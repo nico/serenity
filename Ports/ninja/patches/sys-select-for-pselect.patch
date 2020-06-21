@@ -1,0 +1,12 @@
+diff --git a/src/subprocess-posix.cc b/src/subprocess-posix.cc
+index 1de22c3..f77c559 100644
+--- a/src/subprocess-posix.cc
++++ b/src/subprocess-posix.cc
+@@ -21,6 +21,7 @@
+ #include <unistd.h>
+ #include <stdio.h>
+ #include <string.h>
++#include <sys/select.h>
+ #include <sys/wait.h>
+ #include <spawn.h>
+ 
