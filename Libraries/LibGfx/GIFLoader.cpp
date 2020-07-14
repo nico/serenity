@@ -352,7 +352,10 @@ static bool decode_frame(GIFLoadingContext& context, size_t frame_index)
                 break;
             }
 
-            auto colors = decoder.get_output();
+            if (image.width) {
+                auto colors = decoder.get_output();
+                for (const auto& color : colors) {
+                    auto rgb = context.logical_screen.color_map[color];
 
             for (const auto& color : colors) {
                 auto c = color_map[color];
@@ -556,6 +559,8 @@ static bool load_gif_frame_descriptors(GIFLoadingContext& context)
             }
 
             stream >> image.lzw_min_code_size;
+            if (stream.handle_read_failure())
+                return false;
 
             u8 lzw_encoded_bytes_expected = 0;
 

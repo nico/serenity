@@ -7,11 +7,41 @@ target_link_libraries(FuzzBMP
     PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
     )
 
+add_executable(FuzzGemini FuzzGemini.cpp)
+target_compile_options(FuzzGemini
+    PRIVATE $<$<C_COMPILER_ID:Clang>:-g -O1 -fsanitize=fuzzer>
+    )
+
+target_link_libraries(FuzzGemini
+    PUBLIC Lagom
+    PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
+    )
+
 add_executable(FuzzELF FuzzELF.cpp)
 target_compile_options(FuzzELF
     PRIVATE $<$<C_COMPILER_ID:Clang>:-g -O1 -fsanitize=fuzzer>
     )
 target_link_libraries(FuzzELF
+    PUBLIC Lagom
+    PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
+    )
+
+add_executable(FuzzImageDecoder FuzzImageDecoder.cpp)
+target_compile_options(FuzzImageDecoder
+    PRIVATE $<$<C_COMPILER_ID:Clang>:-g -O1 -fsanitize=fuzzer>
+    )
+
+target_link_libraries(FuzzImageDecoder
+    PUBLIC Lagom
+    PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
+    )
+
+add_executable(FuzzHTML FuzzHTML.cpp)
+target_compile_options(FuzzHTML
+    PRIVATE $<$<C_COMPILER_ID:Clang>:-g -O1 -fsanitize=fuzzer>
+    )
+
+target_link_libraries(FuzzHTML
     PUBLIC Lagom
     PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
     )

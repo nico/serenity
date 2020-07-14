@@ -153,6 +153,7 @@ struct SystemTheme {
 };
 
 const SystemTheme& current_system_theme();
+
 int current_system_theme_buffer_id();
 void set_system_theme(SharedBuffer&);
 RefPtr<SharedBuffer> load_system_theme(const String& path);

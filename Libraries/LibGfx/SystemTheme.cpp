@@ -33,13 +33,13 @@ namespace Gfx {
 
 static SystemTheme dummy_theme;
 static const SystemTheme* theme_page = &dummy_theme;
-static RefPtr<SharedBuffer> theme_buffer;
-
 const SystemTheme& current_system_theme()
 {
     ASSERT(theme_page);
     return *theme_page;
 }
+
+static RefPtr<SharedBuffer> theme_buffer;
 
 int current_system_theme_buffer_id()
 {
