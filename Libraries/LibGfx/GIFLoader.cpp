@@ -281,6 +281,34 @@ static void copy_frame_buffer(Bitmap& dest, const Bitmap& src)
 
 static bool decode_frame(GIFLoadingContext& context, size_t frame_index)
 {
+    void *ret = __builtin_return_address(0);
+    void *stack = __builtin_frame_address(0);
+    dbg() << "return addr " << ret;
+    dbg() << "stack addr " << stack;
+
+    unsigned stackend = (unsigned)stack + (0x2fff - ((unsigned)stack & 0x2fff));
+    unsigned stackstart = stackend - 0x400000 + 1;
+    dbg() << "stack? " << (void*)stackstart << " - " << (void*)stackend;
+    dbg() << "offset from left end: " << (void*)(stackend - (unsigned)stack);
+
+    unsigned *stackwalk = (unsigned*)stack;
+    for (unsigned i = 0; i < 14; ++i) {
+      dbg() << "stack base? " << i << ": " << stackwalk;
+      stackwalk = (unsigned*)*stackwalk;
+    }
+
+
+    for (int i = -2; i < 2; ++i) {
+      dbg() << "sneak " << i << ": " << (unsigned*)stack + i << ": " << (void*)((unsigned*)stack)[i];
+    }
+
+    //unsigned sneak[2];
+    //for (int i = -32; i < 32; ++i) {
+      //dbg() << "sneak " << i << ": " << sneak + i << ": " << sneak[i];
+      //dbg() << "sneak " << i << ": " << sneak + i << ": " << (void*)sneak[i];
+      //dbgprintf("sneak %d: %p: %x", i, sneak + i, sneak[i]);
+    //}
+
     if (frame_index >= context.images.size()) {
         return false;
     }
@@ -387,6 +415,9 @@ static bool decode_frame(GIFLoadingContext& context, size_t frame_index)
         context.state = GIFLoadingContext::State::FrameComplete;
     }
 
+    for (int i = -2; i < 2; ++i) {
+      dbg() << "postsneak " << i << ": " << (unsigned*)stack + i << ": " << (void*)((unsigned*)stack)[i];
+    }
     return true;
 }
 
