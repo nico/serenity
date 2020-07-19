@@ -293,9 +293,16 @@ static bool build_macroblocks(JPGLoadingContext& context, Vector<Macroblock>& ma
 {
     for (u32 cindex = 0; cindex < context.component_count; cindex++) {
         auto& component = context.components[cindex];
+
+        if (component.dc_destination_id >= context.dc_tables.size())
+            return false;   
+        if (component.ac_destination_id >= context.ac_tables.size())
+            return false;   
         for (u8 vfactor_i = 0; vfactor_i < component.vsample_factor; vfactor_i++) {
             for (u8 hfactor_i = 0; hfactor_i < component.hsample_factor; hfactor_i++) {
                 u32 mb_index = (vcursor + vfactor_i) * context.mblock_meta.hpadded_count + (hfactor_i + hcursor);
+                //if (mb_index >= macroblocks.size())
+                    //return false;
                 Macroblock& block = macroblocks[mb_index];
 
                 auto& dc_table = context.dc_tables[component.dc_destination_id];
@@ -596,6 +603,8 @@ static bool read_reset_marker(InputMemoryStream& stream, JPGLoadingContext& cont
         return false;
     }
     context.dc_reset_interval = read_be_word(stream);
+    if (stream.handle_read_failure())
+        return false;
     return true;
 }
 
@@ -670,6 +679,8 @@ static bool read_huffman_table(InputMemoryStream& stream, JPGLoadingContext& con
         for (u32 i = 0; i < total_codes; i++) {
             u8 symbol = 0;
             stream >> symbol;
+            if (stream.handle_read_failure())
+                return false;
             table.symbols.append(symbol);
         }
 
@@ -730,13 +741,19 @@ static bool read_start_of_frame(InputMemoryStream& stream, JPGLoadingContext& co
         return false;
 
     stream >> context.frame.precision;
+    if (stream.handle_read_failure())
+        return false;
     if (context.frame.precision != 8) {
         dbg() << stream.offset() << ": SOF precision != 8!";
         return false;
     }
 
     context.frame.height = read_be_word(stream);
+    if (stream.handle_read_failure())
+        return false;
     context.frame.width = read_be_word(stream);
+    if (stream.handle_read_failure())
+        return false;
     if (!context.frame.width || !context.frame.height) {
         dbg() << stream.offset() << ": ERROR! Image height: " << context.frame.height << ", Image width: "
               << context.frame.width << "!";
@@ -745,6 +762,8 @@ static bool read_start_of_frame(InputMemoryStream& stream, JPGLoadingContext& co
     set_macroblock_metadata(context);
 
     stream >> context.component_count;
+    if (stream.handle_read_failure())
+        return false;
     if (context.component_count != 1 && context.component_count != 3) {
         dbg() << stream.offset() << ": Unsupported number of components in SOF: "
               << context.component_count << "!";
@@ -755,6 +774,8 @@ static bool read_start_of_frame(InputMemoryStream& stream, JPGLoadingContext& co
         ComponentSpec& component = context.components[i];
 
         stream >> component.id;
+        if (stream.handle_read_failure())
+            return false;
         if (i == 0)
             context.has_zero_based_ids = component.id == 0;
         component.id += context.has_zero_based_ids ? 1 : 0;
@@ -783,6 +804,8 @@ static bool read_start_of_frame(InputMemoryStream& stream, JPGLoadingContext& co
         }
 
         stream >> component.qtable_id;
+        if (stream.handle_read_failure())
+            return false;
         if (component.qtable_id > 1) {
             dbg() << stream.offset() << ": Unsupported quantization table id: "
                   << component.qtable_id << "!";
@@ -821,6 +844,8 @@ static bool read_quantization_table(InputMemoryStream& stream, JPGLoadingContext
             if (element_unit_hint == 0) {
                 u8 tmp = 0;
                 stream >> tmp;
+                if (stream.handle_read_failure())
+                    return false;
                 table[zigzag_map[i]] = tmp;
             } else
                 table[zigzag_map[i]] = read_be_word(stream);
@@ -1173,6 +1198,8 @@ static bool scan_huffman_stream(InputMemoryStream& stream, JPGLoadingContext& co
                 continue;
             if (current_byte == 0x00) {
                 stream >> current_byte;
+                if (stream.handle_read_failure())
+                    return false;
                 context.huffman_stream.stream.append(last_byte);
                 continue;
             }
@@ -1182,6 +1209,8 @@ static bool scan_huffman_stream(InputMemoryStream& stream, JPGLoadingContext& co
             if (marker >= JPG_RST0 && marker <= JPG_RST7) {
                 context.huffman_stream.stream.append(marker);
                 stream >> current_byte;
+                if (stream.handle_read_failure())
+                    return false;
                 continue;
             }
             dbg() << stream.offset() << String::format(": Invalid marker: %x!", marker);

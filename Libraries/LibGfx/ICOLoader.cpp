@@ -328,7 +328,7 @@ static bool load_ico_bitmap(ICOLoadingContext& context, Optional<size_t> index)
     ImageDescriptor& desc = context.images[real_index];
 
     PNGImageDecoderPlugin png_decoder(context.data + desc.offset, desc.size);
-    if (png_decoder.sniff()) {
+    if (false && png_decoder.sniff()) {
         desc.bitmap = png_decoder.bitmap();
         if (!desc.bitmap) {
 #ifdef ICO_DEBUG
