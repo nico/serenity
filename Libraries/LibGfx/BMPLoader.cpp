@@ -29,7 +29,7 @@
 #include <AK/MappedFile.h>
 #include <LibGfx/BMPLoader.h>
 
-#define BMP_DEBUG 1
+#define BMP_DEBUG 0
 
 #define IF_BMP_DEBUG(x) \
     if (BMP_DEBUG)      \
@@ -441,7 +441,8 @@ static bool set_dib_bitmasks(BMPLoadingContext& context, Streamer& streamer)
             context.dib.info.masks.append(streamer.read_u32());
 
         populate_dib_mask_info(context);
-    } else if (type >= DIBType::V2 && compression == Compression::BITFIELDS) {
+    } else if (type >= DIBType::V2 && (compression == Compression::BITFIELDS || !context.dib.info.masks.is_empty())) {
+        // XXX not sure if the !is_empty() is right, but it's what the decoding code checks for 32-bit, and that needs stuff populated
         populate_dib_mask_info(context);
     }
 
@@ -662,6 +663,7 @@ static bool decode_bmp_v2_dib(BMPLoadingContext& context, Streamer& streamer)
     if (!decode_bmp_info_dib(context, streamer))
         return false;
 
+// XXX
     context.dib.info.masks.append(streamer.read_u32());
     context.dib.info.masks.append(streamer.read_u32());
     context.dib.info.masks.append(streamer.read_u32());
@@ -849,9 +851,14 @@ static bool decode_bmp_color_table(BMPLoadingContext& context)
         return true;
     }
 
-    auto bytes_per_color = context.dib_type == DIBType::Core ? 3 : 4;
+    auto bytes_per_color = context.dib_type == DIBType::Core ? 3u : 4u;
     u32 max_colors = 1 << context.dib.core.bpp;
+
+    // XXX
+    if (context.data_offset < bmp_header_size + context.dib_size())
+        return false;
     ASSERT(context.data_offset >= bmp_header_size + context.dib_size());
+
     auto size_of_color_table = context.data_offset - bmp_header_size - context.dib_size();
 
     if (context.dib_type <= DIBType::OSV2) {
@@ -863,8 +870,9 @@ static bool decode_bmp_color_table(BMPLoadingContext& context)
         }
     }
 
+// XXX validate size_of_color_table
     Streamer streamer(context.data + bmp_header_size + context.dib_size(), size_of_color_table);
-    for (u32 i = 0; !streamer.at_end() && i < max_colors; ++i) {
+    for (u32 i = 0; streamer.remaining() >= bytes_per_color && i < max_colors; ++i) {
         if (bytes_per_color == 4) {
             context.color_table.append(streamer.read_u32());
         } else {
@@ -1054,7 +1062,11 @@ static bool uncompress_bmp_rle_data(BMPLoadingContext& context, ByteBuffer& buff
             if (byte == 1)
                 return true;
             if (byte == 2) {
+                if (!streamer.has_u8())
+                    return false;
                 u8 offset_x = streamer.read_u8();
+                if (!streamer.has_u8())
+                    return false;
                 u8 offset_y = streamer.read_u8();
                 column += offset_x;
                 if (column >= total_columns) {
@@ -1085,10 +1097,14 @@ static bool uncompress_bmp_rle_data(BMPLoadingContext& context, ByteBuffer& buff
             // Optionally consume a padding byte
             if (compression != Compression::RLE4) {
                 if (pixel_count % 2) {
+                    if (!streamer.has_u8())
+                        return false;
                     byte = streamer.read_u8();
                 }
             } else {
                 if (((pixel_count + 1) / 2) % 2) {
+                    if (!streamer.has_u8())
+                        return false;
                     byte = streamer.read_u8();
                 }
             }
@@ -1191,9 +1207,7 @@ static bool decode_bmp_pixel_data(BMPLoadingContext& context)
             case 4: {
                 if (!streamer.has_u8())
                     return false;
-dbg() << 1;
                 u8 byte = streamer.read_u8();
-dbg() << 2;
                 context.bitmap->scanline_u8(row)[column++] = (byte >> 4) & 0xf;
                 if (column < width)
                     context.bitmap->scanline_u8(row)[column++] = byte & 0xf;
@@ -1219,7 +1233,7 @@ dbg() << 2;
             case 32:
                 if (!streamer.has_u32())
                     return false;
-                if (context.dib.info.masks.is_empty()) {
+                if (context.dib.info.masks.is_empty()) {  // XXX 
                     context.bitmap->scanline(row)[column++] = streamer.read_u32() | 0xff000000;
                 } else {
                     u32 t = int_to_scaled_rgb(context, streamer.read_u32());
