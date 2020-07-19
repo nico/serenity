@@ -599,7 +599,9 @@ static bool decode_png_bitmap_simple(PNGLoadingContext& context)
         }
 
         if (filter > 4) {
+#ifdef PNG_DEBUG
             dbg() << "Invalid PNG filter: " << filter;
+#endif
             context.state = PNGLoadingContext::State::Error;
             return false;
         }
@@ -695,7 +697,9 @@ static bool decode_adam7_pass(PNGLoadingContext& context, Streamer& streamer, in
         }
 
         if (filter > 4) {
+#ifdef PNG_DEBUG
             dbg() << "Invalid PNG filter: " << filter;
+#endif
             context.state = PNGLoadingContext::State::Error;
             return false;
         }
@@ -743,8 +747,11 @@ static bool decode_png_bitmap(PNGLoadingContext& context)
     if (context.state >= PNGLoadingContext::State::BitmapDecoded)
         return true;
 
-    ASSERT(context.width >= 0);
-    ASSERT(context.height >= 0);
+    if (context.width == -1 || context.height == -1)
+        return false; // Didn't see an IHDR chunk.
+
+    if (context.color_type == 3 && context.palette_data.size() < (1 << context.bit_depth) - 1)
+        return false; // Didn't see an PLTE chunk for a palettized image, or not enough entries.
 
     unsigned long srclen = context.compressed_data.size() - 6;
     unsigned long destlen = 0;
@@ -832,28 +839,43 @@ static bool process_IHDR(const ByteBuffer& data, PNGLoadingContext& context)
 #endif
 
     if (context.interlace_method != PngInterlaceMethod::Null && context.interlace_method != PngInterlaceMethod::Adam7) {
+#ifdef PNG_DEBUG
         dbgprintf("PNGLoader::process_IHDR: unknown interlace method: %d\n", context.interlace_method);
+#endif
         return false;
     }
 
+    if (context.width <= 0 || context.width > 1 << 16 || context.height <= 0 || context.height > 1 << 16)
+        return false;
+
     switch (context.color_type) {
     case 0: // Each pixel is a grayscale sample.
+        if (context.bit_depth != 1 && context.bit_depth != 2 && context.bit_depth != 4 && context.bit_depth != 8 && context.bit_depth != 16)
+            return false;
         context.channels = 1;
         break;
     case 4: // Each pixel is a grayscale sample, followed by an alpha sample.
+        if (context.bit_depth != 8 && context.bit_depth != 16)
+            return false;
         context.channels = 2;
         break;
     case 2: // Each pixel is an RGB sample
+        if (context.bit_depth != 8 && context.bit_depth != 16)
+            return false;
         context.channels = 3;
         break;
     case 3: // Each pixel is a palette index; a PLTE chunk must appear.
+        if (context.bit_depth != 1 && context.bit_depth != 2 && context.bit_depth != 4 && context.bit_depth != 8)
+            return false;
         context.channels = 1;
         break;
     case 6: // Each pixel is an RGB sample, followed by an alpha sample.
+        if (context.bit_depth != 8 && context.bit_depth != 16)
+            return false;
         context.channels = 4;
         break;
     default:
-        ASSERT_NOT_REACHED();
+        return false;
     }
     return true;
 }
@@ -884,23 +906,31 @@ static bool process_chunk(Streamer& streamer, PNGLoadingContext& context)
 {
     u32 chunk_size;
     if (!streamer.read(chunk_size)) {
+#ifdef PNG_DEBUG
         printf("Bail at chunk_size\n");
+#endif
         return false;
     }
     u8 chunk_type[5];
     chunk_type[4] = '\0';
     if (!streamer.read_bytes(chunk_type, 4)) {
+#ifdef PNG_DEBUG
         printf("Bail at chunk_type\n");
+#endif
         return false;
     }
     ByteBuffer chunk_data;
     if (!streamer.wrap_bytes(chunk_data, chunk_size)) {
+#ifdef PNG_DEBUG
         printf("Bail at chunk_data\n");
+#endif
         return false;
     }
     u32 chunk_crc;
     if (!streamer.read(chunk_crc)) {
+#ifdef PNG_DEBUG
         printf("Bail at chunk_crc\n");
+#endif
         return false;
     }
 #ifdef PNG_DEBUG
