@@ -45,3 +45,19 @@ __GI_raise (sig=sig@entry=6) at ../sysdeps/unix/sysv/linux/raise.c:50
 50	../sysdeps/unix/sysv/linux/raise.c: File or directory not found.
 (gdb)
 ```
+
+clang emits different warnings than gcc, so you'll likely have to remove `-Werror` in CMakeLists.txt and Meta/Lagom/CMakeLIsts.txt.
+
+Some fuzzers work better if you give them a fuzz corpus:
+
+    Meta/Lagom/Fuzzers/FuzzImageDecoder  ~/Downloads/gif/
+
+Can use this to repro a found crash too:
+
+    Meta/Lagom/Fuzzers/FuzzImageDecoder  ./crash-effdc3366da6d5c9ddd472572ad81570e4f99f20
+
+Less logging with `-close_fd_mask=3` (but hides assertion messages; just `1` only closes stdout).
+
+Parallel stuff with `-jobs=24 -workers=24`
+
+XXX coverage

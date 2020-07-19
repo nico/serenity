@@ -281,6 +281,7 @@ static void copy_frame_buffer(Bitmap& dest, const Bitmap& src)
 
 static bool decode_frame(GIFLoadingContext& context, size_t frame_index)
 {
+#if 0
     void *ret = __builtin_return_address(0);
     void *stack = __builtin_frame_address(0);
     dbg() << "return addr " << ret;
@@ -308,7 +309,7 @@ static bool decode_frame(GIFLoadingContext& context, size_t frame_index)
       //dbg() << "sneak " << i << ": " << sneak + i << ": " << (void*)sneak[i];
       //dbgprintf("sneak %d: %p: %x", i, sneak + i, sneak[i]);
     //}
-
+#endif
     if (frame_index >= context.images.size()) {
         return false;
     }
@@ -415,9 +416,11 @@ static bool decode_frame(GIFLoadingContext& context, size_t frame_index)
         context.state = GIFLoadingContext::State::FrameComplete;
     }
 
+#if 0
     for (int i = -2; i < 2; ++i) {
       dbg() << "postsneak " << i << ": " << (unsigned*)stack + i << ": " << (void*)((unsigned*)stack)[i];
     }
+#endif
     return true;
 }
 

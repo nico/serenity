@@ -29,7 +29,7 @@
 #include <AK/MappedFile.h>
 #include <LibGfx/BMPLoader.h>
 
-#define BMP_DEBUG 0
+#define BMP_DEBUG 1
 
 #define IF_BMP_DEBUG(x) \
     if (BMP_DEBUG)      \
@@ -183,6 +183,14 @@ RefPtr<Gfx::Bitmap> load_bmp(const StringView& path)
     auto bitmap = load_bmp_impl((const u8*)mapped_file.data(), mapped_file.size());
     if (bitmap)
         bitmap->set_mmap_name(String::format("Gfx::Bitmap [%dx%d] - Decoded BMP: %s", bitmap->width(), bitmap->height(), LexicalPath::canonicalized_path(path).characters()));
+    return bitmap;
+}
+
+RefPtr<Gfx::Bitmap> load_bmp_from_memory(const u8* data, size_t length)
+{
+    auto bitmap = load_bmp_impl(data, length);
+    if (bitmap)
+        bitmap->set_mmap_name(String::format("Gfx::Bitmap [%dx%d] - Decoded BMP: <memory>", bitmap->width(), bitmap->height()));
     return bitmap;
 }
 
@@ -342,7 +350,7 @@ static void populate_dib_mask_info(BMPLoadingContext& context)
     if (!mask_shifts.is_empty() && !mask_sizes.is_empty())
         return;
 
-    ASSERT(mask_shifts.is_empty() && mask_sizes.is_empty());
+    ASSERT(mask_shifts.is_empty() && mask_sizes.is_empty()); // XXX ??
 
     mask_shifts.ensure_capacity(masks.size());
     mask_sizes.ensure_capacity(masks.size());
@@ -473,6 +481,13 @@ static bool decode_bmp_header(BMPLoadingContext& context)
     // Ignore reserved bytes
     streamer.drop_bytes(4);
     context.data_offset = streamer.read_u32();
+
+    // XXX
+    if (context.data_offset >= context.data_size) {
+        return false;
+    }
+
+    context.state = BMPLoadingContext::State::HeaderDecoded;
 
     IF_BMP_DEBUG(dbg() << "BMP data size: " << context.data_size);
     IF_BMP_DEBUG(dbg() << "BMP data offset: " << context.data_offset);
@@ -788,6 +803,22 @@ static bool decode_bmp_dib(BMPLoadingContext& context)
         error = true;
     }
 
+    switch (context.dib.info.compression) {
+    case Compression::RGB:
+    case Compression::RLE8:
+    case Compression::RLE4:
+    case Compression::BITFIELDS:
+    case Compression::RLE24:
+    case Compression::PNG:
+    case Compression::ALPHABITFIELDS:
+    case Compression::CMYK:
+    case Compression::CMYKRLE8:
+    case Compression::CMYKRLE4:
+        break;
+    default:
+        error = true;
+    }
+
     if (!error && !set_dib_bitmasks(context, streamer))
         error = true;
 
@@ -862,7 +893,8 @@ static bool uncompress_bmp_rle_data(BMPLoadingContext& context, ByteBuffer& buff
         return false;
     }
 
-    Streamer streamer(context.data + context.data_offset, context.data_size);
+    //Streamer streamer(context.data + context.data_offset, context.data_size);
+    Streamer streamer(context.data + context.data_offset, context.data_size - context.data_offset);
 
     auto compression = context.dib.info.compression;
 
@@ -915,10 +947,11 @@ static bool uncompress_bmp_rle_data(BMPLoadingContext& context, ByteBuffer& buff
                 row++;
             }
             auto index = get_buffer_index();
-            if (index >= buffer.size()) {
+            if (index + 3 >= buffer.size()) {
                 IF_BMP_DEBUG(dbg() << "BMP has badly-formatted RLE data");
                 return false;
             }
+//dbg() << "index " << index << ", size " << buffer.size();
             ((u32&)buffer[index]) = color;
             column++;
             return true;
@@ -1108,13 +1141,17 @@ static bool decode_bmp_pixel_data(BMPLoadingContext& context)
 
     const u32 width = abs(context.dib.core.width);
     const u32 height = abs(context.dib.core.height);
+    if (width == 0 || width > 1 << 16 || height == 0 || height > 1 << 16)
+      return false;
+
     context.bitmap = Bitmap::create_purgeable(format, { static_cast<int>(width), static_cast<int>(height) });
     if (!context.bitmap) {
         IF_BMP_DEBUG(dbg() << "BMP appears to have overly large dimensions");
         return false;
     }
 
-    auto buffer = ByteBuffer::wrap(const_cast<u8*>(context.data + context.data_offset), context.data_size);
+    // XXX this isn't guaranteed to be valid ... (fixed it, now it is)
+    auto buffer = ByteBuffer::wrap(context.data + context.data_offset, context.data_size - context.data_offset);
 
     if (context.dib.info.compression == Compression::RLE4 || context.dib.info.compression == Compression::RLE8
         || context.dib.info.compression == Compression::RLE24) {
@@ -1154,7 +1191,9 @@ static bool decode_bmp_pixel_data(BMPLoadingContext& context)
             case 4: {
                 if (!streamer.has_u8())
                     return false;
+dbg() << 1;
                 u8 byte = streamer.read_u8();
+dbg() << 2;
                 context.bitmap->scanline_u8(row)[column++] = (byte >> 4) & 0xf;
                 if (column < width)
                     context.bitmap->scanline_u8(row)[column++] = byte & 0xf;
@@ -1183,7 +1222,8 @@ static bool decode_bmp_pixel_data(BMPLoadingContext& context)
                 if (context.dib.info.masks.is_empty()) {
                     context.bitmap->scanline(row)[column++] = streamer.read_u32() | 0xff000000;
                 } else {
-                    context.bitmap->scanline(row)[column++] = int_to_scaled_rgb(context, streamer.read_u32());
+                    u32 t = int_to_scaled_rgb(context, streamer.read_u32());
+                    context.bitmap->scanline(row)[column++] = t;
                 }
                 break;
             }
