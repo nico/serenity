@@ -383,6 +383,7 @@ static bool build_macroblocks(JPGLoadingContext& context, Vector<Macroblock>& ma
 static Optional<Vector<Macroblock>> decode_huffman_stream(JPGLoadingContext& context)
 {
     Vector<Macroblock> macroblocks;
+//dbg() << "mblock_meta.padded_total: " << context.mblock_meta.padded_total;
     macroblocks.resize(context.mblock_meta.padded_total);
 
     jpg_dbg("Image width: " << context.frame.width);
@@ -639,6 +640,8 @@ static bool huffman_table_reset_helper(HuffmanTableSpec& src, JPGLoadingContext&
 static bool read_huffman_table(InputMemoryStream& stream, JPGLoadingContext& context)
 {
     i32 bytes_to_read = read_be_word(stream);
+    if (stream.handle_read_failure())
+        return false;
     if (!bounds_okay(stream.offset(), bytes_to_read, context.data_size))
         return false;
     bytes_to_read -= 2;
@@ -711,6 +714,8 @@ static inline bool validate_luma_and_modify_context(const ComponentSpec& luma, J
         context.vsample_factor = luma.vsample_factor;
         jpg_dbg(String::format("Horizontal Subsampling Factor: %i", luma.hsample_factor));
         jpg_dbg(String::format("Vertical Subsampling Factor: %i", luma.vsample_factor));
+        if (context.mblock_meta.padded_total > 1 << 22)
+            return false;
         return true;
     }
     return false;
@@ -847,8 +852,11 @@ static bool read_quantization_table(InputMemoryStream& stream, JPGLoadingContext
                 if (stream.handle_read_failure())
                     return false;
                 table[zigzag_map[i]] = tmp;
-            } else
+            } else {
                 table[zigzag_map[i]] = read_be_word(stream);
+                if (stream.handle_read_failure())
+                    return false;
+            }
         }
         if (stream.handle_any_error())
             return false;
@@ -1123,6 +1131,8 @@ static bool parse_header(InputMemoryStream& stream, JPGLoadingContext& context)
     }
     for (;;) {
         marker = read_marker_at_cursor(stream);
+        if (stream.handle_read_failure())
+            return false;
 
         // Set frame type if the marker marks a new frame.
         if (marker >= 0xFFC0 && marker <= 0xFFCF) {
@@ -1147,29 +1157,39 @@ static bool parse_header(InputMemoryStream& stream, JPGLoadingContext& context)
             dbg() << stream.offset() << String::format(": Unexpected marker %x!", marker);
             return false;
         case JPG_SOF0:
+//dbg() << "11";
             if (!read_start_of_frame(stream, context))
                 return false;
+//dbg() << "12";
             context.state = JPGLoadingContext::FrameDecoded;
             break;
         case JPG_DQT:
+//dbg() << "13";
             if (!read_quantization_table(stream, context))
                 return false;
+//dbg() << "14";
             break;
         case JPG_RST:
+//dbg() << "15";
             if (!read_reset_marker(stream, context))
                 return false;
+//dbg() << "16";
             break;
         case JPG_DHT:
+//dbg() << "17";
             if (!read_huffman_table(stream, context))
                 return false;
+//dbg() << "18";
             break;
         case JPG_SOS:
             return read_start_of_scan(stream, context);
         default:
+//dbg() << "19";
             if (!skip_marker_with_length(stream)) {
                 dbg() << stream.offset() << String::format(": Error skipping marker: %x!", marker);
                 return false;
             }
+//dbg() << "19b";
             break;
         }
     }
@@ -1229,14 +1249,17 @@ static bool decode_jpg(JPGLoadingContext& context)
 
     if (!parse_header(stream, context))
         return false;
+//dbg() << "2";
     if (!scan_huffman_stream(stream, context))
         return false;
+//dbg() << "3";
 
     auto result = decode_huffman_stream(context);
     if (!result.has_value()) {
         dbg() << stream.offset() << ": Failed to decode Macroblocks!";
         return false;
     }
+//dbg() << "4";
 
     auto macroblocks = result.release_value();
     dbg() << String::format("%i macroblocks decoded successfully :^)", macroblocks.size());
