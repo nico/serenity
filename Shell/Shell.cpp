@@ -482,6 +482,7 @@ RefPtr<Job> Shell::run_command(const AST::Command& command)
                 perror("pipe(RedirRefresh)");
                 return IterationDecision::Break;
             }
+            dbg() << "shell pipe " << pipe_fd[0] << " <- " << pipe_fd[1];
             rewiring->dest_fd = pipe_fd[1];
             rewiring->other_pipe_end->dest_fd = pipe_fd[0]; // This fd will be added to the collection on one of the next iterations.
             fds.add(pipe_fd[1]);
@@ -531,10 +532,25 @@ RefPtr<Job> Shell::run_command(const AST::Command& command)
             dbgprintf("in %s<%d>, dup2(%d, %d)\n", argv[0], getpid(), rewiring.dest_fd, rewiring.source_fd);
 #endif
             int rc = dup2(rewiring.dest_fd, rewiring.source_fd);
+            //int rc = dup2(rewiring.source_fd, rewiring.dest_fd);
             if (rc < 0) {
                 perror("dup2(run)");
                 return nullptr;
             }
+            dbg() << "dup'd " << rewiring.dest_fd << " into " << rewiring.source_fd;
+            if (rewiring.other_pipe_end) {
+              dbg() << "rewiring.other_pipe_end fd" << rewiring.other_pipe_end->dest_fd;
+              if (close(rewiring.other_pipe_end->dest_fd) < 0) {
+                    perror("close(dup2 other)");
+              }
+            }
+            // dest_fd closed through `fds` collector.
+            //if (rewiring.dest_fd != rewiring.source_fd) {
+                //if (close(rewiring.dest_fd) < 0) {
+                    //perror("close");
+                    //return nullptr;
+                //}
+            //}
         }
 
         fds.collect();

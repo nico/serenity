@@ -295,8 +295,10 @@ void Thread::finalize_dying_threads()
         auto& process = thread->process();
         thread->finalize();
         delete thread;
-        if (process.m_thread_count.load(AK::MemoryOrder::memory_order_consume) == 0)
+        if (process.m_thread_count.load(AK::MemoryOrder::memory_order_consume) == 0) {
+          dbg() << "finalizing process " << process.pid().value() << "(" << process.name() << ")";
             process.finalize();
+        }
     }
 }
 

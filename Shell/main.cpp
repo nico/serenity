@@ -41,8 +41,12 @@ Shell* s_shell;
 
 void FileDescriptionCollector::collect()
 {
-    for (auto fd : m_fds)
-        close(fd);
+    for (auto fd : m_fds) {
+      dbg() << "coll " << fd;
+        if (close(fd) < 0) {
+          perror("close(collect)");
+        }
+    }
     m_fds.clear();
 }
 

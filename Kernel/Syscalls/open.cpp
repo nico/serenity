@@ -99,13 +99,17 @@ int Process::sys$close(int fd)
 {
     REQUIRE_PROMISE(stdio);
     auto description = file_description(fd);
-#ifdef DEBUG_IO
+//#ifdef DEBUG_IO
     dbg() << "sys$close(" << fd << ") " << description.ptr();
-#endif
+    if (description)
+        dbg() << ", ref " << description->ref_count() - 1; // one is ours in this function
+//#endif
     if (!description)
         return -EBADF;
     int rc = description->close();
     m_fds[fd] = {};
+    if (description)
+        dbg() << "newref " << description->ref_count() - 1; // one is ours in this function
     return rc;
 }
 

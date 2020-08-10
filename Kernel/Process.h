@@ -643,6 +643,8 @@ private:
         FileDescription* description() { return m_description; }
         const FileDescription* description() const { return m_description; }
 
+        RefPtr<FileDescription>& raw_description() { return m_description; }
+
         u32 flags() const { return m_flags; }
         void set_flags(u32 flags) { m_flags = flags; }
 

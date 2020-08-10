@@ -33,7 +33,7 @@
 #include <Kernel/Process.h>
 #include <Kernel/Thread.h>
 
-//#define FIFO_DEBUG
+#define FIFO_DEBUG
 
 namespace Kernel {
 
@@ -142,6 +142,7 @@ bool FIFO::can_read(const FileDescription&, size_t) const
 
 bool FIFO::can_write(const FileDescription&, size_t) const
 {
+  //dbg() << "can_write: " << m_readers;
     return m_buffer.space_for_writing() || !m_readers;
 }
 

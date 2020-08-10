@@ -110,6 +110,8 @@ int head(const String& filename, bool print_filename, int line_count, int char_c
             if (!str)
                 break;
 
+            dbg() << "head line " << line;
+
             // specifically use fputs rather than puts, because fputs doesn't add
             // its own newline.
             fputs(str, stdout);
@@ -151,11 +153,14 @@ int head(const String& filename, bool print_filename, int line_count, int char_c
         }
     }
 
+    dbg() << "closing fp";
+
     fclose(fp);
 
     if (print_filename) {
         puts("");
     }
 
+    dbg() << "returning";
     return 0;
 }

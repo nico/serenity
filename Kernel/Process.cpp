@@ -650,6 +650,11 @@ void Process::finalize()
         }
     }
 
+    for (size_t i = 0; i < m_fds.size(); ++i) {
+      auto *d = m_fds[i].description();
+      dbg() << "fd " << i << ": " << (d ? d->is_fifo() : -1);
+    }
+    dbg() << "clearing fds";
     m_fds.clear();
     m_tty = nullptr;
     m_executable = nullptr;

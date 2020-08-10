@@ -1133,10 +1133,10 @@ RefPtr<Value> Pipe::run(RefPtr<Shell> shell)
     auto last_in_left = left.take_last();
     auto first_in_right = right.take_first();
 
-    auto pipe_write_end = new FdRedirection(STDIN_FILENO, -1, Rewiring::Close::Destination);
-    auto pipe_read_end = new FdRedirection(STDOUT_FILENO, -1, pipe_write_end, Rewiring::Close::RefreshDestination);
-    first_in_right.redirections.append(adopt(*pipe_write_end));
-    last_in_left.redirections.append(adopt(*pipe_read_end));
+    auto pipe_read_end = new FdRedirection(STDIN_FILENO, -1, Rewiring::Close::Destination);
+    auto pipe_write_end = new FdRedirection(STDOUT_FILENO, -1, pipe_read_end, Rewiring::Close::RefreshDestination);
+    first_in_right.redirections.append(adopt(*pipe_read_end));
+    last_in_left.redirections.append(adopt(*pipe_write_end));
     last_in_left.should_wait = false;
     last_in_left.is_pipe_source = true;
 

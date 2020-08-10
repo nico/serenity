@@ -66,6 +66,7 @@ FileDescription::FileDescription(File& file)
 
 FileDescription::~FileDescription()
 {
+  dbg() << "~FileDescription() " << this;
     if (is_socket())
         socket()->detach(*this);
     if (is_fifo())

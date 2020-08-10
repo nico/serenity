@@ -54,6 +54,9 @@ int Process::sys$pipe(int pipefd[2], int flags)
     m_fds[writer_fd].description()->set_writable(true);
     copy_to_user(&pipefd[1], &writer_fd);
 
+    dbg() << "pipe fd 0: " << pipefd[0] << " (" << m_fds[reader_fd].raw_description().ptr() << ", refcount " << m_fds[reader_fd].description()->ref_count() << ")"
+           << " <- fd 1: " << pipefd[1] << " (" << m_fds[writer_fd].raw_description().ptr() << ", refcount " << m_fds[writer_fd].description()->ref_count() << ")";
+
     return 0;
 }
 
