@@ -191,6 +191,7 @@ void ComboBox::set_model(NonnullRefPtr<Model> model)
     TemporaryChange change(m_updating_model, true);
     m_selected_index.clear();
     m_list_view->set_model(move(model));
+    set_selected_index(selected_index()); // Refresh text from model.
 }
 
 void ComboBox::set_selected_index(size_t index)
