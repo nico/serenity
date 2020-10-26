@@ -98,7 +98,7 @@ void WindowManager::reload_config(bool set_screen)
     m_double_click_speed = m_config->read_num_entry("Input", "DoubleClickSpeed", 250);
 
     if (set_screen) {
-        set_resolution(m_config->read_num_entry("Screen", "Width", 1920), m_config->read_num_entry("Screen", "Height", 1080));
+        set_resolution(m_config->read_num_entry("Screen", "Width", 1920), m_config->read_num_entry("Screen", "Height", 1080), m_config->read_num_entry("Screen", "ScaleFactor"));
     }
 
     m_hidden_cursor = get_cursor("Hidden");
@@ -129,8 +129,9 @@ const Gfx::Font& WindowManager::window_title_font() const
     return Gfx::FontDatabase::default_bold_font();
 }
 
-bool WindowManager::set_resolution(int width, int height)
+bool WindowManager::set_resolution(int width, int height, int scale)
 {
+    (void)scale; // FIXME
     bool success = Compositor::the().set_resolution(width, height);
     MenuManager::the().set_needs_window_resize();
     ClientConnection::for_each_client([&](ClientConnection& client) {
@@ -144,14 +145,16 @@ bool WindowManager::set_resolution(int width, int height)
     }
     if (m_config) {
         if (success) {
-            dbg() << "Saving resolution: " << Gfx::IntSize(width, height) << " to config file at " << m_config->file_name();
+            dbg() << "Saving resolution: " << Gfx::IntSize(width, height) << " @ " << scale << "x to config file at " << m_config->file_name();
             m_config->write_num_entry("Screen", "Width", width);
             m_config->write_num_entry("Screen", "Height", height);
+            m_config->write_num_entry("Screen", "ScaleFactor", scale);
             m_config->sync();
         } else {
-            dbg() << "Saving fallback resolution: " << resolution() << " to config file at " << m_config->file_name();
+            dbg() << "Saving fallback resolution: " << resolution() << " @ 1x to config file at " << m_config->file_name();
             m_config->write_num_entry("Screen", "Width", resolution().width());
             m_config->write_num_entry("Screen", "Height", resolution().height());
+            m_config->write_num_entry("Screen", "ScaleFactor", 1);
             m_config->sync();
         }
     }
@@ -177,6 +180,11 @@ void WindowManager::set_scroll_step_size(unsigned step_size)
     dbgln("Saving scroll step size {} to config file at {}", step_size, m_config->file_name());
     m_config->write_entry("Mouse", "ScrollStepSize", String::number(step_size));
     m_config->sync();
+}
+
+int WindowManager::scale_factor() const
+{
+    return 1; // FIXME
 }
 
 void WindowManager::add_window(Window& window)

@@ -272,9 +272,9 @@ void DisplaySettingsWidget::load_current_settings()
 
 void DisplaySettingsWidget::send_settings_to_window_server()
 {
-    auto result = GUI::WindowServerConnection::the().send_sync<Messages::WindowServer::SetResolution>(m_monitor_widget->desktop_resolution());
+    auto result = GUI::WindowServerConnection::the().send_sync<Messages::WindowServer::SetResolution>(m_monitor_widget->desktop_resolution(), m_monitor_widget->desktop_scale_factor());
     if (!result->success()) {
-        GUI::MessageBox::show(nullptr, String::formatted("Reverting to resolution {}x{}", result->resolution().width(), result->resolution().height()),
+        GUI::MessageBox::show(nullptr, String::formatted("Reverting to resolution {}x{}@{}x", result->resolution().width(), result->resolution().height(), result->scale_factor()),
             "Unable to set resolution", GUI::MessageBox::Type::Error);
     }
 
