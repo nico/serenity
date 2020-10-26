@@ -179,6 +179,7 @@ int Menu::visible_item_count() const
 
 void Menu::draw()
 {
+    // XXX good first candidate for doing non-scaled native 2x drawing
     auto palette = WindowManager::the().palette();
     m_theme_index_at_last_paint = MenuManager::the().theme_index();
 

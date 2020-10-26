@@ -457,6 +457,7 @@ void WindowManager::start_window_move(Window& window, const MouseEvent& event)
     move_to_front_and_make_active(window);
     m_move_window = window;
     m_move_window->set_default_positioned(false);
+    // XXX scale
     m_move_origin = event.position();
     m_move_window_origin = window.position();
     window.invalidate();
@@ -464,6 +465,7 @@ void WindowManager::start_window_move(Window& window, const MouseEvent& event)
 
 void WindowManager::start_window_resize(Window& window, const Gfx::IntPoint& position, MouseButton button)
 {
+    // XXX scale
     move_to_front_and_make_active(window);
     constexpr ResizeDirection direction_for_hot_area[3][3] = {
         { ResizeDirection::UpLeft, ResizeDirection::Up, ResizeDirection::UpRight },
@@ -504,11 +506,13 @@ void WindowManager::start_window_resize(Window& window, const Gfx::IntPoint& pos
 
 void WindowManager::start_window_resize(Window& window, const MouseEvent& event)
 {
+    // XXX scale
     start_window_resize(window, event.position(), event.button());
 }
 
 bool WindowManager::process_ongoing_window_move(MouseEvent& event, Window*& hovered_window)
 {
+    // XXX scale
     if (!m_move_window)
         return false;
     if (event.type() == Event::MouseUp && event.button() == MouseButton::Left) {
@@ -595,6 +599,7 @@ bool WindowManager::process_ongoing_window_move(MouseEvent& event, Window*& hove
 
 bool WindowManager::process_ongoing_window_resize(const MouseEvent& event, Window*& hovered_window)
 {
+    // XXX scale
     if (!m_resize_window)
         return false;
 
@@ -681,6 +686,7 @@ bool WindowManager::process_ongoing_window_resize(const MouseEvent& event, Windo
     // that end up moving are the same ones as the user is dragging,
     // no matter which part of the logic above caused us to decide
     // to resize by this much.
+    // XXX scale
     switch (m_resize_direction) {
     case ResizeDirection::DownRight:
     case ResizeDirection::Right:
@@ -717,6 +723,7 @@ bool WindowManager::process_ongoing_window_resize(const MouseEvent& event, Windo
 
 bool WindowManager::process_ongoing_drag(MouseEvent& event, Window*& hovered_window)
 {
+    // XXX scale
     if (!m_dnd_client)
         return false;
 
@@ -808,6 +815,7 @@ bool WindowManager::is_considered_doubleclick(const MouseEvent& event, const Dou
     int elapsed_since_last_click = metadata.clock.elapsed();
     if (elapsed_since_last_click < m_double_click_speed) {
         auto diff = event.position() - metadata.last_position;
+        // XXX not sure if this wants zoom? probably
         auto distance_travelled_squared = diff.x() * diff.x() + diff.y() * diff.y();
         if (distance_travelled_squared <= (m_max_distance_for_double_click * m_max_distance_for_double_click))
             return true;
@@ -858,6 +866,7 @@ bool WindowManager::is_menu_doubleclick(Window& window, const MouseEvent& event)
 
 void WindowManager::process_event_for_doubleclick(Window& window, MouseEvent& event)
 {
+    // XXX scale
     // We only care about button presses (because otherwise it's not a doubleclick, duh!)
     ASSERT(event.type() == Event::MouseUp);
 
@@ -894,6 +903,7 @@ void WindowManager::process_event_for_doubleclick(Window& window, MouseEvent& ev
 
 void WindowManager::deliver_mouse_event(Window& window, MouseEvent& event)
 {
+    // XXX scale
     window.dispatch_event(event);
     if (event.type() == Event::MouseUp) {
         process_event_for_doubleclick(window, event);
@@ -904,6 +914,7 @@ void WindowManager::deliver_mouse_event(Window& window, MouseEvent& event)
 
 void WindowManager::process_mouse_event(MouseEvent& event, Window*& hovered_window)
 {
+    // XXX scale
     HashTable<Window*> windows_who_received_mouse_event_due_to_cursor_tracking;
 
     // We need to process ongoing drag events first. Otherwise, global tracking
@@ -1419,6 +1430,7 @@ void WindowManager::end_dnd_drag()
 
 Gfx::IntRect WindowManager::dnd_rect() const
 {
+    // XXX scale
     int bitmap_width = m_dnd_bitmap ? m_dnd_bitmap->width() : 0;
     int bitmap_height = m_dnd_bitmap ? m_dnd_bitmap->height() : 0;
     int width = font().width(m_dnd_text) + bitmap_width;
@@ -1486,6 +1498,7 @@ void WindowManager::maximize_windows(Window& window, bool maximized)
 
 Gfx::IntPoint WindowManager::get_recommended_window_position(const Gfx::IntPoint& desired)
 {
+    // XXX scale
     // FIXME: Find a  better source for the width and height to shift by.
     Gfx::IntPoint shift(8, Gfx::WindowTheme::current().title_bar_height(palette()) + 10);
 

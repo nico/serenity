@@ -80,6 +80,7 @@ bool MenuManager::is_open(const Menu& menu) const
 
 void MenuManager::draw()
 {
+    // XXX scale
     auto& wm = WindowManager::the();
     auto palette = wm.palette();
     auto menubar_rect = this->menubar_rect();
@@ -198,6 +199,7 @@ void MenuManager::event(Core::Event& event)
 
 void MenuManager::handle_mouse_event(MouseEvent& mouse_event)
 {
+    // XXX scale
     auto* active_window = WindowManager::the().active_window();
     bool handled_menubar_event = false;
     for_each_active_menubar_menu([&](Menu& menu) {
@@ -268,6 +270,7 @@ void MenuManager::handle_mouse_event(MouseEvent& mouse_event)
 
 void MenuManager::handle_menu_mouse_event(Menu& menu, const MouseEvent& event)
 {
+    // XXX scale
     bool is_hover_with_any_menu_open = event.type() == MouseEvent::MouseMove
         && has_open_menu()
         && (m_open_menu_stack.first()->menubar() || m_open_menu_stack.first() == m_system_menu.ptr());

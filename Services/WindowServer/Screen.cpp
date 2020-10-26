@@ -130,6 +130,7 @@ void Screen::set_scroll_step_size(unsigned step_size)
 
 void Screen::on_receive_mouse_data(const MousePacket& packet)
 {
+    // XXX need to scale these down by scale (and probably only send 2-aligned events to apps? or send a float?)
     auto prev_location = m_cursor_location;
     if (packet.is_relative) {
         m_cursor_location.move_by(packet.x * m_acceleration_factor, packet.y * m_acceleration_factor);

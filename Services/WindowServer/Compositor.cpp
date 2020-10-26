@@ -125,6 +125,7 @@ void Compositor::did_construct_window_manager(Badge<WindowManager>)
 
 void Compositor::compose()
 {
+    // XXX scale
     auto& wm = WindowManager::the();
     auto& ws = Screen::the();
 

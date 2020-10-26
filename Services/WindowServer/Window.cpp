@@ -584,6 +584,7 @@ void Window::request_close()
 
 void Window::set_fullscreen(bool fullscreen)
 {
+    // XXX figure out interaction between fullscreen and scale
     if (m_fullscreen == fullscreen)
         return;
     m_fullscreen = fullscreen;

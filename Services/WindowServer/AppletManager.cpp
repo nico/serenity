@@ -122,6 +122,7 @@ void AppletManager::draw()
 
 void AppletManager::draw_applet(const Window& applet)
 {
+    // XXX scale
     if (!applet.backing_store())
         return;
 
