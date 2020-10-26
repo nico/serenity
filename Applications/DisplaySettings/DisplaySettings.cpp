@@ -39,6 +39,7 @@
 #include <LibGUI/ItemListModel.h>
 #include <LibGUI/Label.h>
 #include <LibGUI/MessageBox.h>
+#include <LibGUI/RadioButton.h>
 #include <LibGUI/WindowServerConnection.h>
 #include <LibGfx/Palette.h>
 #include <LibGfx/SystemTheme.h>
@@ -142,10 +143,26 @@ void DisplaySettingsWidget::create_frame()
 
     m_resolution_combo = *find_descendant_of_type_named<GUI::ComboBox>("resolution_combo");
     m_resolution_combo->set_only_allow_values_from_model(true);
-    m_resolution_combo->set_model(*GUI::ItemListModel<Gfx::IntSize>::create(m_resolutions));
     m_resolution_combo->on_change = [this](auto&, const GUI::ModelIndex& index) {
         m_monitor_widget->set_desktop_resolution(m_resolutions.at(index.row()));
         m_monitor_widget->update();
+    };
+
+    m_display_scale_radio_1x = *find_descendant_of_type_named<GUI::RadioButton>("scale_1x");
+    m_display_scale_radio_1x->on_checked = [this](bool checked) {
+        if (checked) {
+            m_monitor_widget->set_desktop_scale_factor(1);
+            m_monitor_widget->update();
+            update_visible_resolutions_from_scale_factor();
+        }
+    };
+    m_display_scale_radio_2x = *find_descendant_of_type_named<GUI::RadioButton>("scale_2x");
+    m_display_scale_radio_2x->on_checked = [this](bool checked) {
+        if (checked) {
+            m_monitor_widget->set_desktop_scale_factor(2);
+            m_monitor_widget->update();
+            update_visible_resolutions_from_scale_factor();
+        }
     };
 
     m_color_input = *find_descendant_of_type_named<GUI::ColorInput>("color_input");
@@ -215,7 +232,16 @@ void DisplaySettingsWidget::load_current_settings()
     index = m_modes.find_first_index(mode).value();
     m_mode_combo->set_selected_index(index);
 
-    /// Resolution ////////////////////////////////////////////////////////////////////////////////
+    /// Resolution and scale factor ///////////////////////////////////////////////////////////////
+    int scale_factor = ws_config->read_num_entry("Screen", "ScaleFactor", 1);
+    if (scale_factor != 1 && scale_factor != 2) {
+        dbgln("unexpected ScaleFactor {}, setting to 1", scale_factor);
+        scale_factor = 1;
+    }
+    (scale_factor == 1 ? m_display_scale_radio_1x : m_display_scale_radio_2x)->set_checked(true);
+    m_monitor_widget->set_desktop_scale_factor(scale_factor);
+    update_visible_resolutions_from_scale_factor();
+
     Gfx::IntSize find_size;
 
     // Let's attempt to find the current resolution and select it!
@@ -261,4 +287,18 @@ void DisplaySettingsWidget::send_settings_to_window_server()
     }
 
     GUI::Desktop::the().set_wallpaper_mode(m_monitor_widget->wallpaper_mode());
+}
+
+void DisplaySettingsWidget::update_visible_resolutions_from_scale_factor()
+{
+    m_visible_resolutions.clear();
+    int scale_factor = m_monitor_widget->desktop_scale_factor();
+    for (auto resolution : m_resolutions) {
+        ASSERT(resolution.width() % scale_factor == 0);
+        ASSERT(resolution.height() % scale_factor == 0);
+        Gfx::IntSize visible_resolution { resolution.width() / scale_factor, resolution.height() / scale_factor };
+        m_visible_resolutions.append(visible_resolution);
+    }
+    m_resolution_combo->set_model(*GUI::ItemListModel<Gfx::IntSize>::create(m_visible_resolutions));
+    m_resolution_combo->update();
 }

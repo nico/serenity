@@ -29,6 +29,7 @@
 #include "MonitorWidget.h"
 #include <LibGUI/ColorInput.h>
 #include <LibGUI/ComboBox.h>
+#include <LibGUI/RadioButton.h>
 
 class DisplaySettingsWidget : public GUI::Widget {
     C_OBJECT(DisplaySettingsWidget);
@@ -42,14 +43,18 @@ private:
     void create_resolution_list();
     void load_current_settings();
     void send_settings_to_window_server(); // Apply the settings to the Window Server
+    void update_visible_resolutions_from_scale_factor();
 
     Vector<String> m_wallpapers;
     Vector<String> m_modes;
     Vector<Gfx::IntSize> m_resolutions;
+    Vector<Gfx::IntSize> m_visible_resolutions;
 
     RefPtr<DisplaySettings::MonitorWidget> m_monitor_widget;
     RefPtr<GUI::ComboBox> m_wallpaper_combo;
     RefPtr<GUI::ComboBox> m_mode_combo;
     RefPtr<GUI::ComboBox> m_resolution_combo;
+    RefPtr<GUI::RadioButton> m_display_scale_radio_1x;
+    RefPtr<GUI::RadioButton> m_display_scale_radio_2x;
     RefPtr<GUI::ColorInput> m_color_input;
 };

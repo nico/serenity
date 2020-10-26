@@ -27,6 +27,7 @@
 #include "MonitorWidget.h"
 #include <LibGUI/Painter.h>
 #include <LibGfx/Bitmap.h>
+#include <LibGfx/Font.h>
 
 namespace DisplaySettings {
 
@@ -110,8 +111,22 @@ void MonitorWidget::paint_event(GUI::PaintEvent& event)
     painter.draw_scaled_bitmap(m_monitor_rect, *screen_bitmap, screen_bitmap->rect());
 
     if (!m_desktop_resolution.is_null()) {
-        painter.draw_text(m_monitor_rect.translated(1, 1), m_desktop_resolution.to_string(), Gfx::TextAlignment::Center, Color::Black);
-        painter.draw_text(m_monitor_rect, m_desktop_resolution.to_string(), Gfx::TextAlignment::Center, Color::White);
+        ASSERT(m_desktop_resolution.width() % m_desktop_scale == 0);
+        ASSERT(m_desktop_resolution.height() % m_desktop_scale == 0);
+        auto displayed_resolution_string = Gfx::IntSize { m_desktop_resolution.width() / m_desktop_scale, m_desktop_resolution.height() / m_desktop_scale }.to_string();
+
+        auto text_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA32, Gfx::IntSize { painter.font().width(displayed_resolution_string) + 1, painter.font().glyph_height() + 1 });
+        GUI::Painter text_painter(*text_bitmap);
+        text_painter.set_font(painter.font());
+
+        text_painter.draw_text({}, displayed_resolution_string, Gfx::TextAlignment::BottomRight, Color::Black);
+        text_painter.draw_text({}, displayed_resolution_string, Gfx::TextAlignment::TopLeft, Color::White);
+
+        Gfx::IntRect text_rect = text_bitmap->rect();
+        text_rect.set_width(text_rect.width() * m_desktop_scale);
+        text_rect.set_height(text_rect.height() * m_desktop_scale);
+        text_rect.center_within(m_monitor_rect);
+        painter.draw_scaled_bitmap(text_rect, *text_bitmap, text_bitmap->rect());
     }
 }
 
