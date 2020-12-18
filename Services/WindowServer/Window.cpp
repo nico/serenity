@@ -591,7 +591,7 @@ void Window::set_fullscreen(bool fullscreen)
     Gfx::IntRect new_window_rect = m_rect;
     if (m_fullscreen) {
         m_saved_nonfullscreen_rect = m_rect;
-        new_window_rect = Screen::the().rect();
+        new_window_rect = Screen::the().logical_rect();
     } else if (!m_saved_nonfullscreen_rect.is_empty()) {
         new_window_rect = m_saved_nonfullscreen_rect;
     }
@@ -613,42 +613,42 @@ Gfx::IntRect Window::tiled_rect(WindowTileType tiled) const
     case WindowTileType::Left:
         return Gfx::IntRect(0,
             menu_height,
-            Screen::the().width() / 2 - frame_width,
+            Screen::the().logical_width() / 2 - frame_width,
             max_height);
     case WindowTileType::Right:
-        return Gfx::IntRect(Screen::the().width() / 2 + frame_width,
+        return Gfx::IntRect(Screen::the().logical_width() / 2 + frame_width,
             menu_height,
-            Screen::the().width() / 2 - frame_width,
+            Screen::the().logical_width() / 2 - frame_width,
             max_height);
     case WindowTileType::Top:
         return Gfx::IntRect(0,
             menu_height,
-            Screen::the().width() - frame_width,
+            Screen::the().logical_width() - frame_width,
             (max_height - title_bar_height) / 2 - frame_width);
     case WindowTileType::Bottom:
         return Gfx::IntRect(0,
             menu_height + (title_bar_height + max_height) / 2 + frame_width,
-            Screen::the().width() - frame_width,
+            Screen::the().logical_width() - frame_width,
             (max_height - title_bar_height) / 2 - frame_width);
     case WindowTileType::TopLeft:
         return Gfx::IntRect(0,
             menu_height,
-            Screen::the().width() / 2 - frame_width,
+            Screen::the().logical_width() / 2 - frame_width,
             (max_height - title_bar_height) / 2 - frame_width);
     case WindowTileType::TopRight:
-        return Gfx::IntRect(Screen::the().width() / 2 + frame_width,
+        return Gfx::IntRect(Screen::the().logical_width() / 2 + frame_width,
             menu_height,
-            Screen::the().width() / 2 - frame_width,
+            Screen::the().logical_width() / 2 - frame_width,
             (max_height - title_bar_height) / 2 - frame_width);
     case WindowTileType::BottomLeft:
         return Gfx::IntRect(0,
             menu_height + (title_bar_height + max_height) / 2 + frame_width,
-            Screen::the().width() / 2 - frame_width,
+            Screen::the().logical_width() / 2 - frame_width,
             (max_height - title_bar_height) / 2);
     case WindowTileType::BottomRight:
-        return Gfx::IntRect(Screen::the().width() / 2 + frame_width,
+        return Gfx::IntRect(Screen::the().logical_width() / 2 + frame_width,
             menu_height + (title_bar_height + max_height) / 2 + frame_width,
-            Screen::the().width() / 2 - frame_width,
+            Screen::the().logical_width() / 2 - frame_width,
             (max_height - title_bar_height) / 2);
     default:
         ASSERT_NOT_REACHED();

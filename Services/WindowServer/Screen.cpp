@@ -46,7 +46,7 @@ Screen& Screen::the()
     return *s_the;
 }
 
-Screen::Screen(unsigned desired_width, unsigned desired_height)
+Screen::Screen(unsigned desired_width, unsigned desired_height, int scale_factor)
 {
     ASSERT(!s_the);
     s_the = this;
@@ -60,8 +60,8 @@ Screen::Screen(unsigned desired_width, unsigned desired_height)
         m_can_set_buffer = true;
     }
 
-    set_resolution(desired_width, desired_height);
-    m_cursor_location = rect().center();
+    set_resolution(desired_width, desired_height, scale_factor);
+    m_cursor_location = physical_rect().center();
 }
 
 Screen::~Screen()
@@ -69,7 +69,7 @@ Screen::~Screen()
     close(m_framebuffer_fd);
 }
 
-bool Screen::set_resolution(int width, int height)
+bool Screen::set_resolution(int width, int height, int scale_factor)
 {
     FBResolution resolution { 0, (unsigned)width, (unsigned)height };
     int rc = fb_set_resolution(m_framebuffer_fd, &resolution);
@@ -77,18 +77,18 @@ bool Screen::set_resolution(int width, int height)
     dbg() << "fb_set_resolution() - return code " << rc;
 #endif
     if (rc == 0) {
-        on_change_resolution(resolution.pitch, resolution.width, resolution.height);
+        on_change_resolution(resolution.pitch, resolution.width, resolution.height, scale_factor);
         return true;
     }
     if (rc == -1) {
         dbg() << "Invalid resolution " << width << "x" << height;
-        on_change_resolution(resolution.pitch, resolution.width, resolution.height);
+        on_change_resolution(resolution.pitch, resolution.width, resolution.height, scale_factor);
         return false;
     }
     ASSERT_NOT_REACHED();
 }
 
-void Screen::on_change_resolution(int pitch, int width, int height)
+void Screen::on_change_resolution(int pitch, int width, int height, int scale_factor)
 {
     if (m_framebuffer) {
         size_t previous_size_in_bytes = m_size_in_bytes;
@@ -106,7 +106,9 @@ void Screen::on_change_resolution(int pitch, int width, int height)
     m_width = width;
     m_height = height;
 
-    m_cursor_location.constrain(rect());
+    m_scale_factor = scale_factor;
+
+    m_cursor_location.constrain(physical_rect());  // FIXME: scale
 }
 
 void Screen::set_buffer(int index)
@@ -130,8 +132,7 @@ void Screen::set_scroll_step_size(unsigned step_size)
 
 void Screen::on_receive_mouse_data(const MousePacket& packet)
 {
-    // XXX need to scale these down by scale (and probably only send 2-aligned events to apps? or send a float?)
-    auto prev_location = m_cursor_location;
+    auto prev_location = m_cursor_location / m_scale_factor;
     if (packet.is_relative) {
         m_cursor_location.move_by(packet.x * m_acceleration_factor, packet.y * m_acceleration_factor);
 #ifdef WSSCREEN_DEBUG
@@ -144,7 +145,8 @@ void Screen::on_receive_mouse_data(const MousePacket& packet)
 #endif
     }
 
-    m_cursor_location.constrain(rect());
+    m_cursor_location.constrain(physical_rect());
+    auto new_location = m_cursor_location / m_scale_factor;
 
     unsigned buttons = packet.buttons;
     unsigned prev_buttons = m_mouse_button_state;
@@ -153,7 +155,7 @@ void Screen::on_receive_mouse_data(const MousePacket& packet)
     auto post_mousedown_or_mouseup_if_needed = [&](MouseButton button) {
         if (!(changed_buttons & (unsigned)button))
             return;
-        auto message = make<MouseEvent>(buttons & (unsigned)button ? Event::MouseDown : Event::MouseUp, m_cursor_location, buttons, button, m_modifiers);
+        auto message = make<MouseEvent>(buttons & (unsigned)button ? Event::MouseDown : Event::MouseUp, new_location, buttons, button, m_modifiers);
         Core::EventLoop::current().post_event(WindowManager::the(), move(message));
     };
     post_mousedown_or_mouseup_if_needed(MouseButton::Left);
@@ -161,19 +163,19 @@ void Screen::on_receive_mouse_data(const MousePacket& packet)
     post_mousedown_or_mouseup_if_needed(MouseButton::Middle);
     post_mousedown_or_mouseup_if_needed(MouseButton::Back);
     post_mousedown_or_mouseup_if_needed(MouseButton::Forward);
-    if (m_cursor_location != prev_location) {
-        auto message = make<MouseEvent>(Event::MouseMove, m_cursor_location, buttons, MouseButton::None, m_modifiers);
+    if (new_location != prev_location) {
+        auto message = make<MouseEvent>(Event::MouseMove, new_location, buttons, MouseButton::None, m_modifiers);
         if (WindowManager::the().dnd_client())
             message->set_mime_data(WindowManager::the().dnd_mime_data());
         Core::EventLoop::current().post_event(WindowManager::the(), move(message));
     }
 
     if (packet.z) {
-        auto message = make<MouseEvent>(Event::MouseWheel, m_cursor_location, buttons, MouseButton::None, m_modifiers, packet.z * m_scroll_step_size);
+        auto message = make<MouseEvent>(Event::MouseWheel, new_location, buttons, MouseButton::None, m_modifiers, packet.z * m_scroll_step_size);
         Core::EventLoop::current().post_event(WindowManager::the(), move(message));
     }
 
-    if (m_cursor_location != prev_location)
+    if (new_location != prev_location)
         Compositor::the().invalidate_cursor();
 }
 

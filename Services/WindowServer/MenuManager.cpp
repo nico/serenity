@@ -453,7 +453,7 @@ void MenuManager::close_bar()
 
 Gfx::IntRect MenuManager::menubar_rect() const
 {
-    return { 0, 0, Screen::the().rect().width(), 19 };
+    return { 0, 0, Screen::the().logical_rect().width(), 19 };
 }
 
 void MenuManager::set_current_menubar(MenuBar* menubar)

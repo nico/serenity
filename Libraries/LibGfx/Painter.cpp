@@ -102,9 +102,7 @@ void Painter::fill_rect_with_draw_op(const IntRect& a_rect, Color color)
 
 void Painter::clear_rect(const IntRect& a_rect, Color color)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
-    auto rect = a_rect.translated(translation()).intersected(clip_rect());
+    auto rect = to_physical(a_rect).intersected(clip_rect());
     if (rect.is_empty())
         return;
 
@@ -121,8 +119,6 @@ void Painter::clear_rect(const IntRect& a_rect, Color color)
 
 void Painter::fill_rect(const IntRect& a_rect, Color color)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     if (color.alpha() == 0)
         return;
 
@@ -136,7 +132,7 @@ void Painter::fill_rect(const IntRect& a_rect, Color color)
         return;
     }
 
-    auto rect = a_rect.translated(translation()).intersected(clip_rect());
+    auto rect = to_physical(a_rect).intersected(clip_rect());
     if (rect.is_empty())
         return;
 
@@ -1223,9 +1219,10 @@ ALWAYS_INLINE void Painter::fill_scanline_with_draw_op(int y, int x, int width, 
     }
 }
 
-void Painter::draw_pixel(const IntPoint& position, Color color, int thickness)
+void Painter::draw_physical_pixel(const IntPoint& position, Color color, int thickness)
 {
     ASSERT(scale() == 1); // FIXME: Add scaling support.
+    ASSERT(draw_op() == DrawOp::Copy);
     if (thickness == 1)
         return set_pixel_with_draw_op(m_target->scanline(position.y())[position.x()], color);
     IntRect rect { position.translated(-(thickness / 2), -(thickness / 2)), { thickness, thickness } };
@@ -1234,18 +1231,14 @@ void Painter::draw_pixel(const IntPoint& position, Color color, int thickness)
 
 void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int thickness, LineStyle style)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     if (color.alpha() == 0)
         return;
 
     auto clip_rect = this->clip_rect();
 
-    auto point1 = p1;
-    point1.move_by(state().translation);
-
-    auto point2 = p2;
-    point2.move_by(state().translation);
+    auto point1 = to_physical(p1);
+    auto point2 = to_physical(p2);
+    thickness *= scale();
 
     // Special case: vertical line.
     if (point1.x() == point2.x()) {
@@ -1262,16 +1255,16 @@ void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int
         int max_y = min(point2.y(), clip_rect.bottom());
         if (style == LineStyle::Dotted) {
             for (int y = min_y; y <= max_y; y += thickness * 2)
-                draw_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
         } else if (style == LineStyle::Dashed) {
             for (int y = min_y; y <= max_y; y += thickness * 6) {
-                draw_pixel({ x, y }, color, thickness);
-                draw_pixel({ x, min(y + thickness, max_y) }, color, thickness);
-                draw_pixel({ x, min(y + thickness * 2, max_y) }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ x, min(y + thickness, max_y) }, color, thickness);
+                draw_physical_pixel({ x, min(y + thickness * 2, max_y) }, color, thickness);
             }
         } else {
             for (int y = min_y; y <= max_y; ++y)
-                draw_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
         }
         return;
     }
@@ -1291,16 +1284,16 @@ void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int
         int max_x = min(point2.x(), clip_rect.right());
         if (style == LineStyle::Dotted) {
             for (int x = min_x; x <= max_x; x += thickness * 2)
-                draw_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
         } else if (style == LineStyle::Dashed) {
             for (int x = min_x; x <= max_x; x += thickness * 6) {
-                draw_pixel({ x, y }, color, thickness);
-                draw_pixel({ min(x + thickness, max_x), y }, color, thickness);
-                draw_pixel({ min(x + thickness * 2, max_x), y }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ min(x + thickness, max_x), y }, color, thickness);
+                draw_physical_pixel({ min(x + thickness * 2, max_x), y }, color, thickness);
             }
         } else {
             for (int x = min_x; x <= max_x; ++x)
-                draw_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
         }
         return;
     }
@@ -1330,7 +1323,7 @@ void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int
         int y = point1.y();
         for (int x = point1.x(); x <= point2.x(); ++x) {
             if (clip_rect.contains(x, y))
-                draw_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
             error += delta_error;
             if (error >= 0.5) {
                 y = (double)y + y_step;
@@ -1343,7 +1336,7 @@ void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int
         int x = point1.x();
         for (int y = point1.y(); y <= point2.y(); ++y) {
             if (clip_rect.contains(x, y))
-                draw_pixel({ x, y }, color, thickness);
+                draw_physical_pixel({ x, y }, color, thickness);
             error += delta_error;
             if (error >= 0.5) {
                 x = (double)x + x_step;
@@ -1475,10 +1468,8 @@ void Painter::draw_elliptical_arc(const IntPoint& p1, const IntPoint& p2, const 
 
 void Painter::add_clip_rect(const IntRect& rect)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
-    state().clip_rect.intersect(rect.translated(translation()));
-    state().clip_rect.intersect(m_target->rect());
+    state().clip_rect.intersect(to_physical(rect));
+    state().clip_rect.intersect(m_target->rect());  // XXX shouldn't be necessary?
 }
 
 void Painter::clear_clip_rect()

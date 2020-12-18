@@ -131,11 +131,10 @@ const Gfx::Font& WindowManager::window_title_font() const
 
 bool WindowManager::set_resolution(int width, int height, int scale)
 {
-    (void)scale; // FIXME
-    bool success = Compositor::the().set_resolution(width, height);
+    bool success = Compositor::the().set_resolution(width, height, scale);
     MenuManager::the().set_needs_window_resize();
     ClientConnection::for_each_client([&](ClientConnection& client) {
-        client.notify_about_new_screen_rect(Screen::the().rect());
+        client.notify_about_new_screen_rect(Screen::the().logical_rect());
     });
     if (success) {
         for_each_window([](Window& window) {
@@ -163,7 +162,7 @@ bool WindowManager::set_resolution(int width, int height, int scale)
 
 Gfx::IntSize WindowManager::resolution() const
 {
-    return Screen::the().size();
+    return Screen::the().physical_size();
 }
 
 void WindowManager::set_acceleration_factor(double factor)
@@ -184,7 +183,7 @@ void WindowManager::set_scroll_step_size(unsigned step_size)
 
 int WindowManager::scale_factor() const
 {
-    return 1; // FIXME
+    return Screen::the().scale_factor();
 }
 
 void WindowManager::add_window(Window& window)
@@ -194,8 +193,8 @@ void WindowManager::add_window(Window& window)
     m_windows_in_order.append(&window);
 
     if (window.is_fullscreen()) {
-        Core::EventLoop::current().post_event(window, make<ResizeEvent>(Screen::the().rect()));
-        window.set_rect(Screen::the().rect());
+        Core::EventLoop::current().post_event(window, make<ResizeEvent>(Screen::the().logical_rect()));
+        window.set_rect(Screen::the().logical_rect());
     }
 
     if (window.type() != WindowType::Desktop || is_first_window)
@@ -573,7 +572,7 @@ bool WindowManager::process_ongoing_window_move(MouseEvent& event, Window*& hove
                     m_move_window->set_tiled(WindowTileType::BottomLeft);
                 else
                     m_move_window->set_tiled(WindowTileType::Left);
-            } else if (is_resizable && event.x() >= Screen::the().width() - tiling_deadzone) {
+            } else if (is_resizable && event.x() >= Screen::the().logical_width() - tiling_deadzone) {
                 if (event.y() <= tiling_deadzone + desktop.top())
                     m_move_window->set_tiled(WindowTileType::TopRight);
                 else if (event.y() >= desktop.height() - tiling_deadzone)
@@ -1087,8 +1086,8 @@ Gfx::IntRect WindowManager::desktop_rect() const
     return {
         0,
         menubar_rect().bottom() + 1,
-        Screen::the().width(),
-        Screen::the().height() - menubar_rect().height() - 28
+        Screen::the().logical_width(),
+        Screen::the().logical_height() - menubar_rect().height() - 28
     };
 }
 
@@ -1385,7 +1384,7 @@ ResizeDirection WindowManager::resize_direction_of_window(const Window& window)
 
 Gfx::IntRect WindowManager::maximized_window_rect(const Window& window) const
 {
-    Gfx::IntRect rect = Screen::the().rect();
+    Gfx::IntRect rect = Screen::the().logical_rect();
 
     // Subtract window title bar (leaving the border)
     rect.set_y(rect.y() + window.frame().title_bar_rect().height());
@@ -1498,7 +1497,6 @@ void WindowManager::maximize_windows(Window& window, bool maximized)
 
 Gfx::IntPoint WindowManager::get_recommended_window_position(const Gfx::IntPoint& desired)
 {
-    // XXX scale
     // FIXME: Find a  better source for the width and height to shift by.
     Gfx::IntPoint shift(8, Gfx::WindowTheme::current().title_bar_height(palette()) + 10);
 
@@ -1517,8 +1515,8 @@ Gfx::IntPoint WindowManager::get_recommended_window_position(const Gfx::IntPoint
     Gfx::IntPoint point;
     if (overlap_window) {
         point = overlap_window->position() + shift;
-        point = { point.x() % Screen::the().width(),
-            (point.y() >= (Screen::the().height() - taskbar_height))
+        point = { point.x() % Screen::the().logical_width(),
+            (point.y() >= (Screen::the().logical_height() - taskbar_height))
                 ? menubar_height + Gfx::WindowTheme::current().title_bar_height(palette())
                 : point.y() };
     } else {

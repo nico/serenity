@@ -92,19 +92,23 @@ Compositor::Compositor()
 void Compositor::init_bitmaps()
 {
     auto& screen = Screen::the();
-    auto size = screen.size();
+    auto size = screen.physical_size();
+    auto unscaled_size = screen.logical_size();
 
     m_front_bitmap = Gfx::Bitmap::create_wrapper(Gfx::BitmapFormat::RGB32, size, screen.pitch(), screen.scanline(0));
-
-    if (m_screen_can_set_buffer)
-        m_back_bitmap = Gfx::Bitmap::create_wrapper(Gfx::BitmapFormat::RGB32, size, screen.pitch(), screen.scanline(size.height()));
-    else
-        m_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, size);
-
-    m_temp_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, size);
-
     m_front_painter = make<Gfx::Painter>(*m_front_bitmap);
-    m_back_painter = make<Gfx::Painter>(*m_back_bitmap);
+    m_front_painter->scale(screen.scale_factor());
+
+    if (m_screen_can_set_buffer) {
+        m_back_bitmap = Gfx::Bitmap::create_wrapper(Gfx::BitmapFormat::RGB32, size, screen.pitch(), screen.scanline(size.height()));
+        m_back_painter = make<Gfx::Painter>(*m_back_bitmap);
+        m_back_painter->scale(screen.scale_factor());
+    } else {
+        m_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, unscaled_size);
+        m_back_painter = make<Gfx::Painter>(*m_back_bitmap);
+    }
+
+    m_temp_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, unscaled_size);
     m_temp_painter = make<Gfx::Painter>(*m_temp_bitmap);
 
     m_buffers_are_flipped = false;
@@ -146,11 +150,11 @@ void Compositor::compose()
     }
 
     auto dirty_screen_rects = move(m_dirty_screen_rects);
-    dirty_screen_rects.add(m_last_geometry_label_damage_rect.intersected(ws.rect()));
-    dirty_screen_rects.add(m_last_dnd_rect.intersected(ws.rect()));
+    dirty_screen_rects.add(m_last_geometry_label_damage_rect.intersected(ws.logical_rect()));
+    dirty_screen_rects.add(m_last_dnd_rect.intersected(ws.logical_rect()));
     if (m_invalidated_cursor) {
         if (wm.dnd_client())
-            dirty_screen_rects.add(wm.dnd_rect().intersected(ws.rect()));
+            dirty_screen_rects.add(wm.dnd_rect().intersected(ws.logical_rect()));
     }
 
     // Mark window regions as dirty that need to be re-rendered
@@ -259,15 +263,15 @@ void Compositor::compose()
             if (m_wallpaper_mode == WallpaperMode::Simple) {
                 painter.blit(rect.location(), *m_wallpaper, rect);
             } else if (m_wallpaper_mode == WallpaperMode::Center) {
-                Gfx::IntPoint offset { ws.size().width() / 2 - m_wallpaper->size().width() / 2,
-                    ws.size().height() / 2 - m_wallpaper->size().height() / 2 };
+                Gfx::IntPoint offset { ws.logical_size().width() / 2 - m_wallpaper->size().width() / 2,
+                    ws.logical_size().height() / 2 - m_wallpaper->size().height() / 2 };
                 painter.blit_offset(rect.location(), *m_wallpaper,
                     rect, offset);
             } else if (m_wallpaper_mode == WallpaperMode::Tile) {
                 painter.draw_tiled_bitmap(rect, *m_wallpaper);
             } else if (m_wallpaper_mode == WallpaperMode::Scaled) {
-                float hscale = (float)m_wallpaper->size().width() / (float)ws.size().width();
-                float vscale = (float)m_wallpaper->size().height() / (float)ws.size().height();
+                float hscale = (float)m_wallpaper->size().width() / (float)ws.logical_size().width();
+                float vscale = (float)m_wallpaper->size().height() / (float)ws.logical_size().height();
 
                 // TODO: this may look ugly, we should scale to a backing bitmap and then blit
                 painter.blit_scaled(rect, *m_wallpaper, rect, hscale, vscale);
@@ -288,7 +292,7 @@ void Compositor::compose()
 
     auto compose_window = [&](Window& window) -> IterationDecision {
         auto frame_rect = window.frame().rect();
-        if (!frame_rect.intersects(ws.rect()))
+        if (!frame_rect.intersects(ws.logical_rect()))
             return IterationDecision::Continue;
         auto frame_rects = frame_rect.shatter(window.rect());
 
@@ -529,8 +533,14 @@ void Compositor::compose()
 
 void Compositor::flush(const Gfx::IntRect& a_rect)
 {
-    auto rect = Gfx::IntRect::intersection(a_rect, Screen::the().rect());
+    auto rect = Gfx::IntRect::intersection(a_rect, Screen::the().logical_rect());
 
+    // XXX
+    // XXX
+    // XXX
+    // XXX
+    // XXX
+    // XXX
     Gfx::RGBA32* front_ptr = m_front_bitmap->scanline(rect.y()) + rect.x();
     Gfx::RGBA32* back_ptr = m_back_bitmap->scanline(rect.y()) + rect.x();
     size_t pitch = m_back_bitmap->pitch();
@@ -564,12 +574,12 @@ void Compositor::flush(const Gfx::IntRect& a_rect)
 
 void Compositor::invalidate_screen()
 {
-    invalidate_screen(Screen::the().rect());
+    invalidate_screen(Screen::the().logical_rect());
 }
 
 void Compositor::invalidate_screen(const Gfx::IntRect& screen_rect)
 {
-    m_dirty_screen_rects.add(screen_rect.intersected(Screen::the().rect()));
+    m_dirty_screen_rects.add(screen_rect.intersected(Screen::the().logical_rect()));
 
     if (m_invalidated_any)
         return;
@@ -699,18 +709,19 @@ void Compositor::run_animations(Gfx::DisjointRectSet& flush_rects)
     });
 }
 
-bool Compositor::set_resolution(int desired_width, int desired_height)
+bool Compositor::set_resolution(int desired_width, int desired_height, int scale_factor)
 {
-    auto screen_rect = Screen::the().rect();
-    if (screen_rect.width() == desired_width && screen_rect.height() == desired_height)
+    auto screen_rect = Screen::the().physical_rect();
+    if (screen_rect.width() == desired_width && screen_rect.height() == desired_height && Screen::the().scale_factor() == scale_factor)
         return true;
 
     // Make sure it's impossible to set an invalid resolution
-    if (!(desired_width >= 640 && desired_height >= 480)) {
+    if (!(desired_width * scale_factor >= 640 && desired_height >= 480 * scale_factor)) {
         dbg() << "Compositor: Tried to set invalid resolution: " << desired_width << "x" << desired_height;
         return false;
     }
-    bool success = Screen::the().set_resolution(desired_width, desired_height);
+
+    bool success = Screen::the().set_resolution(desired_width, desired_height, scale_factor);
     init_bitmaps();
     invalidate_occlusions();
     compose();
@@ -721,7 +732,7 @@ Gfx::IntRect Compositor::current_cursor_rect() const
 {
     auto& wm = WindowManager::the();
     auto& current_cursor = m_current_cursor ? *m_current_cursor : wm.active_cursor();
-    return { Screen::the().cursor_location().translated(-current_cursor.params().hotspot()), current_cursor.size() };
+    return { Screen::the().logical_cursor_location().translated(-current_cursor.params().hotspot()), current_cursor.size() };
 }
 
 void Compositor::invalidate_cursor(bool compose_immediately)
@@ -791,12 +802,13 @@ void Compositor::draw_cursor(const Gfx::IntRect& cursor_rect)
     auto& wm = WindowManager::the();
 
     if (!m_cursor_back_bitmap || m_cursor_back_bitmap->size() != cursor_rect.size()) {
+        // FIXME: Create scaled back-buffer and draw it 1x instead of scaling at paint time.
         m_cursor_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, cursor_rect.size());
         m_cursor_back_painter = make<Gfx::Painter>(*m_cursor_back_bitmap);
     }
 
     auto& current_cursor = m_current_cursor ? *m_current_cursor : wm.active_cursor();
-    m_cursor_back_painter->blit({ 0, 0 }, *m_back_bitmap, current_cursor.rect().translated(cursor_rect.location()).intersected(Screen::the().rect()));
+    m_cursor_back_painter->blit({ 0, 0 }, *m_back_bitmap, current_cursor.rect().translated(cursor_rect.location()).intersected(Screen::the().logical_rect()));
     auto& back_painter = *m_back_painter;
     back_painter.blit(cursor_rect.location(), current_cursor.bitmap(), current_cursor.source_rect(m_current_cursor_frame));
 
@@ -808,7 +820,7 @@ void Compositor::restore_cursor_back()
     if (!m_cursor_back_bitmap)
         return;
 
-    m_back_painter->blit(m_last_cursor_rect.location().constrained(Screen::the().rect()), *m_cursor_back_bitmap, { { 0, 0 }, m_last_cursor_rect.intersected(Screen::the().rect()).size() });
+    m_back_painter->blit(m_last_cursor_rect.location().constrained(Screen::the().logical_rect()), *m_cursor_back_bitmap, { { 0, 0 }, m_last_cursor_rect.intersected(Screen::the().logical_rect()).size() });
 }
 
 void Compositor::notify_display_links()
@@ -878,7 +890,7 @@ void Compositor::recompute_occlusions()
     dbgln("OCCLUSIONS:");
 #endif
 
-    auto screen_rect = Screen::the().rect();
+    auto screen_rect = Screen::the().logical_rect();
 
     if (auto* fullscreen_window = wm.active_fullscreen_window()) {
         WindowManager::the().for_each_visible_window_from_front_to_back([&](Window& w) {
