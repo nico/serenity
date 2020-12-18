@@ -43,6 +43,7 @@ Painter::Painter(Widget& widget)
     state().translation = origin_rect.location();
     state().clip_rect = origin_rect;
     m_clip_origin = origin_rect;
+    ASSERT(state().scale == 1);
     state().clip_rect.intersect(m_target->rect());
 }
 

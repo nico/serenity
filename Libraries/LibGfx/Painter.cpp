@@ -84,6 +84,8 @@ Painter::~Painter()
 
 void Painter::fill_rect_with_draw_op(const IntRect& a_rect, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto rect = a_rect.translated(translation()).intersected(clip_rect());
     if (rect.is_empty())
         return;
@@ -100,6 +102,8 @@ void Painter::fill_rect_with_draw_op(const IntRect& a_rect, Color color)
 
 void Painter::clear_rect(const IntRect& a_rect, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto rect = a_rect.translated(translation()).intersected(clip_rect());
     if (rect.is_empty())
         return;
@@ -117,6 +121,8 @@ void Painter::clear_rect(const IntRect& a_rect, Color color)
 
 void Painter::fill_rect(const IntRect& a_rect, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     if (color.alpha() == 0)
         return;
 
@@ -148,6 +154,8 @@ void Painter::fill_rect(const IntRect& a_rect, Color color)
 
 void Painter::fill_rect_with_dither_pattern(const IntRect& a_rect, Color color_a, Color color_b)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto rect = a_rect.translated(translation()).intersected(clip_rect());
     if (rect.is_empty())
         return;
@@ -170,6 +178,8 @@ void Painter::fill_rect_with_dither_pattern(const IntRect& a_rect, Color color_a
 
 void Painter::fill_rect_with_checkerboard(const IntRect& a_rect, const IntSize& cell_size, Color color_dark, Color color_light)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto rect = a_rect.translated(translation()).intersected(clip_rect());
     if (rect.is_empty())
         return;
@@ -189,6 +199,8 @@ void Painter::fill_rect_with_checkerboard(const IntRect& a_rect, const IntSize& 
 
 void Painter::fill_rect_with_gradient(Orientation orientation, const IntRect& a_rect, Color gradient_start, Color gradient_end)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
 #ifdef NO_FPU
     return fill_rect(a_rect, gradient_start);
 #endif
@@ -233,6 +245,8 @@ void Painter::fill_rect_with_gradient(const IntRect& a_rect, Color gradient_star
 
 void Painter::fill_ellipse(const IntRect& a_rect, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto rect = a_rect.translated(translation()).intersected(clip_rect());
     if (rect.is_empty())
         return;
@@ -252,6 +266,8 @@ void Painter::fill_ellipse(const IntRect& a_rect, Color color)
 
 void Painter::draw_ellipse_intersecting(const IntRect& rect, Color color, int thickness)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     constexpr int number_samples = 100; // FIXME: dynamically work out the number of samples based upon the rect size
     double increment = M_PI / number_samples;
 
@@ -289,6 +305,8 @@ static void for_each_pixel_around_rect_clockwise(const RectType& rect, Callback 
 
 void Painter::draw_focus_rect(const IntRect& rect, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     if (rect.is_empty())
         return;
     bool state = false;
@@ -301,6 +319,8 @@ void Painter::draw_focus_rect(const IntRect& rect, Color color)
 
 void Painter::draw_rect(const IntRect& a_rect, Color color, bool rough)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     IntRect rect = a_rect.translated(translation());
     auto clipped_rect = rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
@@ -345,6 +365,8 @@ void Painter::draw_rect(const IntRect& a_rect, Color color, bool rough)
 
 void Painter::draw_bitmap(const IntPoint& p, const CharacterBitmap& bitmap, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto rect = IntRect(p, bitmap.size()).translated(translation());
     auto clipped_rect = rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
@@ -371,6 +393,8 @@ void Painter::draw_bitmap(const IntPoint& p, const CharacterBitmap& bitmap, Colo
 
 void Painter::draw_bitmap(const IntPoint& p, const GlyphBitmap& bitmap, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto dst_rect = IntRect(p, bitmap.size()).translated(translation());
     auto clipped_rect = dst_rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
@@ -393,6 +417,8 @@ void Painter::draw_bitmap(const IntPoint& p, const GlyphBitmap& bitmap, Color co
 
 void Painter::draw_triangle(const IntPoint& a, const IntPoint& b, const IntPoint& c, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     RGBA32 rgba = color.value();
 
     IntPoint p0(a);
@@ -461,6 +487,8 @@ void Painter::draw_triangle(const IntPoint& a, const IntPoint& b, const IntPoint
 
 void Painter::blit_scaled(const IntRect& dst_rect_raw, const Gfx::Bitmap& source, const IntRect& src_rect, float hscale, float vscale)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto dst_rect = IntRect(dst_rect_raw.location(), dst_rect_raw.size()).translated(translation());
     auto clipped_rect = dst_rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
@@ -491,6 +519,8 @@ void Painter::blit_scaled(const IntRect& dst_rect_raw, const Gfx::Bitmap& source
 
 void Painter::blit_with_opacity(const IntPoint& position, const Gfx::Bitmap& source, const IntRect& src_rect, float opacity)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     ASSERT(!m_target->has_alpha_channel());
 
     if (!opacity)
@@ -529,6 +559,8 @@ void Painter::blit_with_opacity(const IntPoint& position, const Gfx::Bitmap& sou
 
 void Painter::blit_filtered(const IntPoint& position, const Gfx::Bitmap& source, const IntRect& src_rect, Function<Color(Color)> filter)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     IntRect safe_src_rect = src_rect.intersected(source.rect());
     auto dst_rect = IntRect(position, safe_src_rect.size()).translated(translation());
     auto clipped_rect = dst_rect.intersected(clip_rect());
@@ -574,6 +606,8 @@ void Painter::blit_dimmed(const IntPoint& position, const Gfx::Bitmap& source, c
 
 void Painter::draw_tiled_bitmap(const IntRect& a_dst_rect, const Gfx::Bitmap& source)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto dst_rect = a_dst_rect.translated(translation());
     auto clipped_rect = dst_rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
@@ -605,6 +639,8 @@ void Painter::blit_offset(const IntPoint& position,
     const IntRect& src_rect,
     const IntPoint& offset)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto dst_rect = IntRect(position, src_rect.size()).translated(translation());
     auto clipped_rect = dst_rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
@@ -639,6 +675,8 @@ void Painter::blit_offset(const IntPoint& position,
 
 void Painter::blit_with_alpha(const IntPoint& position, const Gfx::Bitmap& source, const IntRect& src_rect)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     ASSERT(source.has_alpha_channel());
     IntRect safe_src_rect = src_rect.intersected(source.rect());
     auto dst_rect = IntRect(position, safe_src_rect.size()).translated(translation());
@@ -671,6 +709,8 @@ void Painter::blit_with_alpha(const IntPoint& position, const Gfx::Bitmap& sourc
 
 void Painter::blit(const IntPoint& position, const Gfx::Bitmap& source, const IntRect& src_rect, float opacity)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     if (opacity < 1.0f)
         return blit_with_opacity(position, source, src_rect, opacity);
     if (source.has_alpha_channel())
@@ -772,6 +812,8 @@ ALWAYS_INLINE static void do_draw_scaled_bitmap(Gfx::Bitmap& target, const IntRe
 
 void Painter::draw_scaled_bitmap(const IntRect& a_dst_rect, const Gfx::Bitmap& source, const IntRect& src_rect, float opacity)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto dst_rect = a_dst_rect;
     if (dst_rect.size() == src_rect.size())
         return blit(dst_rect.location(), source, src_rect, opacity);
@@ -835,11 +877,15 @@ FLATTEN void Painter::draw_glyph(const IntPoint& point, u32 code_point, Color co
 
 FLATTEN void Painter::draw_glyph(const IntPoint& point, u32 code_point, const Font& font, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     draw_bitmap(point, font.glyph_bitmap(code_point), color);
 }
 
 void Painter::draw_emoji(const IntPoint& point, const Gfx::Bitmap& emoji, const Font& font)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     if (!font.is_fixed_width())
         blit(point, emoji, emoji.rect());
     else {
@@ -855,6 +901,8 @@ void Painter::draw_emoji(const IntPoint& point, const Gfx::Bitmap& emoji, const 
 
 void Painter::draw_glyph_or_emoji(const IntPoint& point, u32 code_point, const Font& font, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     if (code_point < (u32)font.glyph_count()) {
         // This looks like a regular character.
         draw_glyph(point, (size_t)code_point, font, color);
@@ -1059,16 +1107,22 @@ void do_draw_text(const IntRect& rect, const TextType& text, const Font& font, T
 
 void Painter::draw_text(const IntRect& rect, const StringView& text, TextAlignment alignment, Color color, TextElision elision)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     draw_text(rect, text, font(), alignment, color, elision);
 }
 
 void Painter::draw_text(const IntRect& rect, const Utf32View& text, TextAlignment alignment, Color color, TextElision elision)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     draw_text(rect, text, font(), alignment, color, elision);
 }
 
 void Painter::draw_text(const IntRect& rect, const StringView& raw_text, const Font& font, TextAlignment alignment, Color color, TextElision elision)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     Utf8View text { raw_text };
     do_draw_text(rect, Utf8View(text), font, alignment, elision, [&](const IntRect& r, u32 code_point) {
         draw_glyph_or_emoji(r.location(), code_point, font, color);
@@ -1077,6 +1131,8 @@ void Painter::draw_text(const IntRect& rect, const StringView& raw_text, const F
 
 void Painter::draw_text(const IntRect& rect, const Utf32View& text, const Font& font, TextAlignment alignment, Color color, TextElision elision)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     do_draw_text(rect, text, font, alignment, elision, [&](const IntRect& r, u32 code_point) {
         draw_glyph_or_emoji(r.location(), code_point, font, color);
     });
@@ -1084,6 +1140,8 @@ void Painter::draw_text(const IntRect& rect, const Utf32View& text, const Font& 
 
 void Painter::draw_text(Function<void(const IntRect&, u32)> draw_one_glyph, const IntRect& rect, const StringView& raw_text, const Font& font, TextAlignment alignment, TextElision elision)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     Utf8View text { raw_text };
     do_draw_text(rect, text, font, alignment, elision, [&](const IntRect& r, u32 code_point) {
         draw_one_glyph(r, code_point);
@@ -1092,6 +1150,8 @@ void Painter::draw_text(Function<void(const IntRect&, u32)> draw_one_glyph, cons
 
 void Painter::draw_text(Function<void(const IntRect&, u32)> draw_one_glyph, const IntRect& rect, const Utf8View& text, const Font& font, TextAlignment alignment, TextElision elision)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     do_draw_text(rect, text, font, alignment, elision, [&](const IntRect& r, u32 code_point) {
         draw_one_glyph(r, code_point);
     });
@@ -1099,6 +1159,8 @@ void Painter::draw_text(Function<void(const IntRect&, u32)> draw_one_glyph, cons
 
 void Painter::draw_text(Function<void(const IntRect&, u32)> draw_one_glyph, const IntRect& rect, const Utf32View& text, const Font& font, TextAlignment alignment, TextElision elision)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     do_draw_text(rect, text, font, alignment, elision, [&](const IntRect& r, u32 code_point) {
         draw_one_glyph(r, code_point);
     });
@@ -1106,6 +1168,8 @@ void Painter::draw_text(Function<void(const IntRect&, u32)> draw_one_glyph, cons
 
 void Painter::set_pixel(const IntPoint& p, Color color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto point = p;
     point.move_by(state().translation);
     if (!clip_rect().contains(point))
@@ -1115,6 +1179,8 @@ void Painter::set_pixel(const IntPoint& p, Color color)
 
 ALWAYS_INLINE void Painter::set_pixel_with_draw_op(u32& pixel, const Color& color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     switch (draw_op()) {
     case DrawOp::Copy:
         pixel = color.value();
@@ -1130,6 +1196,8 @@ ALWAYS_INLINE void Painter::set_pixel_with_draw_op(u32& pixel, const Color& colo
 
 ALWAYS_INLINE void Painter::fill_scanline_with_draw_op(int y, int x, int width, const Color& color)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     switch (draw_op()) {
     case DrawOp::Copy:
         fast_u32_fill(m_target->scanline(y) + x, color.value(), width);
@@ -1157,6 +1225,7 @@ ALWAYS_INLINE void Painter::fill_scanline_with_draw_op(int y, int x, int width, 
 
 void Painter::draw_pixel(const IntPoint& position, Color color, int thickness)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
     if (thickness == 1)
         return set_pixel_with_draw_op(m_target->scanline(position.y())[position.x()], color);
     IntRect rect { position.translated(-(thickness / 2), -(thickness / 2)), { thickness, thickness } };
@@ -1165,6 +1234,8 @@ void Painter::draw_pixel(const IntPoint& position, Color color, int thickness)
 
 void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int thickness, LineStyle style)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     if (color.alpha() == 0)
         return;
 
@@ -1314,6 +1385,7 @@ static bool can_approximate_bezier_curve(const FloatPoint& p1, const FloatPoint&
     return max(p1x, p2x) + max(p1y, p2y) <= tolerance;
 }
 
+// static
 void Painter::for_each_line_segment_on_bezier_curve(const FloatPoint& control_point, const FloatPoint& p1, const FloatPoint& p2, Function<void(const FloatPoint&, const FloatPoint&)>& callback)
 {
     if (can_approximate_bezier_curve(p1, p2, control_point)) {
@@ -1369,11 +1441,14 @@ static bool can_approximate_elliptical_arc(const FloatPoint& p1, const FloatPoin
 
 void Painter::draw_quadratic_bezier_curve(const IntPoint& control_point, const IntPoint& p1, const IntPoint& p2, Color color, int thickness, LineStyle style)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     for_each_line_segment_on_bezier_curve(FloatPoint(control_point), FloatPoint(p1), FloatPoint(p2), [&](const FloatPoint& fp1, const FloatPoint& fp2) {
         draw_line(IntPoint(fp1.x(), fp1.y()), IntPoint(fp2.x(), fp2.y()), color, thickness, style);
     });
 }
 
+// static
 void Painter::for_each_line_segment_on_elliptical_arc(const FloatPoint& p1, const FloatPoint& p2, const FloatPoint& center, const FloatPoint radii, float x_axis_rotation, float theta_1, float theta_delta, Function<void(const FloatPoint&, const FloatPoint&)>& callback)
 {
     if (can_approximate_elliptical_arc(p1, p2, center, radii, x_axis_rotation, theta_1, theta_delta)) {
@@ -1383,6 +1458,7 @@ void Painter::for_each_line_segment_on_elliptical_arc(const FloatPoint& p1, cons
     }
 }
 
+// static
 void Painter::for_each_line_segment_on_elliptical_arc(const FloatPoint& p1, const FloatPoint& p2, const FloatPoint& center, const FloatPoint radii, float x_axis_rotation, float theta_1, float theta_delta, Function<void(const FloatPoint&, const FloatPoint&)>&& callback)
 {
     for_each_line_segment_on_elliptical_arc(p1, p2, center, radii, x_axis_rotation, theta_1, theta_delta, callback);
@@ -1390,6 +1466,8 @@ void Painter::for_each_line_segment_on_elliptical_arc(const FloatPoint& p1, cons
 
 void Painter::draw_elliptical_arc(const IntPoint& p1, const IntPoint& p2, const IntPoint& center, const FloatPoint& radii, float x_axis_rotation, float theta_1, float theta_delta, Color color, int thickness, LineStyle style)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     for_each_line_segment_on_elliptical_arc(FloatPoint(p1), FloatPoint(p2), FloatPoint(center), radii, x_axis_rotation, theta_1, theta_delta, [&](const FloatPoint& fp1, const FloatPoint& fp2) {
         draw_line(IntPoint(fp1.x(), fp1.y()), IntPoint(fp2.x(), fp2.y()), color, thickness, style);
     });
@@ -1397,6 +1475,8 @@ void Painter::draw_elliptical_arc(const IntPoint& p1, const IntPoint& p2, const 
 
 void Painter::add_clip_rect(const IntRect& rect)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     state().clip_rect.intersect(rect.translated(translation()));
     state().clip_rect.intersect(m_target->rect());
 }
@@ -1419,6 +1499,8 @@ PainterStateSaver::~PainterStateSaver()
 
 void Painter::stroke_path(const Path& path, Color color, int thickness)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     FloatPoint cursor;
 
     for (auto& segment : path.segments()) {
@@ -1474,6 +1556,8 @@ void Painter::stroke_path(const Path& path, Color color, int thickness)
 
 void Painter::fill_path(Path& path, Color color, WindingRule winding_rule)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     const auto& segments = path.split_lines();
 
     if (segments.size() == 0)
@@ -1613,6 +1697,8 @@ void Painter::fill_path(Path& path, Color color, WindingRule winding_rule)
 
 void Painter::blit_disabled(const IntPoint& location, const Gfx::Bitmap& bitmap, const IntRect& rect, const Palette& palette)
 {
+    ASSERT(scale() == 1); // FIXME: Add scaling support.
+
     auto bright_color = palette.threed_highlight();
     auto dark_color = palette.threed_shadow1();
     blit_filtered(location.translated(1, 1), bitmap, rect, [&](auto) {

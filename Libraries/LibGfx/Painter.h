@@ -116,12 +116,10 @@ public:
 
     void add_clip_rect(const IntRect& rect);
     void clear_clip_rect();
-    IntRect clip_rect() const { return state().clip_rect; }
 
-    void translate(int dx, int dy) { state().translation.move_by(dx, dy); }
-    void translate(const IntPoint& delta) { state().translation.move_by(delta); }
-
-    IntPoint translation() const { return state().translation; }
+    void translate(int dx, int dy) { translate({ dx, dy }); }
+    void translate(const IntPoint& delta) { state().translation.move_by(delta * state().scale); }
+    void scale(int s) { state().scale *= s; }
 
     Gfx::Bitmap* target() { return m_target.ptr(); }
 
@@ -133,16 +131,20 @@ public:
     }
 
 protected:
+    IntPoint translation() const { return state().translation; }
+    int scale() const { return state().scale; }
     void set_pixel_with_draw_op(u32& pixel, const Color&);
     void fill_scanline_with_draw_op(int y, int x, int width, const Color& color);
     void fill_rect_with_draw_op(const IntRect&, Color);
     void blit_with_alpha(const IntPoint&, const Gfx::Bitmap&, const IntRect& src_rect);
     void blit_with_opacity(const IntPoint&, const Gfx::Bitmap&, const IntRect& src_rect, float opacity);
     void draw_pixel(const IntPoint&, Color, int thickness = 1);
+    IntRect clip_rect() const { return state().clip_rect; }
 
     struct State {
         const Font* font;
         IntPoint translation;
+        int scale = 1;
         IntRect clip_rect;
         DrawOp draw_op;
     };
