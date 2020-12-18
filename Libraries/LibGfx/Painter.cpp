@@ -195,12 +195,12 @@ void Painter::fill_rect_with_checkerboard(const IntRect& a_rect, const IntSize& 
 
 void Painter::fill_rect_with_gradient(Orientation orientation, const IntRect& a_rect, Color gradient_start, Color gradient_end)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
 
 #ifdef NO_FPU
     return fill_rect(a_rect, gradient_start);
 #endif
-    auto rect = a_rect.translated(translation());
+
+    auto rect = to_physical(a_rect);
     auto clipped_rect = IntRect::intersection(rect, clip_rect());
     if (clipped_rect.is_empty())
         return;
@@ -485,6 +485,8 @@ void Painter::blit_scaled(const IntRect& dst_rect_raw, const Gfx::Bitmap& source
 {
     ASSERT(scale() == 1); // FIXME: Add scaling support.
 
+    ASSERT(!Bitmap::is_indexed(source.format()));
+
     auto dst_rect = IntRect(dst_rect_raw.location(), dst_rect_raw.size()).translated(translation());
     auto clipped_rect = dst_rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
@@ -630,10 +632,7 @@ void Painter::draw_tiled_bitmap(const IntRect& a_dst_rect, const Gfx::Bitmap& so
     ASSERT_NOT_REACHED();
 }
 
-void Painter::blit_offset(const IntPoint& position,
-    const Gfx::Bitmap& source,
-    const IntRect& src_rect,
-    const IntPoint& offset)
+void Painter::blit_offset(const IntPoint& position, const Gfx::Bitmap& source, const IntRect& src_rect, const IntPoint& offset)
 {
     ASSERT(scale() == 1); // FIXME: Add scaling support.
 
@@ -671,7 +670,8 @@ void Painter::blit_offset(const IntPoint& position,
 
 void Painter::blit_with_alpha(const IntPoint& position, const Gfx::Bitmap& source, const IntRect& src_rect)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
+    if (scale() != 1)
+        return draw_scaled_bitmap({ position, src_rect.size() }, source, src_rect);
 
     ASSERT(source.has_alpha_channel());
     IntRect safe_src_rect = src_rect.intersected(source.rect());
@@ -705,12 +705,13 @@ void Painter::blit_with_alpha(const IntPoint& position, const Gfx::Bitmap& sourc
 
 void Painter::blit(const IntPoint& position, const Gfx::Bitmap& source, const IntRect& src_rect, float opacity)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     if (opacity < 1.0f)
         return blit_with_opacity(position, source, src_rect, opacity);
     if (source.has_alpha_channel())
         return blit_with_alpha(position, source, src_rect);
+    if (scale() != 1)
+      return draw_scaled_bitmap({ position, src_rect.size() }, source, src_rect, opacity);
+
     auto safe_src_rect = src_rect.intersected(source.rect());
     ASSERT(source.rect().contains(safe_src_rect));
     auto dst_rect = IntRect(position, safe_src_rect.size()).translated(translation());
@@ -808,15 +809,13 @@ ALWAYS_INLINE static void do_draw_scaled_bitmap(Gfx::Bitmap& target, const IntRe
 
 void Painter::draw_scaled_bitmap(const IntRect& a_dst_rect, const Gfx::Bitmap& source, const IntRect& src_rect, float opacity)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
-    auto dst_rect = a_dst_rect;
+    auto dst_rect = to_physical(a_dst_rect);
     if (dst_rect.size() == src_rect.size())
         return blit(dst_rect.location(), source, src_rect, opacity);
 
     auto safe_src_rect = src_rect.intersected(source.rect());
     ASSERT(source.rect().contains(safe_src_rect));
-    dst_rect.move_by(state().translation);
+
     auto clipped_rect = dst_rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
         return;
@@ -873,15 +872,11 @@ FLATTEN void Painter::draw_glyph(const IntPoint& point, u32 code_point, Color co
 
 FLATTEN void Painter::draw_glyph(const IntPoint& point, u32 code_point, const Font& font, Color color)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     draw_bitmap(point, font.glyph_bitmap(code_point), color);
 }
 
 void Painter::draw_emoji(const IntPoint& point, const Gfx::Bitmap& emoji, const Font& font)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     if (!font.is_fixed_width())
         blit(point, emoji, emoji.rect());
     else {
@@ -897,8 +892,6 @@ void Painter::draw_emoji(const IntPoint& point, const Gfx::Bitmap& emoji, const 
 
 void Painter::draw_glyph_or_emoji(const IntPoint& point, u32 code_point, const Font& font, Color color)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     if (code_point < (u32)font.glyph_count()) {
         // This looks like a regular character.
         draw_glyph(point, (size_t)code_point, font, color);
@@ -1103,22 +1096,16 @@ void do_draw_text(const IntRect& rect, const TextType& text, const Font& font, T
 
 void Painter::draw_text(const IntRect& rect, const StringView& text, TextAlignment alignment, Color color, TextElision elision)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     draw_text(rect, text, font(), alignment, color, elision);
 }
 
 void Painter::draw_text(const IntRect& rect, const Utf32View& text, TextAlignment alignment, Color color, TextElision elision)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     draw_text(rect, text, font(), alignment, color, elision);
 }
 
 void Painter::draw_text(const IntRect& rect, const StringView& raw_text, const Font& font, TextAlignment alignment, Color color, TextElision elision)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     Utf8View text { raw_text };
     do_draw_text(rect, Utf8View(text), font, alignment, elision, [&](const IntRect& r, u32 code_point) {
         draw_glyph_or_emoji(r.location(), code_point, font, color);
@@ -1127,8 +1114,6 @@ void Painter::draw_text(const IntRect& rect, const StringView& raw_text, const F
 
 void Painter::draw_text(const IntRect& rect, const Utf32View& text, const Font& font, TextAlignment alignment, Color color, TextElision elision)
 {
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
     do_draw_text(rect, text, font, alignment, elision, [&](const IntRect& r, u32 code_point) {
         draw_glyph_or_emoji(r.location(), code_point, font, color);
     });
