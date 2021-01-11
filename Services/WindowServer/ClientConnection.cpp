@@ -879,7 +879,7 @@ void ClientConnection::handle(const Messages::WindowServer::Pong&)
 
 OwnPtr<Messages::WindowServer::GetGlobalCursorPositionResponse> ClientConnection::handle(const Messages::WindowServer::GetGlobalCursorPosition&)
 {
-    return make<Messages::WindowServer::GetGlobalCursorPositionResponse>(Screen::the().cursor_location());
+    return make<Messages::WindowServer::GetGlobalCursorPositionResponse>(Screen::the().logical_cursor_location());
 }
 
 OwnPtr<Messages::WindowServer::SetMouseAccelerationResponse> ClientConnection::handle(const Messages::WindowServer::SetMouseAcceleration& message)
