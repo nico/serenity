@@ -250,12 +250,18 @@ private:
 
 inline u8* Bitmap::scanline_u8(int y)
 {
+  //if (y < 0 || y >= height()) {
+    //dbgln("{}x{}, {}", width(), height(), y);
+  //}
     ASSERT(y >= 0 && y < height());
     return reinterpret_cast<u8*>(m_data) + (y * m_pitch);
 }
 
 inline const u8* Bitmap::scanline_u8(int y) const
 {
+  //if (y < 0 || y >= height()) {
+    //dbgln("const {}x{}, {}", width(), height(), y);
+  //}
     ASSERT(y >= 0 && y < height());
     return reinterpret_cast<const u8*>(m_data) + (y * m_pitch);
 }
