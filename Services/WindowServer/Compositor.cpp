@@ -454,8 +454,10 @@ void Compositor::compose()
         }());
 
         // Copy anything rendered to the temporary buffer to the back buffer
+        // XXX more hackitori. luckily the clip rects on back_painter above are temporary and it's fine to make a painter from scratch here
+        Gfx::Painter unscaled_back_painter(*m_back_bitmap);
         for (auto& rect : flush_transparent_rects.rects())
-            back_painter.blit(rect.location(), *m_temp_bitmap, rect);
+            unscaled_back_painter.blit(rect.location() * Screen::the().scale_factor(), *m_temp_bitmap, rect * Screen::the().scale_factor());
 
         Gfx::IntRect geometry_label_damage_rect;
         if (draw_geometry_label(geometry_label_damage_rect))
