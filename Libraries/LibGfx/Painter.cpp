@@ -460,7 +460,7 @@ void Painter::draw_triangle(const IntPoint& a, const IntPoint& b, const IntPoint
         top = clip.top();
     }
 
-    for (int y = top; y < p1.y() && y < clip.bottom(); ++y) {
+    for (int y = top; y < p1.y() && y < clip.bottom(); ++y) {  // XXX <=?
         int start = x01 > x02 ? max((int)x02, clip.left()) : max((int)x01, clip.left());
         int end = x01 > x02 ? min((int)x01, clip.right()) : min((int)x02, clip.right());
         auto* scanline = m_target->scanline(y);
@@ -481,7 +481,7 @@ void Painter::draw_triangle(const IntPoint& a, const IntPoint& b, const IntPoint
         top = clip.top();
     }
 
-    for (int y = top; y < p2.y() && y < clip.bottom(); ++y) {
+    for (int y = top; y < p2.y() && y < clip.bottom(); ++y) {  // XXX <=?
         int start = x12 > x02 ? max((int)x02, clip.left()) : max((int)x12, clip.left());
         int end = x12 > x02 ? min((int)x12, clip.right()) : min((int)x02, clip.right());
         auto* scanline = m_target->scanline(y);
@@ -810,9 +810,9 @@ ALWAYS_INLINE static void do_draw_scaled_bitmap(Gfx::Bitmap& target, const IntRe
     bool has_opacity = opacity != 1.0f;
 
   //dbgln("nonint");
-    for (int y = clipped_rect.top(); y < clipped_rect.bottom(); ++y) {
+    for (int y = clipped_rect.top(); y <= clipped_rect.bottom(); ++y) {
         auto* scanline = (Color*)target.scanline(y);
-        for (int x = clipped_rect.left(); x < clipped_rect.right(); ++x) {
+        for (int x = clipped_rect.left(); x <= clipped_rect.right(); ++x) {
             auto scaled_x = ((x - dst_rect.x()) * hscale) >> 16;
             auto scaled_y = ((y - dst_rect.y()) * vscale) >> 16;
             auto src_pixel = get_pixel(source, scaled_x, scaled_y);
