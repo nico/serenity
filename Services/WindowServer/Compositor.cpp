@@ -93,23 +93,21 @@ void Compositor::init_bitmaps()
 {
     auto& screen = Screen::the();
     auto size = screen.physical_size();
-    auto unscaled_size = screen.logical_size();
 
     m_front_bitmap = Gfx::Bitmap::create_wrapper(Gfx::BitmapFormat::RGB32, size, screen.pitch(), screen.scanline(0));
     m_front_painter = make<Gfx::Painter>(*m_front_bitmap);
     m_front_painter->scale(screen.scale_factor());
 
-    if (m_screen_can_set_buffer) {
+    if (m_screen_can_set_buffer)
         m_back_bitmap = Gfx::Bitmap::create_wrapper(Gfx::BitmapFormat::RGB32, size, screen.pitch(), screen.scanline(size.height()));
-        m_back_painter = make<Gfx::Painter>(*m_back_bitmap);
-        m_back_painter->scale(screen.scale_factor());
-    } else {
-        m_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, unscaled_size);
-        m_back_painter = make<Gfx::Painter>(*m_back_bitmap);
-    }
+    else
+        m_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, size);
+    m_back_painter = make<Gfx::Painter>(*m_back_bitmap);
+    m_back_painter->scale(screen.scale_factor());
 
-    m_temp_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, unscaled_size);
+    m_temp_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, size);
     m_temp_painter = make<Gfx::Painter>(*m_temp_bitmap);
+    m_temp_painter->scale(screen.scale_factor());
 
     m_buffers_are_flipped = false;
 
@@ -535,12 +533,10 @@ void Compositor::flush(const Gfx::IntRect& a_rect)
 {
     auto rect = Gfx::IntRect::intersection(a_rect, Screen::the().logical_rect());
 
-    // XXX
-    // XXX
-    // XXX
-    // XXX
-    // XXX
-    // XXX
+    // Almost everything in Compositor is in logical coordintes, with the painters having
+    // a scale applied. But this routine accesses the backbuffer pixels directly, so it
+    // must work in physical coordinates.
+    rect = rect * Screen::the().scale_factor();
     Gfx::RGBA32* front_ptr = m_front_bitmap->scanline(rect.y()) + rect.x();
     Gfx::RGBA32* back_ptr = m_back_bitmap->scanline(rect.y()) + rect.x();
     size_t pitch = m_back_bitmap->pitch();
