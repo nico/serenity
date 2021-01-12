@@ -389,10 +389,7 @@ void Painter::draw_bitmap(const IntPoint& p, const CharacterBitmap& bitmap, Colo
 
 void Painter::draw_bitmap(const IntPoint& p, const GlyphBitmap& bitmap, Color color)
 {
-    if (scale()  != 1) return; // XXX
-    ASSERT(scale() == 1); // FIXME: Add scaling support.
-
-    auto dst_rect = IntRect(p, bitmap.size()).translated(translation());
+    auto dst_rect = to_physical(IntRect(p, bitmap.size()));
     auto clipped_rect = dst_rect.intersected(clip_rect());
     if (clipped_rect.is_empty())
         return;
@@ -403,12 +400,22 @@ void Painter::draw_bitmap(const IntPoint& p, const GlyphBitmap& bitmap, Color co
     RGBA32* dst = m_target->scanline(clipped_rect.y()) + clipped_rect.x();
     const size_t dst_skip = m_target->pitch() / sizeof(RGBA32);
 
-    for (int row = first_row; row <= last_row; ++row) {
-        for (int j = 0; j <= (last_column - first_column); ++j) {
-            if (bitmap.bit_at(j + first_column, row))
-                dst[j] = color.value();
-        }
-        dst += dst_skip;
+    if (scale() == 1)  {
+      for (int row = first_row; row <= last_row; ++row) {
+          for (int j = 0; j <= (last_column - first_column); ++j) {
+              if (bitmap.bit_at(j + first_column, row))
+                  dst[j] = color.value();
+          }
+          dst += dst_skip;
+      }
+    } else {
+      for (int row = first_row; row <= last_row; ++row) {
+          for (int j = 0; j <= (last_column - first_column); ++j) {
+              if (bitmap.bit_at((j + first_column) / scale(), row / scale()))
+                  dst[j] = color.value();
+          }
+          dst += dst_skip;
+      }
     }
 }
 
@@ -1220,6 +1227,7 @@ void Painter::draw_physical_pixel(const IntPoint& position, Color color, int thi
     ASSERT(draw_op() == DrawOp::Copy);
     if (thickness == 1)
         return set_pixel_with_draw_op(m_target->scanline(position.y())[position.x()], color);
+    // XXX this double-scales
     IntRect rect { position.translated(-(thickness / 2), -(thickness / 2)), { thickness, thickness } };
     fill_rect(rect.translated(-state().translation), color);
 }
