@@ -117,6 +117,23 @@ void Painter::clear_rect(const IntRect& a_rect, Color color)
     }
 }
 
+void Painter::fill_physical_rect(const IntRect& a_rect, Color color)
+{
+    auto rect = a_rect.intersected(clip_rect());
+    if (rect.is_empty())
+        return;
+    ASSERT(m_target->rect().contains(rect));
+
+    RGBA32* dst = m_target->scanline(rect.top()) + rect.left();
+    const size_t dst_skip = m_target->pitch() / sizeof(RGBA32);
+
+    for (int i = rect.height() - 1; i >= 0; --i) {
+        for (int j = 0; j < rect.width(); ++j)
+            dst[j] = Color::from_rgba(dst[j]).blend(color).value();
+        dst += dst_skip;
+    }
+}
+
 void Painter::fill_rect(const IntRect& a_rect, Color color)
 {
     if (color.alpha() == 0)
@@ -132,20 +149,7 @@ void Painter::fill_rect(const IntRect& a_rect, Color color)
         return;
     }
 
-    auto rect = to_physical(a_rect).intersected(clip_rect());
-    if (rect.is_empty())
-        return;
-
-    ASSERT(m_target->rect().contains(rect));
-
-    RGBA32* dst = m_target->scanline(rect.top()) + rect.left();
-    const size_t dst_skip = m_target->pitch() / sizeof(RGBA32);
-
-    for (int i = rect.height() - 1; i >= 0; --i) {
-        for (int j = 0; j < rect.width(); ++j)
-            dst[j] = Color::from_rgba(dst[j]).blend(color).value();
-        dst += dst_skip;
-    }
+    fill_physical_rect(to_physical(a_rect), color);
 }
 
 void Painter::fill_rect_with_dither_pattern(const IntRect& a_rect, Color color_a, Color color_b)
@@ -1223,13 +1227,15 @@ ALWAYS_INLINE void Painter::fill_scanline_with_draw_op(int y, int x, int width, 
 void Painter::draw_physical_pixel(const IntPoint& position, Color color, int thickness)
 {
     // This always draws a single physical pixel, independent of scale().
-    // This should only be called by routines that already handle scale.
+    // This should only be called by routines that already handle scale
+    // (including scaling thickness).
     ASSERT(draw_op() == DrawOp::Copy);
-    if (thickness == 1)
+
+    if (thickness == 1) // Implies scale() == 1.
         return set_pixel_with_draw_op(m_target->scanline(position.y())[position.x()], color);
-    // XXX this double-scales
+
     IntRect rect { position.translated(-(thickness / 2), -(thickness / 2)), { thickness, thickness } };
-    fill_rect(rect.translated(-state().translation), color);
+    fill_physical_rect(rect, color);
 }
 
 void Painter::draw_line(const IntPoint& p1, const IntPoint& p2, Color color, int thickness, LineStyle style)

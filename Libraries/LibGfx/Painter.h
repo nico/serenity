@@ -154,6 +154,8 @@ protected:
     State& state() { return m_state_stack.last(); }
     const State& state() const { return m_state_stack.last(); }
 
+    void fill_physical_rect(const IntRect&, Color);
+
     IntRect m_clip_origin;
     NonnullRefPtr<Gfx::Bitmap> m_target;
     Vector<State, 4> m_state_stack;
