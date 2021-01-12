@@ -798,15 +798,15 @@ void Compositor::draw_cursor(const Gfx::IntRect& cursor_rect)
     auto& wm = WindowManager::the();
 
     if (!m_cursor_back_bitmap || m_cursor_back_bitmap->size() != cursor_rect.size()) {
-        // FIXME: Create scaled back-buffer and draw it 1x instead of scaling at paint time.
-        m_cursor_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, cursor_rect.size());
+        // XXX kick-ass comment
+        m_cursor_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, cursor_rect.size() * Screen::the().scale_factor());
         m_cursor_back_painter = make<Gfx::Painter>(*m_cursor_back_bitmap);
     }
 
     auto& current_cursor = m_current_cursor ? *m_current_cursor : wm.active_cursor();
-    m_cursor_back_painter->blit({ 0, 0 }, *m_back_bitmap, current_cursor.rect().translated(cursor_rect.location()).intersected(Screen::the().logical_rect()));
-    auto& back_painter = *m_back_painter;
-    back_painter.blit(cursor_rect.location(), current_cursor.bitmap(), current_cursor.source_rect(m_current_cursor_frame));
+    m_cursor_back_painter->blit({ 0, 0 }, *m_back_bitmap, (current_cursor.rect().translated(cursor_rect.location()) * Screen::the().scale_factor()).intersected(Screen::the().physical_rect()));
+
+    m_back_painter->blit(cursor_rect.location(), current_cursor.bitmap(), current_cursor.source_rect(m_current_cursor_frame));
 
     m_last_cursor_rect = cursor_rect;
 }
@@ -816,7 +816,9 @@ void Compositor::restore_cursor_back()
     if (!m_cursor_back_bitmap)
         return;
 
-    m_back_painter->blit(m_last_cursor_rect.location().constrained(Screen::the().logical_rect()), *m_cursor_back_bitmap, { { 0, 0 }, m_last_cursor_rect.intersected(Screen::the().logical_rect()).size() });
+    // XXX hackitori
+    Gfx::Painter unscaled_back_painter(*m_back_bitmap);
+    unscaled_back_painter.blit((m_last_cursor_rect.location() * Screen::the().scale_factor()).constrained(Screen::the().physical_rect()), *m_cursor_back_bitmap, { { 0, 0 }, (m_last_cursor_rect * Screen::the().scale_factor()).intersected(Screen::the().physical_rect()).size() });
 }
 
 void Compositor::notify_display_links()
