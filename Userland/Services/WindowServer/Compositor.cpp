@@ -391,7 +391,8 @@ void Compositor::compose()
                 dbgln<COMPOSE_DEBUG>("    render wallpaper: {}", render_rect);
 
                 prepare_transparency_rect(render_rect);
-                paint_wallpaper(temp_painter, render_rect);
+                //paint_wallpaper(temp_painter, render_rect);
+                paint_wallpaper(back_painter, render_rect);
                 return IterationDecision::Continue;
             });
         }
@@ -401,9 +402,12 @@ void Compositor::compose()
                 dbgln<COMPOSE_DEBUG>("    render transparent: {}", render_rect);
 
                 prepare_transparency_rect(render_rect);
-                Gfx::PainterStateSaver saver(temp_painter);
-                temp_painter.add_clip_rect(render_rect);
-                compose_window_rect(temp_painter, render_rect);
+                //Gfx::PainterStateSaver saver(temp_painter);
+                //temp_painter.add_clip_rect(render_rect);
+                //compose_window_rect(temp_painter, render_rect);
+                Gfx::PainterStateSaver saver(back_painter);
+                back_painter.add_clip_rect(render_rect);
+                compose_window_rect(back_painter, render_rect);
                 return IterationDecision::Continue;
             });
         }
@@ -436,8 +440,10 @@ void Compositor::compose()
         }());
 
         // Copy anything rendered to the temporary buffer to the back buffer
-        for (auto& rect : flush_transparent_rects.rects())
-            back_painter.blit(rect.location(), *m_temp_bitmap, rect);
+        //for (auto& rect : flush_transparent_rects.rects()) {
+//dbgln("flush {}", rect);
+            //back_painter.blit(rect.location(), *m_temp_bitmap, rect);
+        //}
 
         Gfx::IntRect geometry_label_damage_rect;
         if (draw_geometry_label(geometry_label_damage_rect))
