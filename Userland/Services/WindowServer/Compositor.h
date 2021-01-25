@@ -104,10 +104,8 @@ private:
 
     RefPtr<Gfx::Bitmap> m_front_bitmap;
     RefPtr<Gfx::Bitmap> m_back_bitmap;
-    RefPtr<Gfx::Bitmap> m_temp_bitmap;
     OwnPtr<Gfx::Painter> m_back_painter;
     OwnPtr<Gfx::Painter> m_front_painter;
-    OwnPtr<Gfx::Painter> m_temp_painter;
 
     Gfx::DisjointRectSet m_dirty_screen_rects;
     Gfx::DisjointRectSet m_opaque_wallpaper_rects;

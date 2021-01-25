@@ -101,9 +101,6 @@ void Compositor::init_bitmaps()
         m_back_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, size, screen.scale_factor());
     m_back_painter = make<Gfx::Painter>(*m_back_bitmap);
 
-    m_temp_bitmap = Gfx::Bitmap::create(Gfx::BitmapFormat::RGB32, size, screen.scale_factor());
-    m_temp_painter = make<Gfx::Painter>(*m_temp_bitmap);
-
     m_buffers_are_flipped = false;
 
     invalidate_screen();
@@ -243,7 +240,6 @@ void Compositor::compose()
         check_restore_cursor_back(cursor_rect);
 
     auto back_painter = *m_back_painter;
-    auto temp_painter = *m_temp_painter;
 
     auto paint_wallpaper = [&](Gfx::Painter& painter, const Gfx::IntRect& rect) {
         // FIXME: If the wallpaper is opaque and covers the whole rect, no need to fill with color!
@@ -383,15 +379,13 @@ void Compositor::compose()
             });
         }
 
-        // Render the wallpaper for any transparency directly covering
-        // the wallpaper
+        // Render the wallpaper for any transparency directly covering the wallpaper
         auto& transparency_wallpaper_rects = window.transparency_wallpaper_rects();
         if (!transparency_wallpaper_rects.is_empty()) {
             transparency_wallpaper_rects.for_each_intersected(dirty_rects, [&](const Gfx::IntRect& render_rect) {
                 dbgln<COMPOSE_DEBUG>("    render wallpaper: {}", render_rect);
 
                 prepare_transparency_rect(render_rect);
-                //paint_wallpaper(temp_painter, render_rect);
                 paint_wallpaper(back_painter, render_rect);
                 return IterationDecision::Continue;
             });
@@ -402,9 +396,6 @@ void Compositor::compose()
                 dbgln<COMPOSE_DEBUG>("    render transparent: {}", render_rect);
 
                 prepare_transparency_rect(render_rect);
-                //Gfx::PainterStateSaver saver(temp_painter);
-                //temp_painter.add_clip_rect(render_rect);
-                //compose_window_rect(temp_painter, render_rect);
                 Gfx::PainterStateSaver saver(back_painter);
                 back_painter.add_clip_rect(render_rect);
                 compose_window_rect(back_painter, render_rect);
@@ -438,12 +429,6 @@ void Compositor::compose()
             }
             return false;
         }());
-
-        // Copy anything rendered to the temporary buffer to the back buffer
-        //for (auto& rect : flush_transparent_rects.rects()) {
-//dbgln("flush {}", rect);
-            //back_painter.blit(rect.location(), *m_temp_bitmap, rect);
-        //}
 
         Gfx::IntRect geometry_label_damage_rect;
         if (draw_geometry_label(geometry_label_damage_rect))
