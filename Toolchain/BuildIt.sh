@@ -207,10 +207,10 @@ pushd "$DIR/Tarballs"
 
     pushd ${BINUTILS_NAME}
         if [ "$git_patch" = "1" ]; then
-            git init > /dev/null
-            git add . > /dev/null
-            git commit -am "BASE" > /dev/null
-            git apply "$DIR"/Patches/binutils.patch > /dev/null
+            git init
+            git add .
+            git commit -am "BASE"
+            git apply "$DIR"/Patches/binutils.patch
         else
             patch -p1 < "$DIR"/Patches/binutils.patch > /dev/null
         fi

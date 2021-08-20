@@ -7,7 +7,7 @@ print_help() {
     NAME=$(basename "$ARG0")
     cat <<EOF
 Usage: $NAME COMMAND [TARGET] [ARGS...]
-  Supported TARGETs: i686 (default), x86_64, lagom
+  Supported TARGETs: i686 (default), x86_64, aarch64, lagom
   Supported COMMANDs:
     build:      Compiles the target binaries, [ARGS...] are passed through to ninja
     install:    Installs the target binary
@@ -91,6 +91,10 @@ get_top_dir() {
 }
 
 is_valid_target() {
+    if [ "$TARGET" = "aarch64" ]; then
+        CMAKE_ARGS+=("-DSERENITY_ARCH=aarch64")
+        return 0
+    fi
     if [ "$TARGET" = "lagom" ]; then
         CMAKE_ARGS+=("-DBUILD_LAGOM=ON")
         return 0
@@ -173,7 +177,7 @@ delete_target() {
 }
 
 build_toolchain() {
-    ( cd "$SERENITY_SOURCE_DIR/Toolchain" && ARCH="$TARGET" ./BuildIt.sh )
+    ( cd "$SERENITY_SOURCE_DIR/Toolchain" && ARCH="$TARGET" ./BuildIt.sh --dev )
 }
 
 ensure_toolchain() {
