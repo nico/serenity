@@ -19,6 +19,8 @@ struct __jmp_buf {
     uint32_t regs[6];
 #elif __x86_64__
     uint64_t regs[8];
+#elif __aarch64__
+    uint64_t regs[22];
 #else
 #    error
 #endif
