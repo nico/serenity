@@ -1,0 +1,6 @@
+
+    .globl _invoke_entry
+    .hidden _invoke_entry
+    .type _invoke_entry,@function
+_invoke_entry: # (argc, argv, envp, entry)
+    ret  # XXX

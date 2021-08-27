@@ -301,7 +301,7 @@ endif()
 
 if("${SERENITY_ARCH}" STREQUAL "i686")
     add_compile_options(-march=i686)
-else()
+elseif("${SERENITY_ARCH}" STREQUAL "x86_64")
     add_compile_options(-march=x86-64)
 endif()
 
