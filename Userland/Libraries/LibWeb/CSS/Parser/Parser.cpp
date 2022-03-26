@@ -1766,6 +1766,7 @@ Optional<StyleDeclarationRule> Parser::consume_a_declaration(TokenStream<T>& tok
     return declaration;
 }
 
+// https://drafts.csswg.org/css-syntax-3/#consume-a-list-of-declarations
 template<typename T>
 Vector<DeclarationOrAtRule> Parser::consume_a_list_of_declarations(TokenStream<T>& tokens)
 {
@@ -2062,11 +2063,60 @@ Optional<AK::URL> Parser::parse_url_function(StyleComponentValueRule const& comp
     return {};
 }
 
+// https://drafts.csswg.org/css-fonts/#font-face-rule
+template<typename T>
+RefPtr<FontFace> Parser::parse_a_font_face(TokenStream<T>& tokens)
+{
+    auto declarations_and_at_rules = consume_a_list_of_declarations(tokens);
+
+    //Vector<StyleProperty> properties;
+    //HashMap<String, StyleProperty> custom_properties;
+    String font_family;
+
+    for (auto& declaration_or_at_rule : declarations_and_at_rules) {
+        if (declaration_or_at_rule.is_at_rule()) {
+            dbgln_if(CSS_PARSER_DEBUG, "!!! CSS at-rule is not allowed here!");
+            continue;
+        }
+
+        auto& declaration = declaration_or_at_rule.m_declaration;
+        auto& name = declaration.m_name;
+
+        if (name == "font-family"sv) {
+            auto maybe_font_family_value = parse_font_family_value(declaration.m_values, 0, ShouldAllowSystemFonts::No);
+            if (!maybe_font_family_value)
+                continue;
+            const auto& font_family_list = maybe_font_family_value->as_value_list();
+            if (font_family_list.size() != 1)
+                return nullptr;
+            const auto& font_name_value = font_family_list.value_at(0, false);
+            if (!font_name_value->is_string())
+                return nullptr;
+            font_family = font_name_value->to_string();
+        } else if (name == "url"sv) {
+        } else {
+            dbgln_if(CSS_PARSER_DEBUG, "Ignoring font-face descriptor {}", name);
+        }
+    }
+
+    dbgln("got font-family {}", font_family);
+    return FontFace::create();
+}
+
 RefPtr<CSSRule> Parser::convert_to_rule(NonnullRefPtr<StyleRule> rule)
 {
     if (rule->m_type == StyleRule::Type::At) {
         if (has_ignored_vendor_prefix(rule->m_name)) {
             return {};
+        } else if (rule->m_name.equals_ignoring_case("font-face"sv)) {
+            // FIXME: Reject non-empty preludes that contain more than whitespace?
+
+            auto font_face_tokens = TokenStream { rule->block().values() };
+            auto font_face = parse_a_font_face(font_face_tokens);
+            if (!font_face)
+                return {};
+
+            return CSSFontFaceRule::create(move(font_face));
         } else if (rule->m_name.equals_ignoring_case("media"sv)) {
 
             auto media_query_tokens = TokenStream { rule->prelude() };
@@ -3661,7 +3711,7 @@ RefPtr<StyleValue> Parser::parse_font_value(Vector<StyleComponentValueRule> cons
             }
 
             // Consume font-families
-            auto maybe_font_families = parse_font_family_value(component_values, i + 1);
+            auto maybe_font_families = parse_font_family_value(component_values, i + 1, ShouldAllowSystemFonts::Yes);
             if (!maybe_font_families)
                 return nullptr;
             font_families = maybe_font_families.release_nonnull();
@@ -3690,7 +3740,7 @@ RefPtr<StyleValue> Parser::parse_font_value(Vector<StyleComponentValueRule> cons
     return FontStyleValue::create(font_style.release_nonnull(), font_weight.release_nonnull(), font_size.release_nonnull(), line_height.release_nonnull(), font_families.release_nonnull());
 }
 
-RefPtr<StyleValue> Parser::parse_font_family_value(Vector<StyleComponentValueRule> const& component_values, size_t start_index)
+RefPtr<StyleValue> Parser::parse_font_family_value(Vector<StyleComponentValueRule> const& component_values, size_t start_index, ShouldAllowSystemFonts should_allow_system_fonts)
 {
     auto is_generic_font_family = [](ValueID identifier) -> bool {
         switch (identifier) {
@@ -3745,6 +3795,8 @@ RefPtr<StyleValue> Parser::parse_font_family_value(Vector<StyleComponentValueRul
                 if (maybe_ident->is_builtin())
                     return nullptr;
                 if (is_generic_font_family(maybe_ident->to_identifier())) {
+                    if (should_allow_system_fonts == ShouldAllowSystemFonts::No)
+                        return nullptr;
                     // Can't have a generic-font-name as a token in an unquoted font name.
                     if (!current_name_parts.is_empty())
                         return nullptr;
@@ -4269,7 +4321,7 @@ Result<NonnullRefPtr<StyleValue>, Parser::ParsingResult> Parser::parse_css_value
             return parsed_value.release_nonnull();
         return ParsingResult::SyntaxError;
     case PropertyID::FontFamily:
-        if (auto parsed_value = parse_font_family_value(component_values))
+        if (auto parsed_value = parse_font_family_value(component_values, 0, ShouldAllowSystemFonts::Yes))
             return parsed_value.release_nonnull();
         return ParsingResult::SyntaxError;
     case PropertyID::ListStyle:

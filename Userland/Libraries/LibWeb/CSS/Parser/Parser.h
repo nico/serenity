@@ -13,6 +13,7 @@
 #include <AK/Result.h>
 #include <AK/Vector.h>
 #include <LibWeb/CSS/CSSStyleDeclaration.h>
+#include <LibWeb/CSS/FontFace.h>
 #include <LibWeb/CSS/GeneralEnclosed.h>
 #include <LibWeb/CSS/MediaQuery.h>
 #include <LibWeb/CSS/Parser/DeclarationOrAtRule.h>
@@ -157,6 +158,8 @@ private:
     Result<SelectorList, ParsingResult> parse_a_selector_list(TokenStream<T>&, SelectorType, SelectorParsingMode = SelectorParsingMode::Standard);
 
     template<typename T>
+    RefPtr<FontFace> parse_a_font_face(TokenStream<T>&);
+    template<typename T>
     NonnullRefPtrVector<MediaQuery> parse_a_media_query_list(TokenStream<T>&);
     template<typename T>
     RefPtr<Supports> parse_a_supports(TokenStream<T>&);
@@ -291,7 +294,12 @@ private:
     RefPtr<StyleValue> parse_flex_value(Vector<StyleComponentValueRule> const&);
     RefPtr<StyleValue> parse_flex_flow_value(Vector<StyleComponentValueRule> const&);
     RefPtr<StyleValue> parse_font_value(Vector<StyleComponentValueRule> const&);
-    RefPtr<StyleValue> parse_font_family_value(Vector<StyleComponentValueRule> const&, size_t start_index = 0);
+
+    enum class ShouldAllowSystemFonts {
+        No,
+        Yes,
+    };
+    RefPtr<StyleValue> parse_font_family_value(Vector<StyleComponentValueRule> const&, size_t start_index, ShouldAllowSystemFonts);
     RefPtr<StyleValue> parse_list_style_value(Vector<StyleComponentValueRule> const&);
     RefPtr<StyleValue> parse_overflow_value(Vector<StyleComponentValueRule> const&);
     enum class AllowInsetKeyword {
