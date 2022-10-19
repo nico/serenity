@@ -161,11 +161,12 @@ fi
 
 printf "mounting filesystem... "
 mkdir -p mnt
-use_genext2fs=0
+use_genext2fs=1
 if [ $USE_FUSE2FS -eq 1 ]; then
     mount_cmd="$FUSE2FS_PATH _disk_image mnt/ -o fakeroot,rw"
 elif [ "$(uname -s)" = "Darwin" ]; then
-    mount_cmd="fuse-ext2 _disk_image mnt -o rw+,allow_other,uid=501,gid=20"
+    #mount_cmd="fuse-ext2 _disk_image mnt -o rw+,allow_other,uid=501,gid=20"
+    echo hi
 elif [ "$(uname -s)" = "OpenBSD" ]; then
     VND=$(vnconfig _disk_image)
     mount_cmd="mount -t ext2fs "/dev/${VND}i" mnt/"
@@ -175,16 +176,16 @@ elif [ "$(uname -s)" = "FreeBSD" ]; then
 else
     mount_cmd="mount _disk_image mnt/"
 fi
-if ! eval "$mount_cmd"; then
+#if ! eval "$mount_cmd"; then
     if command -v genext2fs 1>/dev/null ; then
         echo "mount failed but genext2fs exists, use it instead"
         use_genext2fs=1
     else
         die "could not mount filesystem and genext2fs is missing"
     fi
-else
-    echo "done"
-fi
+#else
+    #echo "done"
+#fi
 
 cleanup() {
     if [ -d mnt ]; then
