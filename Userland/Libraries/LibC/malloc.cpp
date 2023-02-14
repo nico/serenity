@@ -633,6 +633,8 @@ size_t malloc_good_size(size_t size)
 
 void* realloc(void* ptr, size_t size)
 {
+    // FIXME: smarter?
+
     MemoryAuditingSuppressor suppressor;
     if (!ptr)
         return malloc(size);

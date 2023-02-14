@@ -436,6 +436,7 @@ static ErrorOr<Vector<LutCurveType>> read_curves(ReadonlyBytes bytes, u32 offset
         TRY(curves.try_append(move(curve)));
     }
 
+    curves.shrink(count);
     return curves;
 }
 

@@ -334,6 +334,7 @@ public:
             if constexpr (inline_capacity > 0) {
                 if (!m_outline_buffer) {
                     for (size_t i = 0; i < m_size; ++i) {
+                        // FIXME: TypedTransfer<StorageType>::move
                         new (&inline_buffer()[i]) StorageType(move(other.inline_buffer()[i]));
                         other.inline_buffer()[i].~StorageType();
                     }
@@ -393,6 +394,7 @@ public:
         } else {
             at(index).~StorageType();
             for (size_t i = index + 1; i < m_size; ++i) {
+                // FIXME: TypedTransfer<StorageType>::move
                 new (slot(i - 1)) StorageType(move(at(i)));
                 at(i).~StorageType();
             }
@@ -414,6 +416,7 @@ public:
             for (size_t i = index; i < index + count; i++)
                 at(i).~StorageType();
             for (size_t i = index + count; i < m_size; ++i) {
+                // FIXME: TypedTransfer<StorageType>::move
                 new (slot(i - count)) StorageType(move(at(i)));
                 at(i).~StorageType();
             }
@@ -500,6 +503,8 @@ public:
             return try_append(forward<U>(value));
         TRY(try_grow_capacity(size() + 1));
         ++m_size;
+
+        // FIXME: like so
         if constexpr (Traits<StorageType>::is_trivial()) {
             TypedTransfer<StorageType>::move(slot(index + 1), slot(index), m_size - index - 1);
         } else {
@@ -542,6 +547,8 @@ public:
         auto other_size = other.size();
         Vector tmp = move(other);
         TRY(try_grow_capacity(size() + other_size));
+
+        // FIXME: or like so?
         TypedTransfer<StorageType>::move(data() + m_size, tmp.data(), other_size);
         m_size += other_size;
         return {};
@@ -612,12 +619,15 @@ public:
         auto other_size = other.size();
         TRY(try_grow_capacity(size() + other_size));
 
+        // FIXME: or like so?
         for (size_t i = size() + other_size - 1; i >= other.size(); --i) {
             new (slot(i)) StorageType(move(at(i - other_size)));
             at(i - other_size).~StorageType();
         }
 
         Vector tmp = move(other);
+
+        // FIXME: TypedTransfer<StorageType>::move
         TypedTransfer<StorageType>::move(slot(0), tmp.data(), tmp.size());
         m_size += other_size;
         return {};
@@ -628,6 +638,7 @@ public:
         if (count == 0)
             return {};
         TRY(try_grow_capacity(size() + count));
+        // FIXME: or like so? not clear why this doesn't call dtors?
         TypedTransfer<StorageType>::move(slot(count), slot(0), m_size);
         TypedTransfer<StorageType>::copy(slot(0), values, count);
         m_size += count;
@@ -645,13 +656,16 @@ public:
     {
         if (m_capacity >= needed_capacity)
             return {};
+
+        // FIXME: krealloc would be nice
         size_t new_capacity = kmalloc_good_size(needed_capacity * sizeof(StorageType)) / sizeof(StorageType);
         auto* new_buffer = static_cast<StorageType*>(kmalloc_array(new_capacity, sizeof(StorageType)));
         if (new_buffer == nullptr)
             return Error::from_errno(ENOMEM);
 
+        // FIXME: uh
         if constexpr (Traits<StorageType>::is_trivial()) {
-            TypedTransfer<StorageType>::copy(new_buffer, data(), m_size);
+            TypedTransfer<StorageType>::copy(new_buffer, data(), m_size);  // Why does this call copy() not move
         } else {
             for (size_t i = 0; i < m_size; ++i) {
                 new (&new_buffer[i]) StorageType(move(at(i)));
@@ -714,6 +728,46 @@ public:
         for (size_t i = new_size; i < size(); ++i)
             at(i).~StorageType();
         m_size = new_size;
+
+        if (keep_capacity)
+            return;
+
+        StorageType* new_buffer;
+        if constexpr (inline_capacity > 0) {
+            if (!m_outline_buffer)
+                return;
+
+            if (inline_capacity < m_size) {
+                new_buffer = static_cast<StorageType*>(kmalloc_array(m_size, sizeof(StorageType)));
+                if (!new_buffer)
+                    return;
+            } else {
+                new_buffer = inline_buffer();
+            }
+        } else {
+            new_buffer = static_cast<StorageType*>(kmalloc_array(m_size, sizeof(StorageType)));
+            if (!new_buffer)
+                return;
+        }
+
+        // XXX move over
+
+        if (m_outline_buffer) {
+            kfree_sized(m_outline_buffer, m_capacity * sizeof(StorageType));
+            m_outline_buffer = nullptr;
+        }
+
+#if 0
+        if constexpr (inline_capacity > 0) {
+            if (inline_capacity < m_size)
+                kfree_sized(m_outline_buffer, m_capacity * sizeof(StorageType));
+        } else {
+            kfree_sized(m_outline_buffer, m_capacity * sizeof(StorageType));
+        }
+#endif
+
+        m_outline_buffer = new_buffer;
+        
     }
 
     void resize(size_t new_size, bool keep_capacity = false)
@@ -730,6 +784,7 @@ public:
 
     void shrink_to_fit()
     {
+        // FIXME: aha! make this just call shrink(size()).
         if (size() == capacity())
             return;
         Vector new_vector;

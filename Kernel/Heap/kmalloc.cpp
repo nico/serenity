@@ -459,6 +459,8 @@ void* kmalloc(size_t size)
     return kmalloc_impl(size, KMALLOC_DEFAULT_ALIGNMENT, CallerWillInitializeMemory::No);
 }
 
+// FIXME: krealloc?
+
 void* kcalloc(size_t count, size_t size)
 {
     if (Checked<size_t>::multiplication_would_overflow(count, size))
