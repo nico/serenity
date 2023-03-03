@@ -12,9 +12,9 @@ namespace DSP::Effects {
 
 Delay::Delay(NonnullRefPtr<Transport> transport)
     : EffectProcessor(move(transport))
-    , m_delay_decay("Decay"_short_string, 0.01, 0.99, 0.33, Logarithmic::No)
+    , m_delay_decay("Decay"_short_string, ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.01), ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.99), ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.33), Logarithmic::No)
     , m_delay_time("Delay Time"_string, 3, 2000, 900, Logarithmic::Yes)
-    , m_dry_gain("Dry"_short_string, 0, 1, 0.9, Logarithmic::No)
+    , m_dry_gain("Dry"_short_string, 0, 1, ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.9), Logarithmic::No)
 {
 
     m_parameters.append(m_delay_decay);

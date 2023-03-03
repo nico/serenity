@@ -46,7 +46,7 @@ TEST_CASE(edid1)
     EXPECT(screen_size.value().vertical_cm() == 19);
     auto gamma = edid.gamma();
     EXPECT(gamma.has_value());
-    EXPECT(gamma.value() >= 2.19f && gamma.value() <= 2.21f);
+    EXPECT(gamma.value() >= FixedPoint<16>::from_floating_point_with_least_significant_bit_rounded(2.19f) && gamma.value() <= FixedPoint<16>::from_floating_point_with_least_significant_bit_rounded(2.21f));
     EXPECT(edid.display_product_name() == "QEMU Monitor");
 
     {
@@ -227,7 +227,7 @@ TEST_CASE(edid2)
     EXPECT(screen_size.value().vertical_cm() == 34);
     auto gamma = edid.gamma();
     EXPECT(gamma.has_value());
-    EXPECT(gamma.value() >= 2.19f && gamma.value() <= 2.21f);
+    EXPECT(gamma.value() >= FixedPoint<16>::from_floating_point_with_least_significant_bit_rounded(2.19f) && gamma.value() <= FixedPoint<16>::from_floating_point_with_least_significant_bit_rounded(2.21f));
     EXPECT(edid.display_product_name() == "CB272U");
 
     {

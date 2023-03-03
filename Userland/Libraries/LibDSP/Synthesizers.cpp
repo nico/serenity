@@ -20,10 +20,10 @@ namespace DSP::Synthesizers {
 Classic::Classic(NonnullRefPtr<Transport> transport)
     : DSP::SynthesizerProcessor(move(transport))
     , m_waveform("Waveform"_string, Waveform::Saw)
-    , m_attack("Attack"_short_string, 0.01, 2000, 5, Logarithmic::Yes)
-    , m_decay("Decay"_short_string, 0.01, 20'000, 80, Logarithmic::Yes)
-    , m_sustain("Sustain"_short_string, 0.001, 1, 0.725, Logarithmic::No)
-    , m_release("Release"_short_string, 0.01, 6'000, 120, Logarithmic::Yes)
+    , m_attack("Attack"_short_string, ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.01), 2000, 5, Logarithmic::Yes)
+    , m_decay("Decay"_short_string, ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.01), 20'000, 80, Logarithmic::Yes)
+    , m_sustain("Sustain"_short_string, ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.001), 1, ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.725), Logarithmic::No)
+    , m_release("Release"_short_string, ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(0.01), 6'000, 120, Logarithmic::Yes)
 {
     m_parameters.append(m_waveform);
     m_parameters.append(m_attack);

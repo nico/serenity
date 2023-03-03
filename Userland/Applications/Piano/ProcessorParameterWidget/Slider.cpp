@@ -38,7 +38,7 @@ ProcessorParameterSlider::ProcessorParameterSlider(Orientation orientation, DSP:
         real_value.raw() = raw_value;
         if (is_logarithmic())
             // FIXME: Implement exponential for fixed point
-            real_value = exp2(static_cast<double>(real_value));
+            real_value = DSP::ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(exp2(static_cast<double>(real_value)));
 
         m_parameter.set_value(real_value);
         if (m_value_label) {

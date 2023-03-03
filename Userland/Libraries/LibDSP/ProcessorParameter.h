@@ -130,11 +130,11 @@ public:
     {
     }
 
-    ParameterFixedPoint min_value() const { return m_min_value; }
-    ParameterFixedPoint max_value() const { return m_max_value; }
-    ParameterFixedPoint range() const { return m_max_value - m_min_value; }
+    ParameterFixedPoint min_value() const { return ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(m_min_value); }
+    ParameterFixedPoint max_value() const { return ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(m_max_value); }
+    ParameterFixedPoint range() const { return ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(m_max_value - m_min_value); }
     constexpr Logarithmic is_logarithmic() const { return m_logarithmic; }
-    ParameterFixedPoint default_value() const { return m_default_value; }
+    ParameterFixedPoint default_value() const { return ParameterFixedPoint::from_floating_point_with_least_significant_bit_rounded(m_default_value); }
     void set_value(ParameterFixedPoint value)
     {
         Detail::ProcessorParameterSingleValue<ParameterFixedPoint>::set_value(value.clamp(min_value(), max_value()));

@@ -38,9 +38,9 @@ public:
 
 #ifndef KERNEL
     template<FloatingPoint F>
-    FixedPoint(F value)
-        : m_value(round_to<Underlying>(value * (static_cast<Underlying>(1) << precision)))
+    static This from_floating_point_with_least_significant_bit_rounded(F value)
     {
+        return create_raw(round_to<Underlying>(value * (static_cast<Underlying>(1) << precision)));
     }
 #endif
 
