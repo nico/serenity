@@ -53,7 +53,11 @@ public:
 
     [[nodiscard]] size_t empty_space() const;
     [[nodiscard]] size_t used_space() const;
-    [[nodiscard]] size_t capacity() const;
+    [[nodiscard]] size_t capacity() const
+    {
+        return m_buffer.size();
+    }
+
     [[nodiscard]] size_t seekback_limit() const;
 
     Optional<size_t> offset_of(StringView needle, Optional<size_t> from = {}, Optional<size_t> until = {}) const;
@@ -63,9 +67,19 @@ public:
 private:
     CircularBuffer(ByteBuffer);
 
-    [[nodiscard]] bool is_wrapping_around() const;
+    [[nodiscard]] bool is_wrapping_around() const
+    {
+        return capacity() <= m_reading_head + m_used_space;
+    }
 
-    [[nodiscard]] Bytes next_write_span();
+    [[nodiscard]] Bytes next_write_span()
+    {
+        //if (is_wrapping_around())
+        if (m_buffer.size() <= m_reading_head + m_used_space)
+            return m_buffer.span().slice(m_reading_head + m_used_space - capacity(), capacity() - m_used_space);
+        return m_buffer.span().slice(m_reading_head + m_used_space, capacity() - (m_reading_head + m_used_space));
+    }
+
     [[nodiscard]] ReadonlyBytes next_read_span() const;
     [[nodiscard]] ReadonlyBytes next_read_span_with_seekback(size_t distance) const;
 

@@ -43,19 +43,9 @@ size_t CircularBuffer::used_space() const
     return m_used_space;
 }
 
-size_t CircularBuffer::capacity() const
-{
-    return m_buffer.size();
-}
-
 size_t CircularBuffer::seekback_limit() const
 {
     return m_seekback_limit;
-}
-
-bool CircularBuffer::is_wrapping_around() const
-{
-    return capacity() <= m_reading_head + m_used_space;
 }
 
 Optional<size_t> CircularBuffer::offset_of(StringView needle, Optional<size_t> from, Optional<size_t> until) const
@@ -88,13 +78,6 @@ void CircularBuffer::clear()
     m_reading_head = 0;
     m_used_space = 0;
     m_seekback_limit = 0;
-}
-
-Bytes CircularBuffer::next_write_span()
-{
-    if (is_wrapping_around())
-        return m_buffer.span().slice(m_reading_head + m_used_space - capacity(), capacity() - m_used_space);
-    return m_buffer.span().slice(m_reading_head + m_used_space, capacity() - (m_reading_head + m_used_space));
 }
 
 ReadonlyBytes CircularBuffer::next_read_span() const
