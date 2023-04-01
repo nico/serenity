@@ -182,8 +182,7 @@ ErrorOr<bool> DeflateDecompressor::CompressedBlock::try_read_more()
         return Error::from_string_literal("Invalid deflate literal/length symbol");
 
     if (symbol < 256) {
-        u8 byte_symbol = symbol;
-        m_decompressor.m_output_buffer.write({ &byte_symbol, sizeof(byte_symbol) });
+        m_decompressor.m_output_buffer.write(symbol);
         return true;
     }
 
@@ -206,7 +205,7 @@ ErrorOr<bool> DeflateDecompressor::CompressedBlock::try_read_more()
         for (size_t idx = 0; idx < length; ++idx) {
             u8 byte = 0;
             TRY(m_decompressor.m_output_buffer.read_with_seekback({ &byte, sizeof(byte) }, distance));
-            m_decompressor.m_output_buffer.write({ &byte, sizeof(byte) });
+            m_decompressor.m_output_buffer.write(byte);
         }
     } else {
         TRY(m_decompressor.m_output_buffer.copy_from_seekback(distance, length));

@@ -25,6 +25,22 @@ public:
     ~CircularBuffer() = default;
 
     size_t write(ReadonlyBytes bytes);
+
+    void write(u8 byte)
+    {
+        auto next_span = next_write_span();
+        if (next_span.size() == 0)
+            return;
+
+        *next_span.data() = byte;
+
+        m_used_space += 1;
+
+        m_seekback_limit += 1;
+        if (m_seekback_limit > capacity())
+            m_seekback_limit = capacity();
+    }
+
     Bytes read(Bytes bytes);
     ErrorOr<void> discard(size_t discarded_bytes);
     ErrorOr<size_t> fill_from_stream(Stream&);
