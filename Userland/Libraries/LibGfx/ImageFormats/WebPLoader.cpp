@@ -491,7 +491,8 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
 
     // color-cache-info      =  %b0
     // color-cache-info      =/ (%b1 4BIT) ; 1 followed by color cache size
-    bool has_color_cache_info = TRY(bit_stream.read_bits(1));
+    bool has_color_cache_info = TRY(bit_stream.read_bits(1)); // XXX Optional
+    int color_cache_size = 0;
     dbgln_if(WEBP_DEBUG, "has_color_cache_info {}", has_color_cache_info);
     if (has_color_cache_info) {
         int color_cache_code_bits = TRY(bit_stream.read_bits(4));
@@ -500,7 +501,7 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
         if (color_cache_code_bits < 1 || color_cache_code_bits > 11)
             return context.error("WebPImageDecoderPlugin: VP8L invalid color_cache_code_bits");
 
-        int color_cache_size = 1 << color_cache_code_bits;
+        color_cache_size = 1 << color_cache_code_bits;
         dbgln_if(WEBP_DEBUG, "color_cache_size {}", color_cache_size);
     }
 
@@ -564,6 +565,67 @@ for (int k = 0; k < 5; ++k) {
             max_symbol = 2 + TRY(bit_stream.read_bits(length_nbits));
             dbgln_if(WEBP_DEBUG, "  extended, length_nbits {} max_symbol {}", length_nbits, max_symbol);
         }
+
+        auto code_length_code_result = CanonicalCode::from_bytes({ code_length_code_lengths, sizeof(code_length_code_lengths) });
+        if (!code_length_code_result.has_value())
+            return Error::from_string_literal("Failed to decode code length code");
+        auto const code_length_code = code_length_code_result.value();
+
+        // Next we extract the code lengths of the code that was used to encode the block.
+
+        // "Once code lengths are read, a prefix code for each symbol type (A, R, G, B, distance) is formed using their respective alphabet sizes:
+        //  * G channel: 256 + 24 + color_cache_size
+        //  * other literals (A,R,B): 256
+        //  * distance code: 40"
+        size_t alphabet_size = 256;
+        if (k == 0)
+            alphabet_size += 24 + color_cache_size;
+        else if (k == 3)
+            alphabet_size = 40;
+
+        u8 last_non_zero = 8; // "If code 16 is used before a non-zero value has been emitted, a value of 8 is repeated."
+        Vector<u8, 286> code_lengths;
+
+        // FIXME: what's max_symbol good for? (seems to work with alphabet_size)
+        //while (code_lengths.size() < (size_t)max_symbol) {
+        while (code_lengths.size() < alphabet_size) {
+            auto symbol = TRY(code_length_code.read_symbol(bit_stream));
+
+            if (symbol < 16 /*deflate_special_code_length_copy*/) {
+                dbgln_if(WEBP_DEBUG, "  append {}", symbol);
+                code_lengths.append(static_cast<u8>(symbol));
+                if (symbol != 0)
+                    last_non_zero = symbol;
+                continue;
+            } else if (symbol == 17 /*deflate_special_code_length_zeros*/) {
+                auto nrepeat = 3 + TRY(bit_stream.read_bits(3));
+                dbgln_if(WEBP_DEBUG, "  repeat {} zeroes", nrepeat);
+                for (size_t j = 0; j < nrepeat; ++j)
+                    code_lengths.append(0);
+                continue;
+            } else if (symbol == 18 /*deflate_special_code_length_long_zeros*/) {
+                auto nrepeat = 11 + TRY(bit_stream.read_bits(7));
+                dbgln_if(WEBP_DEBUG, "  Repeat {} zeroes", nrepeat);
+                for (size_t j = 0; j < nrepeat; ++j)
+                    code_lengths.append(0);
+                continue;
+            } else {
+                VERIFY(symbol == 16 /*deflate_special_code_length_copy*/);
+
+                auto nrepeat = 3 + TRY(bit_stream.read_bits(2));
+                dbgln_if(WEBP_DEBUG, "  repeat {} {}s", nrepeat, last_non_zero);
+
+                // XXX this is slightly different from deflate
+                for (size_t j = 0; j < nrepeat; ++j)
+                    code_lengths.append(last_non_zero);
+            }
+        }
+
+        //if (code_lengths.size() != (size_t)max_symbol)
+        if (code_lengths.size() != alphabet_size)
+            return Error::from_string_literal("Number of code lengths does not match the sum of codes");
+
+        (void)alphabet_size;
 
         int i = 0;
         while (i < max_symbol) {
