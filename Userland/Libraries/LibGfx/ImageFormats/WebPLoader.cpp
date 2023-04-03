@@ -620,6 +620,33 @@ static ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8L_image(WebPLoadingCo
     return bitmap;
 }
 
+namespace {
+class Transform {
+public:
+    virtual ~Transform();
+    virtual void transform(Bitmap&) = 0;
+};
+
+Transform::~Transform() = default;
+
+// https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#43_subtract_green_transform
+class SubtractGreenTransform : public Transform {
+public:
+    virtual void transform(Bitmap&) override;
+};
+
+void SubtractGreenTransform::transform(Bitmap& bitmap)
+{
+    for (ARGB32& pixel : bitmap) {
+        Color color = Color::from_argb(pixel);
+        u8 red = (color.red() + color.green()) & 0xff;
+        u8 blue = (color.blue() + color.green()) & 0xff;
+        pixel = Color(red, color.green(), blue, color.alpha()).value();
+    }
+}
+
+}
+
 // https://developers.google.com/speed/webp/docs/riff_container#simple_file_format_lossless
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#7_overall_structure_of_the_format
 static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk const& vp8l_chunk)
@@ -648,6 +675,7 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#72_structure_of_transforms
 
     // optional-transform   =  (%b1 transform optional-transform) / %b0
+    Vector<NonnullOwnPtr<Transform>> transforms;
     while (TRY(bit_stream.read_bits(1))) {
         // transform            =  predictor-tx / color-tx / subtract-green-tx
         // transform            =/ color-indexing-tx
@@ -675,7 +703,8 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
         case COLOR_TRANSFORM:
             return context.error("WebPImageDecoderPlugin: VP8L COLOR_TRANSFORM handling not yet implemented");
         case SUBTRACT_GREEN_TRANSFORM:
-            return context.error("WebPImageDecoderPlugin: VP8L SUBTRACT_GREEN_TRANSFORM handling not yet implemented");
+            TRY(transforms.try_append(TRY(try_make<SubtractGreenTransform>())));
+            break;
         case COLOR_INDEXING_TRANSFORM:
             return context.error("WebPImageDecoderPlugin: VP8L COLOR_INDEXING_TRANSFORM handling not yet implemented");
         }
