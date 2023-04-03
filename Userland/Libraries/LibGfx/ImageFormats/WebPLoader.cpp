@@ -756,8 +756,11 @@ for (int k = 0; k < 5; ++k) {
 
             // XXX bounds check
             ARGB32* src = dest - distance;
-            for (u32 i = 0; i < length; ++i)
-                dest[i] = src[i];
+            for (u32 i = 0; i < length; ++i) {
+                ARGB32 color = src[i];
+                dest[i] = color;
+                color_cache[(0x1e35a7bd * color) >> (32 - color_cache_code_bits)] = color;
+            }
             dest += length;
         }
         // "3. if S >= 256 + 24"
