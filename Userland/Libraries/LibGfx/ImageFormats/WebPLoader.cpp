@@ -306,7 +306,7 @@ public:
     ErrorOr<u32> read_symbol(LittleEndianInputBitStream&) const;
     ErrorOr<void> write_symbol(LittleEndianOutputBitStream&, u32) const;
 
-    static Optional<CanonicalCode> from_bytes(ReadonlyBytes);
+    static ErrorOr<CanonicalCode> from_bytes(ReadonlyBytes);
 
 private:
     static constexpr size_t max_allowed_prefixed_code_length = 8;
@@ -360,7 +360,7 @@ ALWAYS_INLINE static u16 fast_reverse16(u16 value, size_t bits)
 //static constexpr u8 deflate_special_code_length_zeros = 17;
 //static constexpr u8 deflate_special_code_length_long_zeros = 18;
 
-Optional<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
+ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
 {
     // FIXME: I can't quite follow the algorithm here, but it seems to work.
 
@@ -400,7 +400,7 @@ Optional<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
                 continue;
 
             if (next_code > start_bit)
-                return {};
+                return Error::from_string_literal("Failed to decode code lengths");
 
             if (code_length <= CanonicalCode::max_allowed_prefixed_code_length) {
                 auto& prefix_code = prefix_codes[number_of_prefix_codes++];
@@ -418,9 +418,8 @@ Optional<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
         }
     }
 
-    if (next_code != (1 << 15)) {
-        return {};
-    }
+    if (next_code != (1 << 15))
+        return Error::from_string_literal("Failed to decode code lengths");
 
     for (auto [symbol_code, symbol_value, code_length] : prefix_codes) {
         if (code_length == 0 || code_length > CanonicalCode::max_allowed_prefixed_code_length)
@@ -462,6 +461,14 @@ ErrorOr<u32> CanonicalCode::read_symbol(LittleEndianInputBitStream& stream) cons
     return Error::from_string_literal("Symbol exceeds maximum symbol number");
 }
 
+// https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#61_overview
+// "From here on, we refer to this set as a prefix code group."
+struct PrefixCodeGroup {
+    Array<CanonicalCode, 5> m_codes;
+
+    CanonicalCode& operator[](int i) { return m_codes[i]; }
+    const CanonicalCode& operator[](int i) const { return m_codes[i]; }
+};
 
 // https://developers.google.com/speed/webp/docs/riff_container#simple_file_format_lossless
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#7_overall_structure_of_the_format
@@ -529,20 +536,45 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     // prefix-code           =  simple-prefix-code / normal-prefix-code
     // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#621_decoding_and_building_the_prefix_codes
     // g r b a d
+    PrefixCodeGroup group;
 for (int k = 0; k < 5; ++k) {
     bool is_simple_code_length_code = TRY(bit_stream.read_bits(1));
     dbgln_if(WEBP_DEBUG, "is_simple_code_length_code {}", is_simple_code_length_code);
 
+    // "Once code lengths are read, a prefix code for each symbol type (A, R, G, B, distance) is formed using their respective alphabet sizes:
+    //  * G channel: 256 + 24 + color_cache_size
+    //  * other literals (A,R,B): 256
+    //  * distance code: 40"
+    size_t alphabet_size = 256;
+    if (k == 0)
+        alphabet_size += 24 + color_cache_size;
+    else if (k == 4)
+        alphabet_size = 40;
+
+
     // Some of this has plenty in common with deflate (cf DeflateDecompressor::decode_codes() in Deflate.cpp in LibCompress)
     if (is_simple_code_length_code) {
+        Vector<u8, 286> code_lengths;
+        TRY(code_lengths.try_resize(alphabet_size));
+
         int num_symbols = TRY(bit_stream.read_bits(1)) + 1;
         int is_first_8bits = TRY(bit_stream.read_bits(1));
-        int symbol0 = TRY(bit_stream.read_bits(1 + 7 * is_first_8bits));
+        u8 symbol0 = TRY(bit_stream.read_bits(1 + 7 * is_first_8bits));
         dbgln_if(WEBP_DEBUG, "  symbol0 {}", symbol0);
+
+        if (symbol0 >= code_lengths.size())
+            return Error::from_string_literal("symbol0 out of bounds");
+        code_lengths[symbol0] = 1;
         if (num_symbols == 2) {
-            int symbol1 = TRY(bit_stream.read_bits(8));
+            u8 symbol1 = TRY(bit_stream.read_bits(8));
             dbgln_if(WEBP_DEBUG, "  symbol1 {}", symbol1);
+
+            if (symbol1 >= code_lengths.size())
+                return Error::from_string_literal("symbol1 out of bounds");
+            code_lengths[symbol1] = 1;
         }
+
+        group[k] = TRY(CanonicalCode::from_bytes(code_lengths));
     } else {
         int num_code_lengths = 4 + TRY(bit_stream.read_bits(4));
         dbgln_if(WEBP_DEBUG, "  num_code_lengths {}", num_code_lengths);
@@ -566,22 +598,9 @@ for (int k = 0; k < 5; ++k) {
             dbgln_if(WEBP_DEBUG, "  extended, length_nbits {} max_symbol {}", length_nbits, max_symbol);
         }
 
-        auto code_length_code_result = CanonicalCode::from_bytes({ code_length_code_lengths, sizeof(code_length_code_lengths) });
-        if (!code_length_code_result.has_value())
-            return Error::from_string_literal("Failed to decode code length code");
-        auto const code_length_code = code_length_code_result.value();
+        auto const code_length_code = TRY(CanonicalCode::from_bytes({ code_length_code_lengths, sizeof(code_length_code_lengths) }));
 
         // Next we extract the code lengths of the code that was used to encode the block.
-
-        // "Once code lengths are read, a prefix code for each symbol type (A, R, G, B, distance) is formed using their respective alphabet sizes:
-        //  * G channel: 256 + 24 + color_cache_size
-        //  * other literals (A,R,B): 256
-        //  * distance code: 40"
-        size_t alphabet_size = 256;
-        if (k == 0)
-            alphabet_size += 24 + color_cache_size;
-        else if (k == 3)
-            alphabet_size = 40;
 
         u8 last_non_zero = 8; // "If code 16 is used before a non-zero value has been emitted, a value of 8 is repeated."
         Vector<u8, 286> code_lengths;
@@ -625,14 +644,7 @@ for (int k = 0; k < 5; ++k) {
         if (code_lengths.size() != alphabet_size)
             return Error::from_string_literal("Number of code lengths does not match the sum of codes");
 
-        (void)alphabet_size;
-
-        int i = 0;
-        while (i < max_symbol) {
-            // FIXME: huff pretree dec
-        }
-
-        return context.error("WebPImageDecoderPlugin: extended normal_prefix not yet implemented");
+        group[k] = TRY(CanonicalCode::from_bytes(code_lengths));
     }
 }
 
