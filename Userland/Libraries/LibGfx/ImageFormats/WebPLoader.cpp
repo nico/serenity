@@ -499,7 +499,7 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     // color-cache-info      =  %b0
     // color-cache-info      =/ (%b1 4BIT) ; 1 followed by color cache size
     bool has_color_cache_info = TRY(bit_stream.read_bits(1)); // XXX Optional
-    int color_cache_size = 0;
+    u16 color_cache_size = 0;
     dbgln_if(WEBP_DEBUG, "has_color_cache_info {}", has_color_cache_info);
     if (has_color_cache_info) {
         int color_cache_code_bits = TRY(bit_stream.read_bits(4));
@@ -606,7 +606,7 @@ for (int k = 0; k < 5; ++k) {
         Vector<u8, 286> code_lengths;
 
         // FIXME: what's max_symbol good for? (seems to work with alphabet_size)
-        //while (code_lengths.size() < (size_t)max_symbol) {
+        //while (code_lengths.size() < (size_t)max_symbol)
         while (code_lengths.size() < alphabet_size) {
             auto symbol = TRY(code_length_code.read_symbol(bit_stream));
 
@@ -648,8 +648,113 @@ for (int k = 0; k < 5; ++k) {
     }
 }
 
-    // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#621_decoding_and_building_the_prefix_codes
-    return context.error("WebPImageDecoderPlugin: VP8L pixel decoding not yet implemented");
+    //context.bitmap = TRY(Bitmap::create(context.has_alpha() ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888, { context.width, context.height }));
+    context.bitmap = TRY(Bitmap::create(BitmapFormat::BGRA8888, context.size.value()));  // FIXME: alpha only when needed
+
+
+    //              JFDGK
+    //             LB758C
+    //             H9314AI
+    //             E62.
+
+    struct Offset {
+      i8 x, y;
+    };
+    Array<Offset, 120> distance_map {{
+        {0, 1}, {1, 0}, { 1, 1}, {-1, 1},
+        {0, 2}, {2, 0}, { 1, 2}, {-1, 2}, {2, 1}, {-2, 1}, {2, 2}, {-2, 2},
+        {0, 3}, {3, 0}, { 1, 3}, {-1, 3}, {3, 1}, {-3, 1}, {2, 3}, {-2, 3}, {3, 2}, {-3, 2},
+        {0, 4}, {4, 0}, { 1, 4}, {-1, 4}, {4, 1}, {-4, 1}, {3, 3}, {-3, 3}, {2, 4}, {-2, 4}, {4, 2}, {-4, 2},
+        {0, 5}, {3, 4}, {-3, 4}, { 4, 3}, {-4, 3}, {5, 0}, {1, 5}, {-1, 5}, {5, 1}, {-5, 1}, {2, 5}, {-2, 5}, {5, 2}, {-5, 2}, {4, 4}, {-4, 4}, {3, 5}, {-3, 5}, {5, 3}, {-5, 3},
+        {0, 6}, {6, 0}, { 1, 6}, {-1, 6}, {6, 1}, {-6, 1}, {2, 6}, {-2, 6}, {6, 2}, {-6, 2}, {4, 5}, {-4, 5}, {5, 4}, {-5, 4}, {3, 6}, {-3, 6}, {6, 3}, {-6, 3},
+        {0, 7}, {7, 0}, { 1, 7}, {-1, 7}, {5, 5}, {-5, 5}, {7, 1}, {-7, 1}, {4, 6}, {-4, 6}, {6, 4}, {-6, 4}, {2, 7}, {-2, 7}, {7, 2}, {-7, 2}, {3, 7}, {-3, 7}, {7, 3}, {-7, 3}, {5, 6}, {-5, 6}, {6, 5}, {-6, 5},
+        {8, 0}, {4, 7}, {-4, 7}, {7, 4}, {-7, 4}, {8, 1}, {8, 2}, {6, 6}, {-6, 6}, {8, 3}, {5, 7}, {-5, 7}, {7, 5}, {-7, 5}, {8, 4}, {6, 7}, {-6, 7}, {7, 6}, {-7, 6}, {8, 5}, {7, 7}, {-7, 7}, {8, 6}, {8, 7},
+    }};
+
+    // lz77-coded-image      =
+    //     *((argb-pixel / lz77-copy / color-cache-code) lz77-coded-image)
+    // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#623_decoding_entropy-coded_image_data
+    for (int y = 0; y < context.size->height(); ++y) {
+        for (int x = 0; x < context.size->width(); ++x) {
+            auto symbol = TRY(group[0].read_symbol(bit_stream));
+            dbgln_if(WEBP_DEBUG, "  pixel sym {}", symbol);
+            if (symbol >= 256 + 24 + color_cache_size)
+                return context.error("WebPImageDecoderPlugin: Symbol out of bounds");
+
+            // "1. if S < 256"
+            if (symbol < 256) {
+                // "a. Use S as the green component."
+                u8 g = symbol;
+
+                // "b. Read red from the bitstream using prefix code #2."
+                u8 r = TRY(group[1].read_symbol(bit_stream));
+
+                // "c. Read blue from the bitstream using prefix code #3."
+                u8 b = TRY(group[2].read_symbol(bit_stream));
+
+                // "d. Read alpha from the bitstream using prefix code #4."
+                u8 a = TRY(group[3].read_symbol(bit_stream));
+
+                context.bitmap->set_pixel(x, y, Color(r, g, b, a));
+            }
+            // "2. if S >= 256 && S < 256 + 24"
+            else if (symbol < 256 + 24) {
+                auto prefix_value = [&bit_stream](u8 prefix_code) -> ErrorOr<u32> {
+                    // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#522_lz77_backward_reference
+                    if (prefix_code < 4) {
+                        return prefix_code + 1;
+                    }
+                    int extra_bits = (prefix_code - 2) >> 1;
+                    int offset = (2 + (prefix_code & 1)) << extra_bits;
+                    return offset + TRY(bit_stream.read_bits(extra_bits)) + 1;
+                };
+
+                // "a. Use S - 256 as a length prefix code."
+                u8 length_prefix_code = symbol - 256;
+
+                // "b. Read extra bits for length from the bitstream."
+                // "c. Determine backward-reference length L from length prefix code and the extra bits read."
+                u32 length = TRY(prefix_value(length_prefix_code));
+
+                // "d. Read distance prefix code from the bitstream using prefix code #5."
+                u8 distance_prefix_code = TRY(group[4].read_symbol(bit_stream));
+
+                // "e. Read extra bits for distance from the bitstream."
+                // "f. Determine backward-reference distance D from distance prefix code and the extra bits read."
+                i32 distance = TRY(prefix_value(distance_prefix_code));
+
+                // "g. Copy the L pixels (in scan-line order) from the sequence of pixels prior to them by D pixels."
+
+                // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#522_lz77_backward_reference
+                // "Distance codes larger than 120 denote the pixel-distance in scan-line order, offset by 120."
+                // "The smallest distance codes [1..120] are special, and are reserved for a close neighborhood of the current pixel."
+                dbgln_if(WEBP_DEBUG, "  backref L {} D {}", length, distance);
+
+                if (distance <= 120) {
+                    auto offset = distance_map[distance - 1];
+                    distance = offset.x + offset.y * context.size->width();
+                    if (distance < 1)
+                        distance = 1;
+                } else {
+                    distance = distance - 120;
+                }
+                dbgln_if(WEBP_DEBUG, "    effective distance {}", distance);
+            }
+            // "3. if S >= 256 + 24"
+            else {
+                // "a. Use S - (256 + 24) as the index into the color cache."
+                int index = symbol - (256 + 24);
+                dbgln_if(WEBP_DEBUG, "  use color cache {}", index);
+
+                // "b. Get ARGB color from the color cache at that index."
+                // XXX
+            }
+        }
+    }
+
+
+    //return context.error("WebPImageDecoderPlugin: VP8L pixel decoding not yet implemented");
+    return {};
 }
 
 static ErrorOr<VP8XHeader> decode_webp_chunk_VP8X(WebPLoadingContext& context, Chunk const& vp8x_chunk)
