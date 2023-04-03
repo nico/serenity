@@ -14,6 +14,7 @@
 #include <AK/MemoryStream.h>
 #include <AK/Vector.h>
 #include <LibGfx/ImageFormats/WebPLoader.h>
+#include <LibCompress/Deflate.h>
 
 // Overview: https://developers.google.com/speed/webp/docs/compression
 // Container: https://developers.google.com/speed/webp/docs/riff_container
@@ -300,174 +301,13 @@ static ErrorOr<VP8LHeader> decode_webp_chunk_VP8L_header(WebPLoadingContext& con
     return VP8LHeader { width, height, is_alpha_used };
 }
 
-class CanonicalCode {
-public:
-    CanonicalCode() = default;
-    ErrorOr<u32> read_symbol(LittleEndianInputBitStream&) const;
-    ErrorOr<void> write_symbol(LittleEndianOutputBitStream&, u32) const;
-
-    static ErrorOr<CanonicalCode> from_bytes(ReadonlyBytes);
-
-private:
-    static constexpr size_t max_allowed_prefixed_code_length = 8;
-
-    struct PrefixTableEntry {
-        u16 symbol_value { 0 };
-        u16 code_length { 0 };
-    };
-
-    // Decompression - indexed by code
-    Vector<u16, 286> m_symbol_codes;
-    Vector<u16, 286> m_symbol_values;
-
-    Array<PrefixTableEntry, 1 << max_allowed_prefixed_code_length> m_prefix_table {};
-    size_t m_max_prefixed_code_length { 0 };
-};
-
-static consteval u8 reverse8(u8 value)
-{
-    u8 result = 0;
-    for (size_t i = 0; i < 8; i++) {
-        if (value & (1 << i))
-            result |= 1 << (7 - i);
-    }
-    return result;
-}
-static consteval Array<u8, UINT8_MAX + 1> generate_reverse8_lookup_table()
-{
-    Array<u8, UINT8_MAX + 1> array;
-    for (size_t i = 0; i <= UINT8_MAX; i++) {
-        array[i] = reverse8(i);
-    }
-    return array;
-}
-static constexpr auto reverse8_lookup_table = generate_reverse8_lookup_table();
-
-// Lookup-table based bit swap
-ALWAYS_INLINE static u16 fast_reverse16(u16 value, size_t bits)
-{
-    VERIFY(bits <= 16);
-
-    u16 lo = value & 0xff;
-    u16 hi = value >> 8;
-
-    u16 reversed = (u16)((reverse8_lookup_table[lo] << 8) | reverse8_lookup_table[hi]);
-
-    return reversed >> (16 - bits);
-}
-
-//static constexpr u8 deflate_special_code_length_copy = 16;
-//static constexpr u8 deflate_special_code_length_zeros = 17;
-//static constexpr u8 deflate_special_code_length_long_zeros = 18;
-
-ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
-{
-    // FIXME: I can't quite follow the algorithm here, but it seems to work.
-
-    CanonicalCode code;
-
-    auto non_zero_symbols = 0;
-    auto last_non_zero = -1;
-    for (size_t i = 0; i < bytes.size(); i++) {
-        if (bytes[i] != 0) {
-            non_zero_symbols++;
-            last_non_zero = i;
-        }
-    }
-
-    if (non_zero_symbols == 1) { // special case - only 1 symbol
-        code.m_prefix_table[0] = PrefixTableEntry { static_cast<u16>(last_non_zero), 1u };
-        code.m_prefix_table[1] = code.m_prefix_table[0];
-        code.m_max_prefixed_code_length = 1;
-        return code;
-    }
-
-    struct PrefixCode {
-        u16 symbol_code { 0 };
-        u16 symbol_value { 0 };
-        u16 code_length { 0 };
-    };
-    Array<PrefixCode, 1 << CanonicalCode::max_allowed_prefixed_code_length> prefix_codes;
-    size_t number_of_prefix_codes = 0;
-
-    auto next_code = 0;
-    for (size_t code_length = 1; code_length <= 15; ++code_length) {
-        next_code <<= 1;
-        auto start_bit = 1 << code_length;
-
-        for (size_t symbol = 0; symbol < bytes.size(); ++symbol) {
-            if (bytes[symbol] != code_length)
-                continue;
-
-            if (next_code > start_bit)
-                return Error::from_string_literal("Failed to decode code lengths");
-
-            if (code_length <= CanonicalCode::max_allowed_prefixed_code_length) {
-                auto& prefix_code = prefix_codes[number_of_prefix_codes++];
-                prefix_code.symbol_code = next_code;
-                prefix_code.symbol_value = symbol;
-                prefix_code.code_length = code_length;
-
-                code.m_max_prefixed_code_length = code_length;
-            } else {
-                code.m_symbol_codes.append(start_bit | next_code);
-                code.m_symbol_values.append(symbol);
-            }
-
-            next_code++;
-        }
-    }
-
-    if (next_code != (1 << 15))
-        return Error::from_string_literal("Failed to decode code lengths");
-
-    for (auto [symbol_code, symbol_value, code_length] : prefix_codes) {
-        if (code_length == 0 || code_length > CanonicalCode::max_allowed_prefixed_code_length)
-            break;
-
-        auto shift = code.m_max_prefixed_code_length - code_length;
-        symbol_code <<= shift;
-
-        for (size_t j = 0; j < (1u << shift); ++j) {
-            auto index = fast_reverse16(symbol_code + j, code.m_max_prefixed_code_length);
-            code.m_prefix_table[index] = PrefixTableEntry { symbol_value, code_length };
-        }
-    }
-
-    return code;
-}
-
-ErrorOr<u32> CanonicalCode::read_symbol(LittleEndianInputBitStream& stream) const
-{
-    auto prefix = TRY(stream.peek_bits<size_t>(m_max_prefixed_code_length));
-
-    if (auto [symbol_value, code_length] = m_prefix_table[prefix]; code_length != 0) {
-        stream.discard_previously_peeked_bits(code_length);
-        return symbol_value;
-    }
-
-    auto code_bits = TRY(stream.read_bits<u16>(m_max_prefixed_code_length));
-    code_bits = fast_reverse16(code_bits, m_max_prefixed_code_length);
-    code_bits |= 1 << m_max_prefixed_code_length;
-
-    for (size_t i = m_max_prefixed_code_length; i < 16; ++i) {
-        size_t index;
-        if (binary_search(m_symbol_codes.span(), code_bits, &index))
-            return m_symbol_values[index];
-
-        code_bits = code_bits << 1 | TRY(stream.read_bit());
-    }
-
-    return Error::from_string_literal("Symbol exceeds maximum symbol number");
-}
-
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#61_overview
 // "From here on, we refer to this set as a prefix code group."
 struct PrefixCodeGroup {
-    Array<CanonicalCode, 5> m_codes;
+    Array<Compress::CanonicalCode, 5> m_codes;
 
-    CanonicalCode& operator[](int i) { return m_codes[i]; }
-    const CanonicalCode& operator[](int i) const { return m_codes[i]; }
+    Compress::CanonicalCode& operator[](int i) { return m_codes[i]; }
+    const Compress::CanonicalCode& operator[](int i) const { return m_codes[i]; }
 };
 
 // https://developers.google.com/speed/webp/docs/riff_container#simple_file_format_lossless
@@ -578,7 +418,7 @@ for (int k = 0; k < 5; ++k) {
             code_lengths[symbol1] = 1;
         }
 
-        group[k] = TRY(CanonicalCode::from_bytes(code_lengths));
+        group[k] = TRY(Compress::CanonicalCode::from_bytes(code_lengths));
     } else {
         int num_code_lengths = 4 + TRY(bit_stream.read_bits(4));
         dbgln_if(WEBP_DEBUG, "  num_code_lengths {}", num_code_lengths);
@@ -602,7 +442,7 @@ for (int k = 0; k < 5; ++k) {
             dbgln_if(WEBP_DEBUG, "  extended, length_nbits {} max_symbol {}", length_nbits, max_symbol);
         }
 
-        auto const code_length_code = TRY(CanonicalCode::from_bytes({ code_length_code_lengths, sizeof(code_length_code_lengths) }));
+        auto const code_length_code = TRY(Compress::CanonicalCode::from_bytes({ code_length_code_lengths, sizeof(code_length_code_lengths) }));
 
         // Next we extract the code lengths of the code that was used to encode the block.
 
@@ -648,7 +488,7 @@ for (int k = 0; k < 5; ++k) {
         if (code_lengths.size() != alphabet_size)
             return Error::from_string_literal("Number of code lengths does not match the sum of codes");
 
-        group[k] = TRY(CanonicalCode::from_bytes(code_lengths));
+        group[k] = TRY(Compress::CanonicalCode::from_bytes(code_lengths));
     }
 }
 
