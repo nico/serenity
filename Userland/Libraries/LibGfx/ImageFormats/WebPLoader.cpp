@@ -500,9 +500,11 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     // color-cache-info      =/ (%b1 4BIT) ; 1 followed by color cache size
     bool has_color_cache_info = TRY(bit_stream.read_bits(1)); // XXX AK::Optional (?)
     u16 color_cache_size = 0;
+    u8 color_cache_code_bits;
     dbgln_if(WEBP_DEBUG, "has_color_cache_info {}", has_color_cache_info);
+    Vector<ARGB32, 32> color_cache;
     if (has_color_cache_info) {
-        int color_cache_code_bits = TRY(bit_stream.read_bits(4));
+        color_cache_code_bits = TRY(bit_stream.read_bits(4));
 
         // "The range of allowed values for color_cache_code_bits is [1..11]. Compliant decoders must indicate a corrupted bitstream for other values."
         if (color_cache_code_bits < 1 || color_cache_code_bits > 11)
@@ -510,6 +512,8 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
 
         color_cache_size = 1 << color_cache_code_bits;
         dbgln_if(WEBP_DEBUG, "color_cache_size {}", color_cache_size);
+
+        TRY(color_cache.try_resize(color_cache_size));
     }
 
     // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#622_decoding_of_meta_prefix_codes
@@ -683,100 +687,90 @@ for (int k = 0; k < 5; ++k) {
     ARGB32* dest = context.bitmap->scanline(0);
     ARGB32* end = context.bitmap->scanline(context.size->height() - 1) + context.size->width();
     while (dest < end) {
-    //for (int y = 0; y < context.size->height(); ++y) {
-        //for (int x = 0; x < context.size->width(); ++x) {
-            auto symbol = TRY(group[0].read_symbol(bit_stream));
-            dbgln_if(WEBP_DEBUG, "  pixel sym {}", symbol);
-            if (symbol >= 256 + 24 + color_cache_size)
-                return context.error("WebPImageDecoderPlugin: Symbol out of bounds");
+        auto symbol = TRY(group[0].read_symbol(bit_stream));
+        dbgln_if(WEBP_DEBUG, "  pixel sym {}", symbol);
+        if (symbol >= 256 + 24 + color_cache_size)
+            return context.error("WebPImageDecoderPlugin: Symbol out of bounds");
 
-            // "1. if S < 256"
-            if (symbol < 256) {
-                // "a. Use S as the green component."
-                u8 g = symbol;
+        // "1. if S < 256"
+        if (symbol < 256) {
+            // "a. Use S as the green component."
+            u8 g = symbol;
 
-                // "b. Read red from the bitstream using prefix code #2."
-                u8 r = TRY(group[1].read_symbol(bit_stream));
+            // "b. Read red from the bitstream using prefix code #2."
+            u8 r = TRY(group[1].read_symbol(bit_stream));
 
-                // "c. Read blue from the bitstream using prefix code #3."
-                u8 b = TRY(group[2].read_symbol(bit_stream));
+            // "c. Read blue from the bitstream using prefix code #3."
+            u8 b = TRY(group[2].read_symbol(bit_stream));
 
-                // "d. Read alpha from the bitstream using prefix code #4."
-                u8 a = TRY(group[3].read_symbol(bit_stream));
+            // "d. Read alpha from the bitstream using prefix code #4."
+            u8 a = TRY(group[3].read_symbol(bit_stream));
 
-                //context.bitmap->set_pixel(x, y, Color(r, g, b, a));
-                *dest++ = Color(r, g, b, a).value();
-            }
-            // "2. if S >= 256 && S < 256 + 24"
-            else if (symbol < 256 + 24) {
-                auto prefix_value = [&bit_stream](u8 prefix_code) -> ErrorOr<u32> {
-                    // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#522_lz77_backward_reference
-                    if (prefix_code < 4) {
-                        return prefix_code + 1;
-                    }
-                    int extra_bits = (prefix_code - 2) >> 1;
-                    int offset = (2 + (prefix_code & 1)) << extra_bits;
-                    return offset + TRY(bit_stream.read_bits(extra_bits)) + 1;
-                };
+            ARGB32 color = Color(r, g, b, a).value();
+            *dest++ = color;
 
-                // "a. Use S - 256 as a length prefix code."
-                u8 length_prefix_code = symbol - 256;
-
-                // "b. Read extra bits for length from the bitstream."
-                // "c. Determine backward-reference length L from length prefix code and the extra bits read."
-                u32 length = TRY(prefix_value(length_prefix_code));
-
-                // "d. Read distance prefix code from the bitstream using prefix code #5."
-                u8 distance_prefix_code = TRY(group[4].read_symbol(bit_stream));
-
-                // "e. Read extra bits for distance from the bitstream."
-                // "f. Determine backward-reference distance D from distance prefix code and the extra bits read."
-                i32 distance = TRY(prefix_value(distance_prefix_code));
-
-                // "g. Copy the L pixels (in scan-line order) from the sequence of pixels prior to them by D pixels."
-
+            color_cache[(0x1e35a7bd * color) >> (32 - color_cache_code_bits)] = color;
+        }
+        // "2. if S >= 256 && S < 256 + 24"
+        else if (symbol < 256 + 24) {
+            auto prefix_value = [&bit_stream](u8 prefix_code) -> ErrorOr<u32> {
                 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#522_lz77_backward_reference
-                // "Distance codes larger than 120 denote the pixel-distance in scan-line order, offset by 120."
-                // "The smallest distance codes [1..120] are special, and are reserved for a close neighborhood of the current pixel."
-                dbgln_if(WEBP_DEBUG, "  backref L {} D {}", length, distance);
-
-                if (distance <= 120) {
-                    auto offset = distance_map[distance - 1];
-                    distance = offset.x + offset.y * context.size->width();
-                    if (distance < 1)
-                        distance = 1;
-                } else {
-                    distance = distance - 120;
+                if (prefix_code < 4) {
+                    return prefix_code + 1;
                 }
-                dbgln_if(WEBP_DEBUG, "    effective distance {}", distance);
+                int extra_bits = (prefix_code - 2) >> 1;
+                int offset = (2 + (prefix_code & 1)) << extra_bits;
+                return offset + TRY(bit_stream.read_bits(extra_bits)) + 1;
+            };
 
-                // XXX bounds check
-                ARGB32* src = dest - distance;
-                for (u32 i = 0; i < length; ++i) {
-                    dest[i] = src[i];
-                }
+            // "a. Use S - 256 as a length prefix code."
+            u8 length_prefix_code = symbol - 256;
 
-                dest += length;
-#if 0
-                size_t new_pos = y * context.size->width() + x + distance;
-                u32 new_y = new_pos / context.size->width();
-                u32 new_x = new_pos % context.size->width();
+            // "b. Read extra bits for length from the bitstream."
+            // "c. Determine backward-reference length L from length prefix code and the extra bits read."
+            u32 length = TRY(prefix_value(length_prefix_code));
 
-                x = new_x;
-                y = new_y;
-#endif
+            // "d. Read distance prefix code from the bitstream using prefix code #5."
+            u8 distance_prefix_code = TRY(group[4].read_symbol(bit_stream));
+
+            // "e. Read extra bits for distance from the bitstream."
+            // "f. Determine backward-reference distance D from distance prefix code and the extra bits read."
+            i32 distance = TRY(prefix_value(distance_prefix_code));
+
+            // "g. Copy the L pixels (in scan-line order) from the sequence of pixels prior to them by D pixels."
+
+            // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#522_lz77_backward_reference
+            // "Distance codes larger than 120 denote the pixel-distance in scan-line order, offset by 120."
+            // "The smallest distance codes [1..120] are special, and are reserved for a close neighborhood of the current pixel."
+            dbgln_if(WEBP_DEBUG, "  backref L {} D {}", length, distance);
+
+            if (distance <= 120) {
+                auto offset = distance_map[distance - 1];
+                distance = offset.x + offset.y * context.size->width();
+                if (distance < 1)
+                    distance = 1;
+            } else {
+                distance = distance - 120;
             }
-            // "3. if S >= 256 + 24"
-            else {
-                // "a. Use S - (256 + 24) as the index into the color cache."
-                int index = symbol - (256 + 24);
-                dbgln_if(WEBP_DEBUG, "  use color cache {}", index);
+            dbgln_if(WEBP_DEBUG, "    effective distance {}", distance);
 
-                // "b. Get ARGB color from the color cache at that index."
-                // XXX
-                dest++;
-            }
-        //}
+            // XXX bounds check
+            ARGB32* src = dest - distance;
+            for (u32 i = 0; i < length; ++i)
+                dest[i] = src[i];
+            dest += length;
+        }
+        // "3. if S >= 256 + 24"
+        else {
+            // "a. Use S - (256 + 24) as the index into the color cache."
+            int index = symbol - (256 + 24);
+            dbgln_if(WEBP_DEBUG, "  use color cache {}", index);
+
+            // "b. Get ARGB color from the color cache at that index."
+            if (index >= color_cache_size)
+                return context.error("WebPImageDecoderPlugin: Color cache index out of bounds");
+            *dest++ = color_cache[index];
+        }
     }
 
 
