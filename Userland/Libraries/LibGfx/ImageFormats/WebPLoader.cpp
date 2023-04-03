@@ -498,7 +498,7 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
 
     // color-cache-info      =  %b0
     // color-cache-info      =/ (%b1 4BIT) ; 1 followed by color cache size
-    bool has_color_cache_info = TRY(bit_stream.read_bits(1)); // XXX Optional
+    bool has_color_cache_info = TRY(bit_stream.read_bits(1)); // XXX AK::Optional (?)
     u16 color_cache_size = 0;
     dbgln_if(WEBP_DEBUG, "has_color_cache_info {}", has_color_cache_info);
     if (has_color_cache_info) {
@@ -656,26 +656,35 @@ for (int k = 0; k < 5; ++k) {
     //             LB758C
     //             H9314AI
     //             E62.
-
     struct Offset {
       i8 x, y;
     };
     Array<Offset, 120> distance_map {{
-        {0, 1}, {1, 0}, { 1, 1}, {-1, 1},
-        {0, 2}, {2, 0}, { 1, 2}, {-1, 2}, {2, 1}, {-2, 1}, {2, 2}, {-2, 2},
-        {0, 3}, {3, 0}, { 1, 3}, {-1, 3}, {3, 1}, {-3, 1}, {2, 3}, {-2, 3}, {3, 2}, {-3, 2},
-        {0, 4}, {4, 0}, { 1, 4}, {-1, 4}, {4, 1}, {-4, 1}, {3, 3}, {-3, 3}, {2, 4}, {-2, 4}, {4, 2}, {-4, 2},
-        {0, 5}, {3, 4}, {-3, 4}, { 4, 3}, {-4, 3}, {5, 0}, {1, 5}, {-1, 5}, {5, 1}, {-5, 1}, {2, 5}, {-2, 5}, {5, 2}, {-5, 2}, {4, 4}, {-4, 4}, {3, 5}, {-3, 5}, {5, 3}, {-5, 3},
-        {0, 6}, {6, 0}, { 1, 6}, {-1, 6}, {6, 1}, {-6, 1}, {2, 6}, {-2, 6}, {6, 2}, {-6, 2}, {4, 5}, {-4, 5}, {5, 4}, {-5, 4}, {3, 6}, {-3, 6}, {6, 3}, {-6, 3},
-        {0, 7}, {7, 0}, { 1, 7}, {-1, 7}, {5, 5}, {-5, 5}, {7, 1}, {-7, 1}, {4, 6}, {-4, 6}, {6, 4}, {-6, 4}, {2, 7}, {-2, 7}, {7, 2}, {-7, 2}, {3, 7}, {-3, 7}, {7, 3}, {-7, 3}, {5, 6}, {-5, 6}, {6, 5}, {-6, 5},
-        {8, 0}, {4, 7}, {-4, 7}, {7, 4}, {-7, 4}, {8, 1}, {8, 2}, {6, 6}, {-6, 6}, {8, 3}, {5, 7}, {-5, 7}, {7, 5}, {-7, 5}, {8, 4}, {6, 7}, {-6, 7}, {7, 6}, {-7, 6}, {8, 5}, {7, 7}, {-7, 7}, {8, 6}, {8, 7},
+        {0, 1}, {1, 0},
+        {1, 1}, {-1, 1}, {0, 2}, { 2, 0},
+        {1, 2}, {-1, 2}, {2, 1}, {-2, 1},
+        {2, 2}, {-2, 2}, {0, 3}, { 3, 0}, { 1, 3}, {-1, 3}, { 3, 1}, {-3, 1},
+        {2, 3}, {-2, 3}, {3, 2}, {-3, 2}, { 0, 4}, { 4, 0}, { 1, 4}, {-1, 4}, { 4, 1}, {-4, 1},
+        {3, 3}, {-3, 3}, {2, 4}, {-2, 4}, { 4, 2}, {-4, 2}, { 0, 5},
+        {3, 4}, {-3, 4}, {4, 3}, {-4, 3}, { 5, 0}, { 1, 5}, {-1, 5}, { 5, 1}, {-5, 1}, { 2, 5}, {-2, 5}, { 5, 2}, {-5, 2},
+        {4, 4}, {-4, 4}, {3, 5}, {-3, 5}, { 5, 3}, {-5, 3}, { 0, 6}, { 6, 0}, { 1, 6}, {-1, 6}, { 6, 1}, {-6, 1}, { 2, 6}, {-2, 6}, {6, 2}, {-6, 2},
+        {4, 5}, {-4, 5}, {5, 4}, {-5, 4}, { 3, 6}, {-3, 6}, { 6, 3}, {-6, 3}, { 0, 7}, { 7, 0}, { 1, 7}, {-1, 7},
+        {5, 5}, {-5, 5}, {7, 1}, {-7, 1}, { 4, 6}, {-4, 6}, { 6, 4}, {-6, 4}, { 2, 7}, {-2, 7}, { 7, 2}, {-7, 2}, { 3, 7}, {-3, 7}, {7, 3}, {-7, 3},
+        {5, 6}, {-5, 6}, {6, 5}, {-6, 5}, { 8, 0}, { 4, 7}, {-4, 7}, { 7, 4}, {-7, 4}, { 8, 1}, { 8, 2},
+        {6, 6}, {-6, 6}, {8, 3}, { 5, 7}, {-5, 7}, { 7, 5}, {-7, 5}, { 8, 4},
+        {6, 7}, {-6, 7}, {7, 6}, {-7, 6}, { 8, 5},
+        {7, 7}, {-7, 7}, {8, 6},
+        {8, 7},
     }};
 
     // lz77-coded-image      =
     //     *((argb-pixel / lz77-copy / color-cache-code) lz77-coded-image)
     // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#623_decoding_entropy-coded_image_data
-    for (int y = 0; y < context.size->height(); ++y) {
-        for (int x = 0; x < context.size->width(); ++x) {
+    ARGB32* dest = context.bitmap->scanline(0);
+    ARGB32* end = context.bitmap->scanline(context.size->height() - 1) + context.size->width();
+    while (dest < end) {
+    //for (int y = 0; y < context.size->height(); ++y) {
+        //for (int x = 0; x < context.size->width(); ++x) {
             auto symbol = TRY(group[0].read_symbol(bit_stream));
             dbgln_if(WEBP_DEBUG, "  pixel sym {}", symbol);
             if (symbol >= 256 + 24 + color_cache_size)
@@ -695,7 +704,8 @@ for (int k = 0; k < 5; ++k) {
                 // "d. Read alpha from the bitstream using prefix code #4."
                 u8 a = TRY(group[3].read_symbol(bit_stream));
 
-                context.bitmap->set_pixel(x, y, Color(r, g, b, a));
+                //context.bitmap->set_pixel(x, y, Color(r, g, b, a));
+                *dest++ = Color(r, g, b, a).value();
             }
             // "2. if S >= 256 && S < 256 + 24"
             else if (symbol < 256 + 24) {
@@ -739,6 +749,22 @@ for (int k = 0; k < 5; ++k) {
                     distance = distance - 120;
                 }
                 dbgln_if(WEBP_DEBUG, "    effective distance {}", distance);
+
+                // XXX bounds check
+                ARGB32* src = dest - distance;
+                for (u32 i = 0; i < length; ++i) {
+                    dest[i] = src[i];
+                }
+
+                dest += length;
+#if 0
+                size_t new_pos = y * context.size->width() + x + distance;
+                u32 new_y = new_pos / context.size->width();
+                u32 new_x = new_pos % context.size->width();
+
+                x = new_x;
+                y = new_y;
+#endif
             }
             // "3. if S >= 256 + 24"
             else {
@@ -748,8 +774,9 @@ for (int k = 0; k < 5; ++k) {
 
                 // "b. Get ARGB color from the color cache at that index."
                 // XXX
+                dest++;
             }
-        }
+        //}
     }
 
 
