@@ -595,11 +595,15 @@ static ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8L_image(WebPLoadingCo
                 distance = distance - 120;
             }
 
-            if (pixel - bitmap->begin() < distance)
+            if (pixel - bitmap->begin() < distance) {
+                dbgln_if(WEBP_DEBUG, "invalid backref, {} < {}", pixel - bitmap->begin(), distance);
                 return context.error("WebPImageDecoderPlugin: Backward reference distance out of bounds");
+            }
 
-            if (bitmap->end() - pixel < length)
+            if (bitmap->end() - pixel < length) {
+                dbgln_if(WEBP_DEBUG, "invalid length, {} < {}", bitmap->end() - pixel, length);
                 return context.error("WebPImageDecoderPlugin: Backward reference length out of bounds");
+            }
 
             ARGB32* src = pixel - distance;
             for (u32 i = 0; i < length; ++i)
