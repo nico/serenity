@@ -669,6 +669,42 @@ void PredictorTransform::transform(Bitmap& bitmap)
     (void)bitmap;
 }
 
+// https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#42_color_transform
+class ColorTransform : public Transform {
+public:
+    static ErrorOr<NonnullOwnPtr<ColorTransform>> read(WebPLoadingContext&, LittleEndianInputBitStream&, IntSize const& image_size);
+    virtual void transform(Bitmap&) override;
+
+private:
+    ColorTransform(int block_size, NonnullRefPtr<Bitmap> color_bitmap)
+        : m_block_size(block_size)
+        , m_color_bitmap(color_bitmap)
+    {
+    }
+
+    int m_block_size;
+    NonnullRefPtr<Bitmap> m_color_bitmap;
+};
+
+ErrorOr<NonnullOwnPtr<ColorTransform>> ColorTransform::read(WebPLoadingContext& context, LittleEndianInputBitStream& bit_stream, IntSize const& image_size)
+{
+    // color-image          =  3BIT ; sub-pixel code
+    //                         entropy-coded-image
+    int size_bits = TRY(bit_stream.read_bits(3)) + 2;
+    int block_size = 1 << size_bits;
+    IntSize color_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
+
+    auto color_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRA8888, color_image_size, bit_stream));
+
+    return adopt_nonnull_own_or_enomem(new (nothrow) ColorTransform(block_size, move(color_bitmap)));
+}
+
+void ColorTransform::transform(Bitmap& bitmap)
+{
+    // FIXME
+    (void)bitmap;
+}
+
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#43_subtract_green_transform
 class SubtractGreenTransform : public Transform {
 public:
@@ -742,7 +778,8 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
             TRY(transforms.try_append(TRY(PredictorTransform::read(context, bit_stream, context.size.value()))));
             break;
         case COLOR_TRANSFORM:
-            return context.error("WebPImageDecoderPlugin: VP8L COLOR_TRANSFORM handling not yet implemented");
+            TRY(transforms.try_append(TRY(ColorTransform::read(context, bit_stream, context.size.value()))));
+            break;
         case SUBTRACT_GREEN_TRANSFORM:
             TRY(transforms.try_append(TRY(try_make<SubtractGreenTransform>())));
             break;
