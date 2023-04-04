@@ -629,6 +629,42 @@ public:
 
 Transform::~Transform() = default;
 
+// https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#41_predictor_transform
+class PredictorTransform : public Transform {
+public:
+    static ErrorOr<NonnullOwnPtr<PredictorTransform>> read(WebPLoadingContext&, LittleEndianInputBitStream&, IntSize const& image_size);
+    virtual void transform(Bitmap&) override;
+
+private:
+    PredictorTransform(int block_size, NonnullRefPtr<Bitmap> predictor_bitmap)
+        : m_block_size(block_size)
+        , m_predictor_bitmap(predictor_bitmap)
+    {
+    }
+
+    int m_block_size;
+    NonnullRefPtr<Bitmap> m_predictor_bitmap;
+};
+
+ErrorOr<NonnullOwnPtr<PredictorTransform>> PredictorTransform::read(WebPLoadingContext& context, LittleEndianInputBitStream& bit_stream, IntSize const& image_size)
+{
+    // predictor-image      =  3BIT ; sub-pixel code
+    //                         entropy-coded-image
+    int size_bits = TRY(bit_stream.read_bits(3)) + 2;
+    int block_size = 1 << size_bits;
+    IntSize predictor_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
+
+    auto predictor_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRA8888, predictor_image_size, bit_stream));
+
+    return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(block_size, move(predictor_bitmap)));
+}
+
+void PredictorTransform::transform(Bitmap& bitmap)
+{
+    // FIXME
+    (void)bitmap;
+}
+
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#43_subtract_green_transform
 class SubtractGreenTransform : public Transform {
 public:
@@ -699,7 +735,8 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
 
         switch (transform_type) {
         case PREDICTOR_TRANSFORM:
-            return context.error("WebPImageDecoderPlugin: VP8L PREDICTOR_TRANSFORM handling not yet implemented");
+            TRY(transforms.try_append(TRY(PredictorTransform::read(context, bit_stream, context.size.value()))));
+            break;
         case COLOR_TRANSFORM:
             return context.error("WebPImageDecoderPlugin: VP8L COLOR_TRANSFORM handling not yet implemented");
         case SUBTRACT_GREEN_TRANSFORM:
