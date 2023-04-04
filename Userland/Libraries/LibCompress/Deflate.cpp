@@ -65,9 +65,9 @@ ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
     }
 
     if (non_zero_symbols == 1) { // special case - only 1 symbol
-        code.m_prefix_table[0] = PrefixTableEntry { static_cast<u16>(last_non_zero), 1u };
-        code.m_prefix_table[1] = code.m_prefix_table[0];
-        code.m_max_prefixed_code_length = 1;
+        code.m_prefix_table[0] = PrefixTableEntry { static_cast<u16>(last_non_zero), 0u };
+        //code.m_prefix_table[0] = code.m_prefix_table[0];
+        code.m_max_prefixed_code_length = 0;
 
         code.m_bit_codes[last_non_zero] = 0;
         code.m_bit_code_lengths[last_non_zero] = 1;
@@ -135,6 +135,9 @@ ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
 
 ErrorOr<u32> CanonicalCode::read_symbol(LittleEndianInputBitStream& stream) const
 {
+    if (m_max_prefixed_code_length == 0)
+        return m_prefix_table[0].symbol_value;
+
     auto prefix = TRY(stream.peek_bits<size_t>(m_max_prefixed_code_length));
 
     if (auto [symbol_value, code_length] = m_prefix_table[prefix]; code_length != 0) {
