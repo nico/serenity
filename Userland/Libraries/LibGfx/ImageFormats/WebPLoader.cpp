@@ -681,13 +681,60 @@ public:
     virtual void transform(Bitmap&) override;
 
 private:
-    PredictorTransform(int block_size, NonnullRefPtr<Bitmap> predictor_bitmap)
-        : m_block_size(block_size)
+    PredictorTransform(int size_bits, NonnullRefPtr<Bitmap> predictor_bitmap)
+        : m_size_bits(size_bits)
         , m_predictor_bitmap(predictor_bitmap)
     {
     }
 
-    int m_block_size;
+    static u8 Average2(u8 a, u8 b)
+    {
+        return (a + b) / 2;
+    }
+
+    static u32 Select(u32 L, u32 T, u32 TL) {
+      // "L = left pixel, T = top pixel, TL = top left pixel."
+
+#if 0
+      // "ARGB component estimates for prediction."
+      int pAlpha = ALPHA(L) + ALPHA(T) - ALPHA(TL);
+      int pRed = RED(L) + RED(T) - RED(TL);
+      int pGreen = GREEN(L) + GREEN(T) - GREEN(TL);
+      int pBlue = BLUE(L) + BLUE(T) - BLUE(TL);
+
+      // "Manhattan distances to estimates for left and top pixels."
+      int pL = abs(pAlpha - ALPHA(L)) + abs(pRed - RED(L)) +
+               abs(pGreen - GREEN(L)) + abs(pBlue - BLUE(L));
+      int pT = abs(pAlpha - ALPHA(T)) + abs(pRed - RED(T)) +
+               abs(pGreen - GREEN(T)) + abs(pBlue - BLUE(T));
+
+      // "Return either left or top, the one closer to the prediction."
+      if (pL < pT) {     // "\[AMENDED\]"
+        return L;
+      } else {
+        return T;
+      }
+#endif
+      return L + T + TL;
+    }
+
+    // Clamp the input value between 0 and 255.
+    static int Clamp(int a)
+    {
+      return (a < 0) ? 0 : (a > 255) ?  255 : a;
+    }
+
+    static int ClampAddSubtractFull(int a, int b, int c)
+    {
+      return Clamp(a + b - c);
+    }
+
+    static int ClampAddSubtractHalf(int a, int b)
+    {
+      return Clamp(a + (a - b) / 2);
+    }
+
+    int m_size_bits;
     NonnullRefPtr<Bitmap> m_predictor_bitmap;
 };
 
@@ -701,13 +748,28 @@ ErrorOr<NonnullOwnPtr<PredictorTransform>> PredictorTransform::read(WebPLoadingC
 
     auto predictor_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRA8888, predictor_image_size, bit_stream));
 
-    return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(block_size, move(predictor_bitmap)));
+    return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(size_bits, move(predictor_bitmap)));
 }
 
 void PredictorTransform::transform(Bitmap& bitmap)
 {
-    // FIXME
-    (void)bitmap;
+    for (int y = 0; y < bitmap.height(); ++y) {
+        ARGB32* bitmap_scanline = bitmap.scanline(y);
+
+        int predictor_y = y >> m_size_bits;
+        ARGB32* predictor_scanline = m_predictor_bitmap->scanline(predictor_y);
+
+        for (int x = 0; x < bitmap.width(); ++x) {
+            int predictor_x = x >> m_size_bits;
+
+            // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#51_roles_of_image_data
+            // "The green component of a pixel defines which of the 14 predictors is used within a particular block of the ARGB image."
+            // FIXME
+            (void)predictor_x;
+            (void)predictor_scanline;
+            (void)bitmap_scanline;
+        }
+    }
 }
 
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#42_color_transform
