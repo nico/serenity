@@ -760,7 +760,6 @@ ErrorOr<NonnullOwnPtr<PredictorTransform>> PredictorTransform::read(WebPLoadingC
     IntSize predictor_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
 
     auto predictor_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRA8888, predictor_image_size, bit_stream));
-    MUST(save_bitmap(*predictor_bitmap, "webp-predictor.png"sv));
 
     return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(size_bits, move(predictor_bitmap)));
 }
@@ -848,7 +847,7 @@ ARGB32 PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, ARGB32 TR,
     case 10:
         return 0xff000000; // XXX
     case 11:
-        return 0xff000000; // XXX
+        return Select(L, T, TL);
     case 12:
         return 0xff000000; // XXX
     case 13:
