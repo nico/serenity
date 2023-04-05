@@ -671,7 +671,7 @@ namespace {
 class Transform {
 public:
     virtual ~Transform();
-    virtual void transform(Bitmap&) = 0;
+    virtual ErrorOr<void> transform(Bitmap&) = 0;
 };
 
 Transform::~Transform() = default;
@@ -680,7 +680,7 @@ Transform::~Transform() = default;
 class PredictorTransform : public Transform {
 public:
     static ErrorOr<NonnullOwnPtr<PredictorTransform>> read(WebPLoadingContext&, LittleEndianInputBitStream&, IntSize const& image_size);
-    virtual void transform(Bitmap&) override;
+    virtual ErrorOr<void> transform(Bitmap&) override;
 
 private:
     PredictorTransform(int size_bits, NonnullRefPtr<Bitmap> predictor_bitmap)
@@ -744,7 +744,7 @@ private:
       return Clamp(a + (a - b) / 2);
     }
 
-    static ARGB32 predict(u8 predictor, ARGB32 TL, ARGB32 T, ARGB32 TR, ARGB32 L);
+    static ErrorOr<ARGB32> predict(u8 predictor, ARGB32 TL, ARGB32 T, ARGB32 TR, ARGB32 L);
     static ARGB32 inverse_transform(ARGB32 pixel, ARGB32 prediction);
 
     int m_size_bits;
@@ -764,7 +764,7 @@ ErrorOr<NonnullOwnPtr<PredictorTransform>> PredictorTransform::read(WebPLoadingC
     return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(size_bits, move(predictor_bitmap)));
 }
 
-void PredictorTransform::transform(Bitmap& bitmap)
+ErrorOr<void> PredictorTransform::transform(Bitmap& bitmap)
 {
     // "There are special handling rules for some border pixels.
     //  If there is a prediction transform, regardless of the mode [0..13] for these pixels,
@@ -803,7 +803,7 @@ void PredictorTransform::transform(Bitmap& bitmap)
 
             // FIXME: reject predictor > 13
 
-            ARGB32 predicted = predict(predictor, TL, T, TR, L);
+            ARGB32 predicted = TRY(predict(predictor, TL, T, TR, L));
             bitmap_scanline[x] = inverse_transform(X, predicted);
 
             TL = T;
@@ -819,41 +819,122 @@ void PredictorTransform::transform(Bitmap& bitmap)
 
         bitmap_previous_scanline = bitmap_scanline;
     }
+    return {};
 }
 
-ARGB32 PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, ARGB32 TR, ARGB32 L)
+ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, ARGB32 TR, ARGB32 L)
 {
     switch (predictor) {
     case 0:
+        // "0xff000000 (represents solid black color in ARGB)"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 0");
         return 0xff000000;
     case 1:
+        // "L"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 1");
         return L;
     case 2:
+        // "T"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 2");
         return T;
     case 3:
+        // "TR"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 3");
         return TR;
     case 4:
+        // "TL"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 4");
         return TL;
-    case 5:
-        return 0xff000000; // XXX
-    case 6:
-        return 0xff000000; // XXX
-    case 7:
-        return 0xff000000; // XXX
-    case 8:
-        return 0xff000000; // XXX
-    case 9:
-        return 0xff000000; // XXX
-    case 10:
-        return 0xff000000; // XXX
+    case 5: {
+        // "Average2(Average2(L, TR), T) for each ARGB component"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 5");
+        Color color_L = Color::from_argb(L);
+        Color color_TR = Color::from_argb(TR);
+        Color color_T = Color::from_argb(T);
+        return Color(Average2(Average2(color_L.red(), color_TR.red()), color_T.red()),
+                     Average2(Average2(color_L.green(), color_TR.green()), color_T.green()),
+                     Average2(Average2(color_L.blue(), color_TR.blue()), color_T.blue()),
+                     Average2(Average2(color_L.alpha(), color_TR.alpha()), color_T.alpha())).value();
+    }
+    case 6: {
+        // "Average2(L, TL)"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 6");
+        Color color_L = Color::from_argb(L);
+        Color color_TL = Color::from_argb(TL);
+        return Color(Average2(color_L.red(), color_TL.red()),
+                     Average2(color_L.green(), color_TL.green()),
+                     Average2(color_L.blue(), color_TL.blue()),
+                     Average2(color_L.alpha(), color_TL.alpha())).value();
+    }
+    case 7: {
+        // "Average2(L, T) for each ARGB component"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 7");
+        Color color_L = Color::from_argb(L);
+        Color color_T = Color::from_argb(T);
+        return Color(Average2(color_L.red(), color_T.red()),
+                     Average2(color_L.green(), color_T.green()),
+                     Average2(color_L.blue(), color_T.blue()),
+                     Average2(color_L.alpha(), color_T.alpha())).value();
+    }
+    case 8: {
+        // "Average2(TL, T) for each ARGB component"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 8");
+        Color color_TL = Color::from_argb(TL);
+        Color color_T = Color::from_argb(T);
+        return Color(Average2(color_TL.red(), color_T.red()),
+                     Average2(color_TL.green(), color_T.green()),
+                     Average2(color_TL.blue(), color_T.blue()),
+                     Average2(color_TL.alpha(), color_T.alpha())).value();
+    }
+    case 9: {
+        // "Average2(T, TR) for each ARGB component"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 9");
+        Color color_T = Color::from_argb(T);
+        Color color_TR = Color::from_argb(TR);
+        return Color(Average2(color_T.red(), color_TR.red()),
+                     Average2(color_T.green(), color_TR.green()),
+                     Average2(color_T.blue(), color_TR.blue()),
+                     Average2(color_T.alpha(), color_TR.alpha())).value();
+    }
+    case 10: {
+        // "Average2(Average2(L, TL), Average2(T, TR)) for each ARGB component"
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 10");
+        Color color_L = Color::from_argb(L);
+        Color color_TL = Color::from_argb(TL);
+        Color color_T = Color::from_argb(T);
+        Color color_TR = Color::from_argb(TR);
+        return Color(Average2(Average2(color_L.red(), color_TL.red()), Average2(color_T.red(), color_TR.red())),
+                     Average2(Average2(color_L.green(), color_TL.green()), Average2(color_T.green(), color_TR.green())),
+                     Average2(Average2(color_L.blue(), color_TL.blue()), Average2(color_T.blue(), color_TR.blue())),
+                     Average2(Average2(color_L.alpha(), color_TL.alpha()), Average2(color_T.alpha(), color_TR.alpha()))).value();
+    }
     case 11:
         return Select(L, T, TL);
-    case 12:
-        return 0xff000000; // XXX
-    case 13:
-        return 0xff000000; // XXX
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 11");
+    case 12: {
+        // "ClampAddSubtractFull(L, T, TL) for each ARGB component" 
+        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 12");
+        Color color_L = Color::from_argb(L);
+        Color color_T = Color::from_argb(T);
+        Color color_TL = Color::from_argb(TL);
+        return Color(ClampAddSubtractFull(color_L.red(), color_T.red(), color_TL.red()),
+                     ClampAddSubtractFull(color_L.green(), color_T.green(), color_TL.green()),
+                     ClampAddSubtractFull(color_L.blue(), color_T.blue(), color_TL.blue()),
+                     ClampAddSubtractFull(color_L.alpha(), color_T.alpha(), color_TL.alpha())).value();
     }
-    return 0; // XXX
+    case 13: {
+        // "ClampAddSubtractHalf(Average2(L, T), TL) for each ARGB component"
+        Color color_L = Color::from_argb(L);
+        Color color_T = Color::from_argb(T);
+        Color color_TL = Color::from_argb(TL);
+        return Color(ClampAddSubtractHalf(Average2(color_L.red(), color_T.red()), color_TL.red()),
+                     ClampAddSubtractHalf(Average2(color_L.green(), color_T.green()), color_TL.green()),
+                     ClampAddSubtractHalf(Average2(color_L.blue(), color_T.blue()), color_TL.blue()),
+                     ClampAddSubtractHalf(Average2(color_L.alpha(), color_T.alpha()), color_TL.alpha())).value();
+        return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 13");
+    }
+    }
+    return Error::from_string_literal("WebPImageDecoderPlugin: invalid preditor");
 }
 
 ARGB32 PredictorTransform::inverse_transform(ARGB32 pixel, ARGB32 prediction)
@@ -866,7 +947,7 @@ ARGB32 PredictorTransform::inverse_transform(ARGB32 pixel, ARGB32 prediction)
 class ColorTransform : public Transform {
 public:
     static ErrorOr<NonnullOwnPtr<ColorTransform>> read(WebPLoadingContext&, LittleEndianInputBitStream&, IntSize const& image_size);
-    virtual void transform(Bitmap&) override;
+    virtual ErrorOr<void> transform(Bitmap&) override;
 
 private:
     ColorTransform(int size_bits, NonnullRefPtr<Bitmap> color_bitmap)
@@ -894,12 +975,12 @@ ErrorOr<NonnullOwnPtr<ColorTransform>> ColorTransform::read(WebPLoadingContext& 
     int block_size = 1 << size_bits;
     IntSize color_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
 
-    auto color_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRA8888, color_image_size, bit_stream));
+    auto color_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRx8888, color_image_size, bit_stream));
 
     return adopt_nonnull_own_or_enomem(new (nothrow) ColorTransform(size_bits, move(color_bitmap)));
 }
 
-void ColorTransform::transform(Bitmap& bitmap)
+ErrorOr<void> ColorTransform::transform(Bitmap& bitmap)
 {
     for (int y = 0; y < bitmap.height(); ++y) {
         ARGB32* bitmap_scanline = bitmap.scanline(y);
@@ -912,6 +993,7 @@ void ColorTransform::transform(Bitmap& bitmap)
             bitmap_scanline[x] = inverse_transform(bitmap_scanline[x], color_scanline[color_x]);
         }
     }
+    return {};
 }
 
 ARGB32 ColorTransform::inverse_transform(ARGB32 pixel, ARGB32 transform)
@@ -943,10 +1025,10 @@ ARGB32 ColorTransform::inverse_transform(ARGB32 pixel, ARGB32 transform)
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#43_subtract_green_transform
 class SubtractGreenTransform : public Transform {
 public:
-    virtual void transform(Bitmap&) override;
+    virtual ErrorOr<void> transform(Bitmap&) override;
 };
 
-void SubtractGreenTransform::transform(Bitmap& bitmap)
+ErrorOr<void> SubtractGreenTransform::transform(Bitmap& bitmap)
 {
     for (ARGB32& pixel : bitmap) {
         Color color = Color::from_argb(pixel);
@@ -954,6 +1036,7 @@ void SubtractGreenTransform::transform(Bitmap& bitmap)
         u8 blue = (color.blue() + color.green()) & 0xff;
         pixel = Color(red, color.green(), blue, color.alpha()).value();
     }
+    return {};
 }
 
 }
@@ -1031,7 +1114,7 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     // Transforms have to be applied in the reverse order they appear in in the file.
     for (int i = transforms.size() - 1; i >= 0; --i)
     for (auto const& transform : transforms.in_reverse())
-        transform->transform(*context.bitmap);
+        TRY(transform->transform(*context.bitmap));
 
     return {};
 }
