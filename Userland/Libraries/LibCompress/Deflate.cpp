@@ -93,7 +93,7 @@ ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
                 continue;
 
             if (next_code > start_bit)
-                return Error::from_string_literal("Failed to decode code lengths");
+                return Error::from_string_literal("Failed to decode code lengths 1");
 
             if (code_length <= CanonicalCode::max_allowed_prefixed_code_length) {
                 auto& prefix_code = prefix_codes[number_of_prefix_codes++];
@@ -107,15 +107,17 @@ ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
                 code.m_symbol_values.append(symbol);
             }
 
-            code.m_bit_codes[symbol] = fast_reverse16(start_bit | next_code, code_length); // DEFLATE writes huffman encoded symbols as lsb-first
-            code.m_bit_code_lengths[symbol] = code_length;
+            //code.m_bit_codes[symbol] = fast_reverse16(start_bit | next_code, code_length); // DEFLATE writes huffman encoded symbols as lsb-first
+            //code.m_bit_code_lengths[symbol] = code_length;
 
             next_code++;
         }
     }
 
-    if (next_code != (1 << 15))
-        return Error::from_string_literal("Failed to decode code lengths");
+    if (next_code != (1 << 15)) {
+        dbgln("next code {}", next_code);
+        return Error::from_string_literal("Failed to decode code lengths 2");
+    }
 
     for (auto [symbol_code, symbol_value, code_length] : prefix_codes) {
         if (code_length == 0 || code_length > CanonicalCode::max_allowed_prefixed_code_length)
