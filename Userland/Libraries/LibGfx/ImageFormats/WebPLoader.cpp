@@ -794,6 +794,8 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#72_structure_of_transforms
 
     // optional-transform   =  (%b1 transform optional-transform) / %b0
+    // "Each transform is allowed to be used only once."
+    // FIXME: Check that.
     Vector<NonnullOwnPtr<Transform>> transforms;
     while (TRY(bit_stream.read_bits(1))) {
         // transform            =  predictor-tx / color-tx / subtract-green-tx
