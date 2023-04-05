@@ -562,9 +562,7 @@ static ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8L_image(WebPLoadingCo
         int x = offset % size.width();
         int y = offset / size.width();
 
-        int position =
-            (y >> prefix_bits) * entropy_image->width() + (x >> prefix_bits);
-        int meta_prefix_code = (entropy_image->begin()[position] >> 8) & 0xffff;  // XXX bounds check
+        int meta_prefix_code = (entropy_image->scanline(y >> prefix_bits)[x >> prefix_bits] >> 8) & 0xffff;
         return groups[meta_prefix_code];
     };
 
