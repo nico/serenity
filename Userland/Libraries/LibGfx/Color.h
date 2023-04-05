@@ -168,10 +168,10 @@ public:
         return Color(r_u8, g_u8, b_u8, a_u8);
     }
 
+    constexpr u8 alpha() const { return (m_value >> 24) & 0xff; }
     constexpr u8 red() const { return (m_value >> 16) & 0xff; }
     constexpr u8 green() const { return (m_value >> 8) & 0xff; }
     constexpr u8 blue() const { return m_value & 0xff; }
-    constexpr u8 alpha() const { return (m_value >> 24) & 0xff; }
 
     constexpr void set_alpha(u8 value)
     {
