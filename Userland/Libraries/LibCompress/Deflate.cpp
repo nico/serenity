@@ -107,8 +107,10 @@ ErrorOr<CanonicalCode> CanonicalCode::from_bytes(ReadonlyBytes bytes)
                 code.m_symbol_values.append(symbol);
             }
 
-            //code.m_bit_codes[symbol] = fast_reverse16(start_bit | next_code, code_length); // DEFLATE writes huffman encoded symbols as lsb-first
-            //code.m_bit_code_lengths[symbol] = code_length;
+            if (symbol < 288) {
+                code.m_bit_codes[symbol] = fast_reverse16(start_bit | next_code, code_length); // DEFLATE writes huffman encoded symbols as lsb-first
+                code.m_bit_code_lengths[symbol] = code_length;
+            }
 
             next_code++;
         }
