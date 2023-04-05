@@ -717,13 +717,20 @@ public:
     virtual void transform(Bitmap&) override;
 
 private:
-    ColorTransform(int block_size, NonnullRefPtr<Bitmap> color_bitmap)
-        : m_block_size(block_size)
+    ColorTransform(int size_bits, NonnullRefPtr<Bitmap> color_bitmap)
+        : m_size_bits(size_bits)
         , m_color_bitmap(color_bitmap)
     {
     }
 
-    int m_block_size;
+    static i8 ColorTransformDelta(i8 transform, i8 color)
+    {
+        return (transform * color) >> 5;
+    }
+
+    static ARGB32 inverse_transform(ARGB32 pixel, ARGB32 transform);
+
+    int m_size_bits;
     NonnullRefPtr<Bitmap> m_color_bitmap;
 };
 
@@ -737,13 +744,48 @@ ErrorOr<NonnullOwnPtr<ColorTransform>> ColorTransform::read(WebPLoadingContext& 
 
     auto color_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRA8888, color_image_size, bit_stream));
 
-    return adopt_nonnull_own_or_enomem(new (nothrow) ColorTransform(block_size, move(color_bitmap)));
+    return adopt_nonnull_own_or_enomem(new (nothrow) ColorTransform(size_bits, move(color_bitmap)));
 }
 
 void ColorTransform::transform(Bitmap& bitmap)
 {
-    // FIXME
-    (void)bitmap;
+    for (int y = 0; y < bitmap.height(); ++y) {
+        ARGB32* bitmap_scanline = bitmap.scanline(y);
+
+        int color_y = y >> m_size_bits;
+        ARGB32* color_scanline = m_color_bitmap->scanline(color_y);
+
+        for (int x = 0; x < bitmap.width(); ++x) {
+            int color_x = x >> m_size_bits;
+            bitmap_scanline[x] = inverse_transform(bitmap_scanline[x], color_scanline[color_x]);
+        }
+    }
+}
+
+ARGB32 ColorTransform::inverse_transform(ARGB32 pixel, ARGB32 transform)
+{
+    // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#51_roles_of_image_data
+    // "Each ColorTransformElement 'cte' is treated as a pixel whose alpha component is 255,
+    // red component is cte.red_to_blue, green component is cte.green_to_blue
+    // and blue component is cte.green_to_red."
+    Color transform_color = Color::from_argb(transform);
+    i8 red_to_blue = static_cast<i8>(transform_color.red());
+    i8 green_to_blue = static_cast<i8>(transform_color.green());
+    i8 green_to_red = static_cast<i8>(transform_color.blue());
+
+    Color pixel_color = Color::from_argb(pixel);
+
+    // "Transformed values of red and blue components"
+    int tmp_red = pixel_color.red();
+    int green = pixel_color.green();
+    int tmp_blue = pixel_color.blue();
+
+    // "Applying the inverse transform is just adding the color transform deltas"
+    tmp_red += ColorTransformDelta(green_to_red, green);
+    tmp_blue += ColorTransformDelta(green_to_blue, green);
+    tmp_blue += ColorTransformDelta(red_to_blue, tmp_red & 0xff);
+
+    return Color(tmp_red & 0xff, green, tmp_blue & 0xff, pixel_color.alpha()).value();
 }
 
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#43_subtract_green_transform
