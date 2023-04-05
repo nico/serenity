@@ -697,7 +697,12 @@ private:
     static u32 Select(u32 L, u32 T, u32 TL) {
       // "L = left pixel, T = top pixel, TL = top left pixel."
 
-#if 0
+      // XXX maybe don't need the shift and could just mask?
+#define ALPHA(x) ((x >> 24) & 0xff)
+#define RED(x) ((x >> 16) & 0xff)
+#define GREEN(x) ((x >> 8) & 0xff)
+#define BLUE(x) (x & 0xff)
+
       // "ARGB component estimates for prediction."
       int pAlpha = ALPHA(L) + ALPHA(T) - ALPHA(TL);
       int pRed = RED(L) + RED(T) - RED(TL);
@@ -705,10 +710,10 @@ private:
       int pBlue = BLUE(L) + BLUE(T) - BLUE(TL);
 
       // "Manhattan distances to estimates for left and top pixels."
-      int pL = abs(pAlpha - ALPHA(L)) + abs(pRed - RED(L)) +
-               abs(pGreen - GREEN(L)) + abs(pBlue - BLUE(L));
-      int pT = abs(pAlpha - ALPHA(T)) + abs(pRed - RED(T)) +
-               abs(pGreen - GREEN(T)) + abs(pBlue - BLUE(T));
+      int pL = abs(pAlpha - (int)ALPHA(L)) + abs(pRed - (int)RED(L)) +
+               abs(pGreen - (int)GREEN(L)) + abs(pBlue - (int)BLUE(L));
+      int pT = abs(pAlpha - (int)ALPHA(T)) + abs(pRed - (int)RED(T)) +
+               abs(pGreen - (int)GREEN(T)) + abs(pBlue - (int)BLUE(T));
 
       // "Return either left or top, the one closer to the prediction."
       if (pL < pT) {     // "\[AMENDED\]"
@@ -716,8 +721,11 @@ private:
       } else {
         return T;
       }
-#endif
-      return L + T + TL;
+
+#undef BLUE
+#undef GREEN
+#undef RED
+#undef ALPHA
     }
 
     // Clamp the input value between 0 and 255.
@@ -736,6 +744,9 @@ private:
       return Clamp(a + (a - b) / 2);
     }
 
+    static ARGB32 predict(u8 predictor, ARGB32 TL, ARGB32 T, ARGB32 TR, ARGB32 L);
+    static ARGB32 inverse_transform(ARGB32 pixel, ARGB32 prediction);
+
     int m_size_bits;
     NonnullRefPtr<Bitmap> m_predictor_bitmap;
 };
@@ -749,29 +760,107 @@ ErrorOr<NonnullOwnPtr<PredictorTransform>> PredictorTransform::read(WebPLoadingC
     IntSize predictor_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
 
     auto predictor_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRA8888, predictor_image_size, bit_stream));
+    MUST(save_bitmap(*predictor_bitmap, "webp-predictor.png"sv));
 
     return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(size_bits, move(predictor_bitmap)));
 }
 
 void PredictorTransform::transform(Bitmap& bitmap)
 {
-    for (int y = 0; y < bitmap.height(); ++y) {
+    // "There are special handling rules for some border pixels.
+    //  If there is a prediction transform, regardless of the mode [0..13] for these pixels,
+    //  the predicted value for the left-topmost pixel of the image is 0xff000000,
+    bitmap.scanline(0)[0] = inverse_transform(bitmap.scanline(0)[0], 0xff000000);
+
+    //  L-pixel for all pixels on the top row,
+    for (int x = 1; x < bitmap.width(); ++x)
+        bitmap.scanline(0)[x] = inverse_transform(bitmap.scanline(0)[x], bitmap.scanline(0)[x - 1]);
+
+    //  and T-pixel for all pixels on the leftmost column."
+    for (int y = 1; y < bitmap.height(); ++y)
+        bitmap.scanline(y)[0] = inverse_transform(bitmap.scanline(y)[0], bitmap.scanline(y - 1)[0]);
+
+    ARGB32* bitmap_previous_scanline = bitmap.scanline(0);
+    for (int y = 1; y < bitmap.height(); ++y) {
         ARGB32* bitmap_scanline = bitmap.scanline(y);
+
+        ARGB32 TL = bitmap_previous_scanline[0];
+        ARGB32 T = bitmap_previous_scanline[1];
+        ARGB32 TR = bitmap.width() > 2 ? bitmap_previous_scanline[2] : bitmap_previous_scanline[0];
+
+        ARGB32 L = bitmap_scanline[0];
 
         int predictor_y = y >> m_size_bits;
         ARGB32* predictor_scanline = m_predictor_bitmap->scanline(predictor_y);
 
-        for (int x = 0; x < bitmap.width(); ++x) {
+        for (int x = 1; x < bitmap.width(); ++x) {
             int predictor_x = x >> m_size_bits;
+
+            ARGB32 X = bitmap_scanline[x];
 
             // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#51_roles_of_image_data
             // "The green component of a pixel defines which of the 14 predictors is used within a particular block of the ARGB image."
-            // FIXME
-            (void)predictor_x;
-            (void)predictor_scanline;
-            (void)bitmap_scanline;
+            u8 predictor = Color::from_argb(predictor_scanline[predictor_x]).green();
+
+            // FIXME: reject predictor > 13
+
+            ARGB32 predicted = predict(predictor, TL, T, TR, L);
+            bitmap_scanline[x] = inverse_transform(X, predicted);
+
+            TL = T;
+            T = TR;
+
+            // "Addressing the TR-pixel for pixels on the rightmost column is exceptional.
+            //  The pixels on the rightmost column are predicted by using the modes [0..13] just like pixels not on the border,
+            //  but the leftmost pixel on the same row as the current pixel is instead used as the TR-pixel."
+            TR = x + 1 < bitmap.width() ? bitmap_previous_scanline[x + 1] : bitmap_previous_scanline[0];
+
+            L = X;
         }
+
+        bitmap_previous_scanline = bitmap_scanline;
     }
+}
+
+ARGB32 PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, ARGB32 TR, ARGB32 L)
+{
+    switch (predictor) {
+    case 0:
+        return 0xff000000;
+    case 1:
+        return L;
+    case 2:
+        return T;
+    case 3:
+        return TR;
+    case 4:
+        return TL;
+    case 5:
+        return 0xff000000; // XXX
+    case 6:
+        return 0xff000000; // XXX
+    case 7:
+        return 0xff000000; // XXX
+    case 8:
+        return 0xff000000; // XXX
+    case 9:
+        return 0xff000000; // XXX
+    case 10:
+        return 0xff000000; // XXX
+    case 11:
+        return 0xff000000; // XXX
+    case 12:
+        return 0xff000000; // XXX
+    case 13:
+        return 0xff000000; // XXX
+    }
+    return 0; // XXX
+}
+
+ARGB32 PredictorTransform::inverse_transform(ARGB32 pixel, ARGB32 prediction)
+{
+    // XXX per-channel
+    return pixel + prediction;
 }
 
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#42_color_transform
