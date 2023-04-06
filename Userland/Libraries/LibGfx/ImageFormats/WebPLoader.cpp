@@ -823,27 +823,21 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     switch (predictor) {
     case 0:
         // "0xff000000 (represents solid black color in ARGB)"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 0");
         return 0xff'00'00'00;
     case 1:
         // "L"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 1");
         return L;
     case 2:
         // "T"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 2");
         return T;
     case 3:
         // "TR"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 3");
         return TR;
     case 4:
         // "TL"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 4");
         return TL;
     case 5: {
         // "Average2(Average2(L, TR), T) for each ARGB component"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 5");
         Color color_L = Color::from_argb(L);
         Color color_TR = Color::from_argb(TR);
         Color color_T = Color::from_argb(T);
@@ -854,7 +848,6 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     }
     case 6: {
         // "Average2(L, TL)"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 6");
         Color color_L = Color::from_argb(L);
         Color color_TL = Color::from_argb(TL);
         return Color(Average2(color_L.red(), color_TL.red()),
@@ -864,7 +857,6 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     }
     case 7: {
         // "Average2(L, T) for each ARGB component"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 7");
         Color color_L = Color::from_argb(L);
         Color color_T = Color::from_argb(T);
         return Color(Average2(color_L.red(), color_T.red()),
@@ -874,7 +866,6 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     }
     case 8: {
         // "Average2(TL, T) for each ARGB component"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 8");
         Color color_TL = Color::from_argb(TL);
         Color color_T = Color::from_argb(T);
         return Color(Average2(color_TL.red(), color_T.red()),
@@ -884,7 +875,6 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     }
     case 9: {
         // "Average2(T, TR) for each ARGB component"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 9");
         Color color_T = Color::from_argb(T);
         Color color_TR = Color::from_argb(TR);
         return Color(Average2(color_T.red(), color_TR.red()),
@@ -894,7 +884,6 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     }
     case 10: {
         // "Average2(Average2(L, TL), Average2(T, TR)) for each ARGB component"
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 10");
         Color color_L = Color::from_argb(L);
         Color color_TL = Color::from_argb(TL);
         Color color_T = Color::from_argb(T);
@@ -907,10 +896,8 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     case 11:
         // "Select(L, T, TL)"
         return Select(L, T, TL);
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 11");
     case 12: {
         // "ClampAddSubtractFull(L, T, TL) for each ARGB component" 
-        //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 12");
         Color color_L = Color::from_argb(L);
         Color color_T = Color::from_argb(T);
         Color color_TL = Color::from_argb(TL);
@@ -928,7 +915,6 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
                      ClampAddSubtractHalf(Average2(color_L.green(), color_T.green()), color_TL.green()),
                      ClampAddSubtractHalf(Average2(color_L.blue(), color_T.blue()), color_TL.blue()),
                      ClampAddSubtractHalf(Average2(color_L.alpha(), color_T.alpha()), color_TL.alpha())).value();
-        return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 13");
     }
     }
     return Error::from_string_literal("WebPImageDecoderPlugin: invalid preditor");
