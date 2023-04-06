@@ -56,6 +56,22 @@ ErrorOr<void> save_bitmap(const Bitmap& bitmap, StringView path)
     return {};
 }
 
+ErrorOr<void> save_scaled_bitmap(const Bitmap& bitmap, StringView path, int scale)
+{
+    auto clone = TRY(bitmap.clone());
+    for (ARGB32& pixel : *clone) {
+        Color c = Color::from_argb(pixel);
+        c.set_alpha(255);
+        c.set_red(c.red() * scale);
+        c.set_green(c.green() * scale);
+        c.set_blue(c.blue() * scale);
+        pixel = c.value();
+    }
+    TRY(save_one_bitmap(clone, path));
+
+    return {};
+}
+
 struct FourCC {
     constexpr FourCC(char const* name)
     {
@@ -542,6 +558,18 @@ static ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8L_image(WebPLoadingCo
             }
             dbgln_if(WEBP_DEBUG, "largest meta prefix code {}", largest_meta_prefix_code);
 
+            {
+                auto bitmap = TRY(Bitmap::create(BitmapFormat::BGRx8888, prefix_size));
+                ARGB32* s = entropy_image->begin();
+                ARGB32* d = bitmap->begin();
+                for (int i = 0; i < prefix_size.width() * prefix_size.height(); ++i) {
+                    u16 meta_prefix_code = (s[i] >> 8) & 0xffff;
+                    u8 v = (255 * meta_prefix_code) / largest_meta_prefix_code;
+                    d[i] = 0xff'00'00'00u | (v << 16) | (v << 8) | v;
+                }
+                MUST(save_one_bitmap(*bitmap, "webp-entropy-scaled.png"sv));
+            }
+
             num_prefix_groups = largest_meta_prefix_code + 1;
         }
     }
@@ -795,7 +823,7 @@ ErrorOr<NonnullOwnPtr<PredictorTransform>> PredictorTransform::read(WebPLoadingC
     IntSize predictor_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
 
     auto predictor_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRx8888, predictor_image_size, bit_stream));
-    MUST(save_bitmap(*predictor_bitmap, "webp-predictor.png"sv));
+    MUST(save_scaled_bitmap(*predictor_bitmap, "webp-predictor.png"sv, 255 / 13));
 
     return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(size_bits, move(predictor_bitmap)));
 }
