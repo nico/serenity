@@ -905,6 +905,7 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
                      Average2(Average2(color_L.alpha(), color_TL.alpha()), Average2(color_T.alpha(), color_TR.alpha()))).value();
     }
     case 11:
+        // "Select(L, T, TL)"
         return Select(L, T, TL);
         //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 11");
     case 12: {
