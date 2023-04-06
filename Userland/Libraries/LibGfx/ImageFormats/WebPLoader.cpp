@@ -795,16 +795,12 @@ ErrorOr<void> PredictorTransform::transform(Bitmap& bitmap)
         for (int x = 1; x < bitmap.width(); ++x) {
             int predictor_x = x >> m_size_bits;
 
-            ARGB32 X = bitmap_scanline[x];
-
             // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#51_roles_of_image_data
             // "The green component of a pixel defines which of the 14 predictors is used within a particular block of the ARGB image."
             u8 predictor = Color::from_argb(predictor_scanline[predictor_x]).green();
 
-            // FIXME: reject predictor > 13
-
             ARGB32 predicted = TRY(predict(predictor, TL, T, TR, L));
-            bitmap_scanline[x] = inverse_transform(X, predicted);
+            bitmap_scanline[x] = inverse_transform(bitmap_scanline[x], predicted);
 
             TL = T;
             T = TR;
@@ -814,7 +810,7 @@ ErrorOr<void> PredictorTransform::transform(Bitmap& bitmap)
             //  but the leftmost pixel on the same row as the current pixel is instead used as the TR-pixel."
             TR = x + 1 < bitmap.width() ? bitmap_previous_scanline[x + 1] : bitmap_previous_scanline[0];
 
-            L = X;
+            L = bitmap_scanline[x];
         }
 
         bitmap_previous_scanline = bitmap_scanline;
