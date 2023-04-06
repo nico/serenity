@@ -9,8 +9,11 @@
 #include <AK/Endian.h>
 #include <AK/Format.h>
 #include <AK/MemoryStream.h>
+#include <AK/String.h>
 #include <AK/Vector.h>
 #include <LibCompress/Deflate.h>
+#include <LibCore/File.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibGfx/ImageFormats/WebPLoader.h>
 
 // Overview: https://developers.google.com/speed/webp/docs/compression
@@ -21,6 +24,37 @@
 namespace Gfx {
 
 namespace {
+
+ErrorOr<void> save_one_bitmap(const Bitmap& bitmap, StringView path)
+{
+    auto bytes = TRY(Gfx::PNGWriter::encode(bitmap));
+    auto output_stream = TRY(Core::File::open(path, Core::File::OpenMode::Write));
+    TRY(output_stream->write_until_depleted(bytes));
+    return {};
+}
+
+ErrorOr<void> save_bitmap(const Bitmap& bitmap, StringView path)
+{
+    TRY(save_one_bitmap(bitmap, path));
+
+    {
+        auto clone = TRY(bitmap.clone());
+        for (ARGB32& pixel : *clone)
+            pixel |= 0xff'00'00'00;
+        TRY(save_one_bitmap(clone, TRY(String::formatted("{}-rgb.png", path))));
+    }
+
+    {
+        auto clone = TRY(bitmap.clone());
+        for (ARGB32& pixel : *clone) {
+            u8 a = pixel >> 24;
+            pixel = 0xff'00'00'00 | (a << 16) | (a << 8) | a;
+        }
+        TRY(save_one_bitmap(clone, TRY(String::formatted("{}-a.png", path))));
+    }
+
+    return {};
+}
 
 struct FourCC {
     constexpr FourCC(char const* name)
@@ -494,6 +528,7 @@ static ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8L_image(WebPLoadingCo
             IntSize prefix_size { ceil_div(size.width(), block_size), ceil_div(size.height(), block_size) };
 
             entropy_image = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRx8888, prefix_size, bit_stream));
+            MUST(save_bitmap(*entropy_image, "webp-entropy.png"sv));
 
             // "The red and green components of a pixel define the meta prefix code used in a particular block of the ARGB image."
             // ...
@@ -760,6 +795,7 @@ ErrorOr<NonnullOwnPtr<PredictorTransform>> PredictorTransform::read(WebPLoadingC
     IntSize predictor_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
 
     auto predictor_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRx8888, predictor_image_size, bit_stream));
+    MUST(save_bitmap(*predictor_bitmap, "webp-predictor.png"sv));
 
     return adopt_nonnull_own_or_enomem(new (nothrow) PredictorTransform(size_bits, move(predictor_bitmap)));
 }
@@ -963,6 +999,7 @@ ErrorOr<NonnullOwnPtr<ColorTransform>> ColorTransform::read(WebPLoadingContext& 
     IntSize color_image_size { ceil_div(image_size.width(), block_size), ceil_div(image_size.height(), block_size) };
 
     auto color_bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::EntropyCoded, BitmapFormat::BGRx8888, color_image_size, bit_stream));
+    MUST(save_bitmap(*color_bitmap, "webp-color.png"sv));
 
     return adopt_nonnull_own_or_enomem(new (nothrow) ColorTransform(size_bits, move(color_bitmap)));
 }
@@ -1104,10 +1141,16 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     auto format = vp8l_header.is_alpha_used ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
     context.bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::SpatiallyCoded, format, context.size.value(), bit_stream));
 
+    MUST(save_bitmap(*context.bitmap, "webp-untransformed.png"sv));
+
     // Transforms have to be applied in the reverse order they appear in in the file.
-    for (auto const& transform : transforms.in_reverse())
-    //for (auto const& transform : transforms)
+int i = 0;
+    for (auto const& transform : transforms.in_reverse()) {
+    //for (auto const& transform : transforms) {
         TRY(transform->transform(*context.bitmap));
+        i++;
+        MUST(save_bitmap(*context.bitmap, MUST(String::formatted("webp-untransformed-{}.png"sv, i))));
+    }
 
     return {};
 }
