@@ -935,8 +935,12 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
 
 ARGB32 PredictorTransform::inverse_transform(ARGB32 pixel, ARGB32 prediction)
 {
-    // XXX per-channel
-    return pixel + prediction;
+    Color pixel_color = Color::from_argb(pixel);
+    Color prediction_color = Color::from_argb(prediction);
+    return Color(pixel_color.red() + prediction_color.red(),
+                 pixel_color.green() + prediction_color.green(),
+                 pixel_color.blue() + prediction_color.blue(),
+                 pixel_color.alpha() + prediction_color.alpha()).value();
 }
 
 // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#42_color_transform
