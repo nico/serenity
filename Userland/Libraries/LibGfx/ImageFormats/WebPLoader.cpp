@@ -1057,7 +1057,7 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
 
     // optional-transform   =  (%b1 transform optional-transform) / %b0
     // "Each transform is allowed to be used only once."
-    // FIXME: Check that.
+    u8 seen_transforms = 0;
     Vector<NonnullOwnPtr<Transform>> transforms;
     while (TRY(bit_stream.read_bits(1))) {
         // transform            =  predictor-tx / color-tx / subtract-green-tx
@@ -1079,6 +1079,12 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
 
         TransformType transform_type = static_cast<TransformType>(TRY(bit_stream.read_bits(2)));
         dbgln_if(WEBP_DEBUG, "transform type {}", (int)transform_type);
+
+        // Check that every transfom is used at most once.
+        u8 mask = 1 << (int)transform_type;
+        if (seen_transforms & mask)
+            return context.error("WebPImageDecoderPlugin: transform type used multiple times");
+        seen_transforms |= mask;
 
         switch (transform_type) {
         case PREDICTOR_TRANSFORM:
