@@ -808,7 +808,7 @@ ErrorOr<void> PredictorTransform::transform(Bitmap& bitmap)
             // "Addressing the TR-pixel for pixels on the rightmost column is exceptional.
             //  The pixels on the rightmost column are predicted by using the modes [0..13] just like pixels not on the border,
             //  but the leftmost pixel on the same row as the current pixel is instead used as the TR-pixel."
-            TR = x + 1 < bitmap.width() ? bitmap_previous_scanline[x + 1] : bitmap_previous_scanline[0];
+            TR = x + 2 < bitmap.width() ? bitmap_previous_scanline[x + 2] : bitmap_previous_scanline[0];
 
             L = bitmap_scanline[x];
         }
