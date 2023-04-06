@@ -785,7 +785,7 @@ ErrorOr<void> PredictorTransform::transform(Bitmap& bitmap)
 
         ARGB32 TL = bitmap_previous_scanline[0];
         ARGB32 T = bitmap_previous_scanline[1];
-        ARGB32 TR = bitmap.width() > 2 ? bitmap_previous_scanline[2] : bitmap_previous_scanline[0];
+        ARGB32 TR = 2 < bitmap.width() ? bitmap_previous_scanline[2] : bitmap_previous_scanline[0];
 
         ARGB32 L = bitmap_scanline[0];
 
