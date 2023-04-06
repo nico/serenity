@@ -1112,8 +1112,8 @@ static ErrorOr<void> decode_webp_chunk_VP8L(WebPLoadingContext& context, Chunk c
     context.bitmap = TRY(decode_webp_chunk_VP8L_image(context, ImageKind::SpatiallyCoded, format, context.size.value(), bit_stream));
 
     // Transforms have to be applied in the reverse order they appear in in the file.
-    for (int i = transforms.size() - 1; i >= 0; --i)
     for (auto const& transform : transforms.in_reverse())
+    //for (auto const& transform : transforms)
         TRY(transform->transform(*context.bitmap));
 
     return {};
