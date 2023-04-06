@@ -769,7 +769,7 @@ ErrorOr<void> PredictorTransform::transform(Bitmap& bitmap)
     // "There are special handling rules for some border pixels.
     //  If there is a prediction transform, regardless of the mode [0..13] for these pixels,
     //  the predicted value for the left-topmost pixel of the image is 0xff000000,
-    bitmap.scanline(0)[0] = inverse_transform(bitmap.scanline(0)[0], 0xff000000);
+    bitmap.scanline(0)[0] = inverse_transform(bitmap.scanline(0)[0], 0xff'00'00'00);
 
     //  L-pixel for all pixels on the top row,
     for (int x = 1; x < bitmap.width(); ++x)
@@ -824,7 +824,7 @@ ErrorOr<ARGB32> PredictorTransform::predict(u8 predictor, ARGB32 TL, ARGB32 T, A
     case 0:
         // "0xff000000 (represents solid black color in ARGB)"
         //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 0");
-        return 0xff000000;
+        return 0xff'00'00'00;
     case 1:
         // "L"
         //return Error::from_string_literal("WebPImageDecoderPlugin: unimplemented preditor 1");
