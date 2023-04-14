@@ -49,6 +49,12 @@ ALWAYS_INLINE static u16x4 to_u16x4(TSrc v)
 }
 
 template<typename TSrc>
+ALWAYS_INLINE static u16x8 to_u16x8(TSrc v)
+{
+    return __builtin_convertvector(v, u16x8);
+}
+
+template<typename TSrc>
 ALWAYS_INLINE static u32x4 to_u32x4(TSrc v)
 {
     return __builtin_convertvector(v, u32x4);
@@ -58,6 +64,12 @@ template<typename TSrc>
 ALWAYS_INLINE static i32x4 to_i32x4(TSrc v)
 {
     return __builtin_convertvector(v, i32x4);
+}
+
+template<typename TSrc>
+ALWAYS_INLINE static i32x8 to_i32x8(TSrc v)
+{
+    return __builtin_convertvector(v, i32x8);
 }
 
 template<typename TSrc>

@@ -6,6 +6,7 @@
  */
 
 #include <AK/IntegralMath.h>
+#include <AK/SIMDExtras.h>
 #include <LibGfx/Size.h>
 #include <LibVideo/Color/CodingIndependentCodePoints.h>
 
@@ -873,9 +874,9 @@ DecoderErrorOr<void> Decoder::predict_inter_block(u8 plane, BlockContext const& 
     // A variable ref specifying the reference frame contents is set equal to FrameStore[ refIdx ].
     auto& reference_frame_buffer = reference_frame.frame_planes[plane];
     auto reference_frame_width = reference_frame.size.width() >> subsampling_x;
-    auto reference_frame_buffer_at = [&](u32 row, u32 column) -> u16& {
-        return reference_frame_buffer[row * reference_frame_width + column];
-    };
+    //auto reference_frame_buffer_at = [&](u32 row, u32 column) -> u16& {
+    //    return reference_frame_buffer[row * reference_frame_width + column];
+    //};
 
     auto block_buffer_at = [&](u32 row, u32 column) -> u16& {
         return block_buffer[row * width + column];
@@ -905,28 +906,51 @@ DecoderErrorOr<void> Decoder::predict_inter_block(u8 plane, BlockContext const& 
     };
 
     for (auto row = 0u; row < intermediate_height; row++) {
+        auto clamped_row = clip_3(0, scaled_bottom, (offset_scaled_block_y >> 4) + static_cast<i32>(row) - 3);
+        u16 const* scanline = reference_frame_buffer.data() + clamped_row * reference_frame_width;
+
         for (auto column = 0u; column < width; column++) {
             auto samples_start = offset_scaled_block_x + static_cast<i32>(scaled_step_x * column);
+            i32 const* subpel_filters_for_samples = subpel_filters[block_context.interpolation_filter][samples_start & 15];
+            i32 scaled_x_base = (samples_start >> 4) - 3;
 
+#if 0
             i32 accumulated_samples = 0;
             for (auto t = 0u; t < 8u; t++) {
-                auto sample = reference_frame_buffer_at(
-                    clip_3(0, scaled_bottom, (offset_scaled_block_y >> 4) + static_cast<i32>(row) - 3),
-                    clip_3(0, scaled_right, (samples_start >> 4) + static_cast<i32>(t) - 3));
-                accumulated_samples += subpel_filters[block_context.interpolation_filter][samples_start & 15][t] * sample;
+                auto sample = scanline[clip_3(0, scaled_right, scaled_x_base + static_cast<i32>(t))];
+                accumulated_samples += subpel_filters_for_samples[t] * sample;
             }
+#elif 1
+            (void)scaled_right;
+            i32 accumulated_samples = 0;
+            for (auto t = 0u; t < 8u; t++) {
+                auto sample = scanline[scaled_x_base + static_cast<i32>(t)];
+                accumulated_samples += subpel_filters_for_samples[t] * sample;
+            }
+#else
+            (void)scaled_right;
+            AK::SIMD::u16x8 samples = *reinterpret_cast<AK::SIMD::u16x8 const*>(scanline + scaled_x_base);
+            AK::SIMD::i32x8 factors = *reinterpret_cast<AK::SIMD::i32x8 const*>(subpel_filters_for_samples);
+
+            auto sum = AK::SIMD::to_i32x8(samples) * factors;
+            auto accumulated_samples = sum[0] + sum[1] + sum[2] + sum[3] + sum[4] + sum[5] + sum[6] + sum[7];
+#endif
             intermediate_buffer_at(row, column) = clip_1(block_context.frame_context.color_config.bit_depth, rounded_right_shift(accumulated_samples, 7));
         }
     }
 
     for (auto row = 0u; row < height; row++) {
+
         for (auto column = 0u; column < width; column++) {
             auto samples_start = (offset_scaled_block_y & 15) + static_cast<i32>(scaled_step_y * row);
+            u16 const* scancolumn = intermediate_buffer.data() + (samples_start >> 4) * width + column;
+            i32 const* subpel_filters_for_samples = subpel_filters[block_context.interpolation_filter][samples_start & 15];
 
             i32 accumulated_samples = 0;
             for (auto t = 0u; t < 8u; t++) {
-                auto sample = intermediate_buffer_at((samples_start >> 4) + t, column);
-                accumulated_samples += subpel_filters[block_context.interpolation_filter][samples_start & 15][t] * sample;
+                auto sample = *scancolumn;
+                accumulated_samples += subpel_filters_for_samples[t] * sample;
+                scancolumn += width;
             }
             block_buffer_at(row, column) = clip_1(block_context.frame_context.color_config.bit_depth, rounded_right_shift(accumulated_samples, 7));
         }
