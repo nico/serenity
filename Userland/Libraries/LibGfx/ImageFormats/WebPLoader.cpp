@@ -1728,7 +1728,7 @@ IntSize WebPImageDecoderPlugin::size()
         return {};
 
     if (m_context->state < WebPLoadingContext::State::FirstChunkDecoded) {
-        if (decode_webp_first_chunk(*m_context).is_error())
+        if (decode_webp_first_chunk(*m_context).is_error()) // XXX
             return {};
     }
 
@@ -1750,14 +1750,14 @@ bool WebPImageDecoderPlugin::set_nonvolatile(bool& was_purged)
 
 bool WebPImageDecoderPlugin::initialize()
 {
-    return !decode_webp_header(*m_context).is_error();
+    return !decode_webp_header(*m_context).is_error(); // XXX
 }
 
 bool WebPImageDecoderPlugin::sniff(ReadonlyBytes data)
 {
     WebPLoadingContext context;
     context.data = data;
-    return !decode_webp_header(context).is_error();
+    return !decode_webp_header(context).is_error(); // XXX
 }
 
 ErrorOr<NonnullOwnPtr<ImageDecoderPlugin>> WebPImageDecoderPlugin::create(ReadonlyBytes data)
@@ -1772,7 +1772,7 @@ bool WebPImageDecoderPlugin::is_animated()
         return false;
 
     if (m_context->state < WebPLoadingContext::State::FirstChunkDecoded) {
-        if (decode_webp_first_chunk(*m_context).is_error())
+        if (decode_webp_first_chunk(*m_context).is_error()) // XXX
             return false;
     }
 
@@ -1785,7 +1785,7 @@ size_t WebPImageDecoderPlugin::loop_count()
         return 0;
 
     if (m_context->state < WebPLoadingContext::State::AnimationFrameChunksDecoded) {
-        if (decode_webp_animation_frame_chunks(*m_context).is_error())
+        if (decode_webp_animation_frame_chunks(*m_context).is_error()) // XXX
             return 0;
     }
 
@@ -1798,7 +1798,7 @@ size_t WebPImageDecoderPlugin::frame_count()
         return 1;
 
     if (m_context->state < WebPLoadingContext::State::ChunksDecoded) {
-        if (decode_webp_chunks(*m_context).is_error())
+        if (decode_webp_chunks(*m_context).is_error()) // XXX
             return 1;
     }
 
@@ -1819,24 +1819,28 @@ ErrorOr<ImageFrameDescriptor> WebPImageDecoderPlugin::frame(size_t index)
         return Error::from_string_literal("WebPImageDecoderPlugin: Decoding failed");
 
     if (m_context->state < WebPLoadingContext::State::ChunksDecoded)
-        TRY(decode_webp_chunks(*m_context));
+        TRY(decode_webp_chunks(*m_context)); // XXX
 
     if (is_animated()) {
         if (m_context->state < WebPLoadingContext::State::AnimationFrameChunksDecoded)
-            TRY(decode_webp_animation_frame_chunks(*m_context));
-        return decode_webp_animation_frame(*m_context, index);
+            TRY(decode_webp_animation_frame_chunks(*m_context)); // XXX
+        return decode_webp_animation_frame(*m_context, index); // XXX
     }
 
     if (!m_context->image_data.image_data_chunk.has_value())
         return m_context->error("WebPImageDecoderPlugin: Did not find image data chunk");
 
     if (m_context->state < WebPLoadingContext::State::BitmapDecoded) {
+<<<<<<< Updated upstream
         auto bitmap = TRY(decode_webp_image_data(*m_context, m_context->image_data));
+=======
+        auto bitmap = TRY(decode_webp_image_data(*m_context, m_context->image_data.value())); // XXX
+>>>>>>> Stashed changes
 
         // Check that size in VP8X chunk matches dimensions in VP8 or VP8L chunk if both are present.
         if (m_context->first_chunk->type == FourCC("VP8X")) {
             if (static_cast<u32>(bitmap->width()) != m_context->vp8x_header.width || static_cast<u32>(bitmap->height()) != m_context->vp8x_header.height)
-                return m_context->error("WebPImageDecoderPlugin: VP8X and VP8/VP8L chunks store different dimensions");
+                return m_context->error("WebPImageDecoderPlugin: VP8X and VP8/VP8L chunks store different dimensions"); // XXX
         }
 
         m_context->bitmap = move(bitmap);
@@ -1849,7 +1853,7 @@ ErrorOr<ImageFrameDescriptor> WebPImageDecoderPlugin::frame(size_t index)
 
 ErrorOr<Optional<ReadonlyBytes>> WebPImageDecoderPlugin::icc_data()
 {
-    TRY(decode_webp_chunks(*m_context));
+    TRY(decode_webp_chunks(*m_context)); // XXX
 
     // FIXME: "If this chunk is not present, sRGB SHOULD be assumed."
 
