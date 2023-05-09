@@ -48,6 +48,8 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
 
     // FIXME: !show_frame does not make sense in a webp file either, probably?
 
+    // FIXME: reject version > 3
+
     u32 start_code = data[3] | (data[4] << 8) | (data[5] << 16);
     if (start_code != 0x2a019d) // https://www.rfc-editor.org/errata/eid7370
         return Error::from_string_literal("WebPImageDecoderPlugin: 'VP8 ' chunk invalid start_code");
@@ -74,7 +76,7 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
 
 namespace {
 
-// https://datatracker.ietf.org/doc/html/rfc6386#section-7
+// https://datatracker.ietf.org/doc/html/rfc6386#section-7 "Boolean Entropy Decoder"
 // XXX code copied from LibVideo/VP9/BooleanDecoder.{h,cpp} and tweaked minorly
 class BooleanEntropyDecoder {
 public:
@@ -159,6 +161,40 @@ ErrorOr<i32> BooleanEntropyDecoder::read_signed_literal(u8 bits)
     return result;
 }
 
+// https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
+class TreeDecoder {
+public:
+    using tree_index = u8;
+
+    TreeDecoder(ReadonlyBytes tree)
+        : m_tree(tree)
+    {
+    }
+
+    ErrorOr<int> read(BooleanEntropyDecoder&, ReadonlyBytes probabilities);
+
+private:
+   // "A tree may then be compactly represented as an array of (pairs of)
+   //  8-bit integers.  Each (even) array index corresponds to an interior
+   //  node of the tree; the 0th index of course corresponds to the root of
+   //  the tree.  The array entries come in pairs corresponding to the left
+   //  (0) and right (1) branches of the subtree below the interior node.
+   //  We use the convention that a positive (even) branch entry is the
+   //  index of a deeper interior node, while a nonpositive entry v
+   //  corresponds to a leaf whose value is -v."
+   ReadonlyBytes m_tree;
+
+};
+
+ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes probabilities)
+{
+    tree_index i = 0;
+    while ((i = m_tree[i + TRY(decoder.read_bool(probabilities[i >> 1]))]) > 0) {
+    }
+
+    return -i;
+}
+
 }
 
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
@@ -169,13 +205,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
     auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
 
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-19
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     //auto f = [&decoder](u32 n) { return decoder.read_bits(n); };
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+    auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
 
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.2
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.2 "Color Space and Pixel Type (Key Frames Only)"
     enum class ColorSpaceAndPixelType {
         YUV = 0,
         ReservedForFutureUse = 1,
@@ -190,14 +227,17 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     dbgln_if(WEBP_DEBUG, "color_space {} clamping_type {}", (int)color_space, (int)clamping_type);
 
+    u8 mb_segment_tree_probs[3] = { 255, 255, 255 };
 
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.3
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.3 "Segment-Based Adjustments"
+    u8 update_mb_segmentation_map = false;
+
     u8 segmentation_enabled = TRY(L(1));
     if (segmentation_enabled) {
         // "update_segmentation()" in 19.2
 
         // FIXME: Is this always true for keyframes in webp files? Should we return an Error if this is 0 instead?
-        u8 update_mb_segmentation_map = TRY(L(1));
+        update_mb_segmentation_map = TRY(L(1));
         u8 update_segment_feature_data = TRY(L(1));
 
         dbgln_if(WEBP_DEBUG, "update_mb_segmentation_map {} update_segment_feature_data {}",
@@ -232,21 +272,24 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         }
 
         if (update_mb_segmentation_map) {
+            // This reads mb_segment_tree_probs for https://datatracker.ietf.org/doc/html/rfc6386#section-10.
             for (int i = 0; i < 3; ++i) {
                 u8 segment_prob_update = TRY(L(1));
                 dbgln_if(WEBP_DEBUG, "segment_prob_update {}", segment_prob_update);
                 if (segment_prob_update) {
                     u8 segment_prob = TRY(L(8));
                     dbgln_if(WEBP_DEBUG, "segment_prob {}", segment_prob);
+                    mb_segment_tree_probs[i] = segment_prob;
                 }
             }
         }
     }
 
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.4
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.4 "Loop Filter Type and Levels"
     u8 filter_type = TRY(L(1));
     u8 loop_filter_level = TRY(L(6));
     u8 sharpness_level = TRY(L(3));
+    using Prob = u8;
     dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", filter_type, loop_filter_level, sharpness_level);
 
     // "mb_lf_adjustments()" in 19.2
@@ -261,7 +304,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 dbgln_if(WEBP_DEBUG, "ref_frame_delta_update_flag {}", ref_frame_delta_update_flag);
                 if (ref_frame_delta_update_flag) {
                     u8 delta_magnitude = TRY(L(6));
-                    u8 delta_sign = TRY(L(1));
+                    u8 delta_sign = TRY(L(1)); // 0 - positive, 1 - negative
                     dbgln_if(WEBP_DEBUG, "delta_magnitude {} loop_filter_update_sign {}", delta_magnitude, delta_sign);
                 }
             }
@@ -277,8 +320,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         }
     }
 
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.5 "Token Partition and Partition Data Offsets"
+    // Note that 9.5 describes that offsets are stored right here after log2_nbr_of_dct_partitions, while
+    // 19.2 completely omits them.
     u8 log2_nbr_of_dct_partitions = TRY(L(2));
     dbgln_if(WEBP_DEBUG, "log2_nbr_of_dct_partitions {}", log2_nbr_of_dct_partitions);
+
+    // XXX read partition offsets
 
     // "quant_indices()" in 19.2
     u8 y_ac_qi = TRY(L(7));
@@ -341,15 +389,64 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     }
 
     u8 mb_no_skip_coeff = TRY(L(1));
+    u8 prob_skip_false;
     dbgln_if(WEBP_DEBUG, "mb_no_skip_coeff {}", mb_no_skip_coeff);
     if (mb_no_skip_coeff) {
-        u8 prob_skip_false = TRY(L(8));
+        prob_skip_false = TRY(L(8));
         dbgln_if(WEBP_DEBUG, "prob_skip_false {}", prob_skip_false);
     }
+    // Non-keyframes read prob_intra etc here.
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
 
-    // " macroblock_header()" in 19.3
+    // "macroblock_header()" in 19.3
+    // Corresponds to vp8_dixie_modemv_process_row()? And ParseIntraMode().
+    // FIXME: Need to read this from the partition pointer.
+
+    if (update_mb_segmentation_map) {
+        // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
+        const TreeDecoder::tree_index mb_segment_tree [2 * (4 - 1)] = {
+            2,  4, /* root: "0", "1" subtrees */
+            (TreeDecoder::tree_index)-0, (TreeDecoder::tree_index)-1, /* "00" = 0th value, "01" = 1st value */
+            (TreeDecoder::tree_index)-2, (TreeDecoder::tree_index)-3  /* "10" = 2nd value, "11" = 3rd value */
+        };
+        int segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, mb_segment_tree_probs));
+        dbgln_if(WEBP_DEBUG, "segment_id {}", segment_id);
+    }
+    if (mb_no_skip_coeff) {
+        u8 mb_skip_coeff = TRY(B(prob_skip_false));
+        dbgln_if(WEBP_DEBUG, "mb_skip_coeff {}", mb_skip_coeff);
+    }
+
+    // Key frames must use intra prediction, that is new macroblocks are predicted from old macroblocks in the same frame.
+    // (Inter prediction on the other hand predicts new macroblocks from the corresponding macroblock in the previous frame.)
+
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-8.2 "Tree Coding Example"
+    enum intra_mbmode {
+        DC_PRED, /* predict DC using row above and column to the left */
+        V_PRED,  /* predict rows using row above */
+        H_PRED,  /* predict columns using column to the left */
+        TM_PRED, /* propagate second differences a la "True Motion" */
+ 
+        B_PRED,  /* each Y subblock is independently predicted */
+
+        num_uv_modes = B_PRED,  /* first four modes apply to chroma */
+        num_ymodes   /* all modes apply to luma */
+    };
+
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19.3 says "intra_y_mode selects the luminance intra-prediction mode (Section 16.1)",
+    // but for keyframes the correct reference is actually https://datatracker.ietf.org/doc/html/rfc6386#section-11.2 "Luma Modes".
+    // That is, we want "kf_ymode_tree", not "ymode_tree", and "kf_ymode_prob", not "ymode_prob".
+    // See "decode_kf_mb_mode" in the reference decoder in the spec.
+    const TreeDecoder::tree_index kf_ymode_tree[2 * (num_ymodes - 1) ] = {
+        (TreeDecoder::tree_index)-B_PRED, 2,                                 /* root: B_PRED = "0", "1" subtree */
+        4, 6,                                                                /* "1" subtree has 2 descendant subtrees */
+        (TreeDecoder::tree_index)-DC_PRED, (TreeDecoder::tree_index)-V_PRED, /* "10" subtree: DC_PRED = "100", V_PRED = "101" */
+        (TreeDecoder::tree_index)-H_PRED, (TreeDecoder::tree_index)-TM_PRED  /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
+    };
+    const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
+    int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
+    dbgln_if(WEBP_DEBUG, "intra_y_mode {}", intra_y_mode);
 
     (void)bitmap_format;
     return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps not yet implemented");
