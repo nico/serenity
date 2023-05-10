@@ -177,9 +177,9 @@ ErrorOr<i32> BooleanEntropyDecoder::read_signed_literal(u8 bits)
 // https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
 class TreeDecoder {
 public:
-    using tree_index = u8;
+    using tree_index = i8;
 
-    TreeDecoder(ReadonlyBytes tree)
+    TreeDecoder(ReadonlySpan<tree_index> tree)
         : m_tree(tree)
     {
     }
@@ -195,17 +195,26 @@ private:
    //  We use the convention that a positive (even) branch entry is the
    //  index of a deeper interior node, while a nonpositive entry v
    //  corresponds to a leaf whose value is -v."
-   ReadonlyBytes m_tree;
+   ReadonlySpan<tree_index> m_tree;
 
 };
 
 ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes probabilities)
 {
     tree_index i = 0;
+#if 0
     while ((i = m_tree[i + TRY(decoder.read_bool(probabilities[i >> 1]))]) > 0) {
     }
-
     return -i;
+#else
+    while (true) {
+      u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
+      i = m_tree[i + b];
+dbgln_if(WEBP_DEBUG, "b {} i {}", b, i);
+      if (i <= 0)
+          return -i;
+    }
+#endif
 }
 
 }
@@ -434,9 +443,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     if (update_mb_segmentation_map) {
         // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
         const TreeDecoder::tree_index mb_segment_tree [2 * (4 - 1)] = {
-            2,  4, /* root: "0", "1" subtrees */
-            (TreeDecoder::tree_index)-0, (TreeDecoder::tree_index)-1, /* "00" = 0th value, "01" = 1st value */
-            (TreeDecoder::tree_index)-2, (TreeDecoder::tree_index)-3  /* "10" = 2nd value, "11" = 3rd value */
+             2,  4, /* root: "0", "1" subtrees */
+            -0, -1, /* "00" = 0th value, "01" = 1st value */
+            -2, -3  /* "10" = 2nd value, "11" = 3rd value */
         };
         int segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, mb_segment_tree_probs));
         dbgln_if(WEBP_DEBUG, "segment_id {}", segment_id);
@@ -467,10 +476,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     // That is, we want "kf_ymode_tree", not "ymode_tree", and "kf_ymode_prob", not "ymode_prob".
     // See "decode_kf_mb_mode" in the reference decoder in the spec.
     const TreeDecoder::tree_index kf_ymode_tree[2 * (num_ymodes - 1) ] = {
-        (TreeDecoder::tree_index)-B_PRED, 2,                                 /* root: B_PRED = "0", "1" subtree */
-        4, 6,                                                                /* "1" subtree has 2 descendant subtrees */
-        (TreeDecoder::tree_index)-DC_PRED, (TreeDecoder::tree_index)-V_PRED, /* "10" subtree: DC_PRED = "100", V_PRED = "101" */
-        (TreeDecoder::tree_index)-H_PRED, (TreeDecoder::tree_index)-TM_PRED  /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
+        -B_PRED, 2,        /* root: B_PRED = "0", "1" subtree */
+        4, 6,              /* "1" subtree has 2 descendant subtrees */
+        -DC_PRED, -V_PRED, /* "10" subtree: DC_PRED = "100", V_PRED = "101" */
+        -H_PRED, -TM_PRED  /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
     };
     const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
     int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
