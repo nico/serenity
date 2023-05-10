@@ -71,7 +71,10 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
     dbgln_if(WEBP_DEBUG, "version {}, show_frame {}, size_of_first_partition {}, width {}, horizontal_scale {}, height {}, vertical_scale {}",
         version, show_frame, size_of_first_partition, width, horizontal_scale, height, vertical_scale);
 
-    return VP8Header { version, show_frame, size_of_first_partition, width, horizontal_scale, height, vertical_scale, vp8_data.slice(10) };
+    if (vp8_data.size() < 10 + size_of_first_partition)
+        return Error::from_string_literal("WebPImageDecoderPlugin: 'VP8 ' chunk too small for full first partition");
+
+    return VP8Header { version, show_frame, size_of_first_partition, width, horizontal_scale, height, vertical_scale, vp8_data.slice(10, size_of_first_partition), vp8_data.slice(10 + size_of_first_partition) };
 }
 
 namespace {
@@ -124,19 +127,29 @@ ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
     bool return_bool;
 
     if (m_value >= SPLIT) {
+//fprintf(stderr, "bit 1 range %d split %d value %d SPLIT %d\n", m_range, split, m_value, SPLIT);
         return_bool = true;
         m_range -= split;
-        m_value -= split;
+        m_value -= SPLIT;
     } else {
+//fprintf(stderr, "bit 0 range %d split %d value %d SPLIT %d\n", m_range, split, m_value, SPLIT);
         return_bool = false;
         m_range = split;
     }
 
+#if 1
     if (m_range < 128) {
-        u8 bits_to_shift_into_range = count_leading_zeroes(m_range);
+        VERIFY(m_range != 0);
+        u8 bits_to_shift_into_range = count_leading_zeroes((u8)m_range);
         m_range <<= bits_to_shift_into_range;
         m_value = (m_value << bits_to_shift_into_range) | TRY(m_bit_stream.read_bits<u32>(bits_to_shift_into_range));
     }
+#else
+     while (m_range < 128) {  /* shift out irrelevant value bits */
+       m_value = (m_value << 1) | TRY(m_bit_stream.read_bits<u32>(1));
+       m_range <<= 1;
+     }
+#endif
 
     return return_bool;
 }
@@ -233,6 +246,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     u8 update_mb_segmentation_map = false;
 
     u8 segmentation_enabled = TRY(L(1));
+    dbgln_if(WEBP_DEBUG, "segmentation_enabled {}", (int)segmentation_enabled);
     if (segmentation_enabled) {
         // "update_segmentation()" in 19.2
 
@@ -321,12 +335,26 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     }
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.5 "Token Partition and Partition Data Offsets"
-    // Note that 9.5 describes that offsets are stored right here after log2_nbr_of_dct_partitions, while
-    // 19.2 completely omits them.
     u8 log2_nbr_of_dct_partitions = TRY(L(2));
     dbgln_if(WEBP_DEBUG, "log2_nbr_of_dct_partitions {}", log2_nbr_of_dct_partitions);
 
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-4 says:
+    // "If there is more than one partition
+    //  for these coefficients, the sizes of the partitions -- except the
+    //  last partition -- in bytes are also present in the bitstream right
+    //  after the above first partition."
+    // 19.2 completely omits them for that reason.
+    // Let's read them now.
+    u8 number_of_dct_partitions = 1 << log2_nbr_of_dct_partitions;
+
     // XXX read partition offsets
+    auto data = vp8_header.second_partition;
+    u32 offset = vp8_header.size_of_first_partition;
+    for (size_t i = 0; i < number_of_dct_partitions - 1; ++i) {
+        u32 size_of_partition = data[3 * i + 0] | (data[3 * i + 1] << 8) | (data[3 * i + 2] << 16);
+        dbgln_if(WEBP_DEBUG, "offset {} size_of_partition {}", offset, size_of_partition);
+        offset += size_of_partition;
+    }
 
     // "quant_indices()" in 19.2
     u8 y_ac_qi = TRY(L(7));
