@@ -210,7 +210,6 @@ ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes pro
     while (true) {
       u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
       i = m_tree[i + b];
-dbgln_if(WEBP_DEBUG, "b {} i {}", b, i);
       if (i <= 0)
           return -i;
     }
@@ -366,6 +365,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     }
 
     // "quant_indices()" in 19.2
+    // Also https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
     u8 y_ac_qi = TRY(L(7));
     dbgln_if(WEBP_DEBUG, "y_ac_qi {}", y_ac_qi);
 
@@ -410,6 +410,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     dbgln_if(WEBP_DEBUG, "refresh_entropy_probs {}", refresh_entropy_probs);
 
     // "refresh_entropy_probs()" in 19.2
+    // also https://datatracker.ietf.org/doc/html/rfc6386#section-9.9 "DCT Coefficient Probability Update"
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 8; j++) {
             for (int k = 0; k < 3; k++) {
@@ -425,6 +426,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         }
     }
 
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.11 "Remaining Frame Header Data (Key Frame)"
     u8 mb_no_skip_coeff = TRY(L(1));
     u8 prob_skip_false;
     dbgln_if(WEBP_DEBUG, "mb_no_skip_coeff {}", mb_no_skip_coeff);
@@ -433,6 +435,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         dbgln_if(WEBP_DEBUG, "prob_skip_false {}", prob_skip_false);
     }
     // Non-keyframes read prob_intra etc here.
+
+    // "This completes the layout of the frame header.  The remainder of the
+    //  first data partition consists of macroblock-level prediction data."
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
 
@@ -458,7 +463,15 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     // Key frames must use intra prediction, that is new macroblocks are predicted from old macroblocks in the same frame.
     // (Inter prediction on the other hand predicts new macroblocks from the corresponding macroblock in the previous frame.)
 
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-2 "Format Overview"
+    // "Internally, VP8 decomposes each output frame into an array of
+    //  macroblocks.  A macroblock is a square array of pixels whose Y
+    //  dimensions are 16x16 and whose U and V dimensions are 8x8."
+    int macroblock_width = (vp8_header.width + 15) / 16;
+    int macroblock_height = (vp8_header.height + 15) / 16;
+
     // https://datatracker.ietf.org/doc/html/rfc6386#section-8.2 "Tree Coding Example"
+    // Repeated in https://datatracker.ietf.org/doc/html/rfc6386#section-11.2 "Luma Modes"
     enum intra_mbmode {
         DC_PRED, /* predict DC using row above and column to the left */
         V_PRED,  /* predict rows using row above */
@@ -481,9 +494,229 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         -DC_PRED, -V_PRED, /* "10" subtree: DC_PRED = "100", V_PRED = "101" */
         -H_PRED, -TM_PRED  /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
     };
-    const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
-    int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
-    dbgln_if(WEBP_DEBUG, "intra_y_mode {}", intra_y_mode);
+
+    enum intra_bmode {
+        B_DC_PRED,  /* predict DC using row above and column
+                       to the left */
+        B_TM_PRED,  /* propagate second differences a la
+                       "True Motion" */
+
+        B_VE_PRED,  /* predict rows using row above */
+        B_HE_PRED,  /* predict columns using column to the left */
+
+        B_LD_PRED,  /* southwest (left and down) 45 degree diagonal
+                       prediction */
+        B_RD_PRED,  /* southeast (right and down) "" */
+
+        B_VR_PRED,  /* SSE (vertical right) diagonal prediction */
+        B_VL_PRED,  /* SSW (vertical left) "" */
+        B_HD_PRED,  /* ESE (horizontal down) "" */
+        B_HU_PRED,  /* ENE (horizontal up) "" */
+
+        num_intra_bmodes
+    };
+
+    const TreeDecoder::tree_index bmode_tree[2 * (num_intra_bmodes - 1)] = {
+     -B_DC_PRED, 2,                   /* B_DC_PRED = "0" */
+      -B_TM_PRED, 4,                  /* B_TM_PRED = "10" */
+       -B_VE_PRED, 6,                 /* B_VE_PRED = "110" */
+        8, 12,
+         -B_HE_PRED, 10,              /* B_HE_PRED = "11100" */
+          -B_RD_PRED, -B_VR_PRED,     /* B_RD_PRED = "111010",
+                                         B_VR_PRED = "111011" */
+         -B_LD_PRED, 14,              /* B_LD_PRED = "111110" */
+           -B_VL_PRED, 16,            /* B_VL_PRED = "1111110" */
+             -B_HD_PRED, -B_HU_PRED   /* HD = "11111110",
+                                         HU = "11111111" */
+    };
+
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-11.5 "Subblock Mode Probability Table"
+    const Prob kf_bmode_prob[num_intra_bmodes][num_intra_bmodes][num_intra_bmodes - 1] = {
+        {
+            { 231, 120,  48,  89, 115, 113, 120, 152, 112 },
+            { 152, 179,  64, 126, 170, 118,  46,  70,  95 },
+            { 175,  69, 143,  80,  85,  82,  72, 155, 103 },
+            {  56,  58,  10, 171, 218, 189,  17,  13, 152 },
+            { 144,  71,  10,  38, 171, 213, 144,  34,  26 },
+            { 114,  26,  17, 163,  44, 195,  21,  10, 173 },
+            { 121,  24,  80, 195,  26,  62,  44,  64,  85 },
+            { 170,  46,  55,  19, 136, 160,  33, 206,  71 },
+            {  63,  20,   8, 114, 114, 208,  12,   9, 226 },
+            {  81,  40,  11,  96, 182,  84,  29,  16,  36 }
+        },
+        {
+            { 134, 183,  89, 137,  98, 101, 106, 165, 148 },
+            {  72, 187, 100, 130, 157, 111,  32,  75,  80 },
+            {  66, 102, 167,  99,  74,  62,  40, 234, 128 },
+            {  41,  53,   9, 178, 241, 141,  26,   8, 107 },
+            { 104,  79,  12,  27, 217, 255,  87,  17,   7 },
+            {  74,  43,  26, 146,  73, 166,  49,  23, 157 },
+            {  65,  38, 105, 160,  51,  52,  31, 115, 128 },
+            {  87,  68,  71,  44, 114,  51,  15, 186,  23 },
+            {  47,  41,  14, 110, 182, 183,  21,  17, 194 },
+            {  66,  45,  25, 102, 197, 189,  23,  18,  22 }
+        },
+        {
+            {  88,  88, 147, 150,  42,  46,  45, 196, 205 },
+            {  43,  97, 183, 117,  85,  38,  35, 179,  61 },
+            {  39,  53, 200,  87,  26,  21,  43, 232, 171 },
+            {  56,  34,  51, 104, 114, 102,  29,  93,  77 },
+            { 107,  54,  32,  26,  51,   1,  81,  43,  31 },
+            {  39,  28,  85, 171,  58, 165,  90,  98,  64 },
+            {  34,  22, 116, 206,  23,  34,  43, 166,  73 },
+            {  68,  25, 106,  22,  64, 171,  36, 225, 114 },
+            {  34,  19,  21, 102, 132, 188,  16,  76, 124 },
+            {  62,  18,  78,  95,  85,  57,  50,  48,  51 }
+        },
+        {
+            { 193, 101,  35, 159, 215, 111,  89,  46, 111 },
+            {  60, 148,  31, 172, 219, 228,  21,  18, 111 },
+            { 112, 113,  77,  85, 179, 255,  38, 120, 114 },
+            {  40,  42,   1, 196, 245, 209,  10,  25, 109 },
+            { 100,  80,   8,  43, 154,   1,  51,  26,  71 },
+            {  88,  43,  29, 140, 166, 213,  37,  43, 154 },
+            {  61,  63,  30, 155,  67,  45,  68,   1, 209 },
+            { 142,  78,  78,  16, 255, 128,  34, 197, 171 },
+            {  41,  40,   5, 102, 211, 183,   4,   1, 221 },
+            {  51,  50,  17, 168, 209, 192,  23,  25,  82 }
+        },
+        {
+            { 125,  98,  42,  88, 104,  85, 117, 175,  82 },
+            {  95,  84,  53,  89, 128, 100, 113, 101,  45 },
+            {  75,  79, 123,  47,  51, 128,  81, 171,   1 },
+            {  57,  17,   5,  71, 102,  57,  53,  41,  49 },
+            { 115,  21,   2,  10, 102, 255, 166,  23,   6 },
+            {  38,  33,  13, 121,  57,  73,  26,   1,  85 },
+            {  41,  10,  67, 138,  77, 110,  90,  47, 114 },
+            { 101,  29,  16,  10,  85, 128, 101, 196,  26 },
+            {  57,  18,  10, 102, 102, 213,  34,  20,  43 },
+            { 117,  20,  15,  36, 163, 128,  68,   1,  26 }
+        },
+        {
+            { 138,  31,  36, 171,  27, 166,  38,  44, 229 },
+            {  67,  87,  58, 169,  82, 115,  26,  59, 179 },
+            {  63,  59,  90, 180,  59, 166,  93,  73, 154 },
+            {  40,  40,  21, 116, 143, 209,  34,  39, 175 },
+            {  57,  46,  22,  24, 128,   1,  54,  17,  37 },
+            {  47,  15,  16, 183,  34, 223,  49,  45, 183 },
+            {  46,  17,  33, 183,   6,  98,  15,  32, 183 },
+            {  65,  32,  73, 115,  28, 128,  23, 128, 205 },
+            {  40,   3,   9, 115,  51, 192,  18,   6, 223 },
+            {  87,  37,   9, 115,  59,  77,  64,  21,  47 }
+        },
+        {
+            { 104,  55,  44, 218,   9,  54,  53, 130, 226 },
+            {  64,  90,  70, 205,  40,  41,  23,  26,  57 },
+            {  54,  57, 112, 184,   5,  41,  38, 166, 213 },
+            {  30,  34,  26, 133, 152, 116,  10,  32, 134 },
+            {  75,  32,  12,  51, 192, 255, 160,  43,  51 },
+            {  39,  19,  53, 221,  26, 114,  32,  73, 255 },
+            {  31,   9,  65, 234,   2,  15,   1, 118,  73 },
+            {  88,  31,  35,  67, 102,  85,  55, 186,  85 },
+            {  56,  21,  23, 111,  59, 205,  45,  37, 192 },
+            {  55,  38,  70, 124,  73, 102,   1,  34,  98 }
+        },
+        {
+            { 102,  61,  71,  37,  34,  53,  31, 243, 192 },
+            {  69,  60,  71,  38,  73, 119,  28, 222,  37 },
+            {  68,  45, 128,  34,   1,  47,  11, 245, 171 },
+            {  62,  17,  19,  70, 146,  85,  55,  62,  70 },
+            {  75,  15,   9,   9,  64, 255, 184, 119,  16 },
+            {  37,  43,  37, 154, 100, 163,  85, 160,   1 },
+            {  63,   9,  92, 136,  28,  64,  32, 201,  85 },
+            {  86,   6,  28,   5,  64, 255,  25, 248,   1 },
+            {  56,   8,  17, 132, 137, 255,  55, 116, 128 },
+            {  58,  15,  20,  82, 135,  57,  26, 121,  40 }
+        },
+        {
+            { 164,  50,  31, 137, 154, 133,  25,  35, 218 },
+            {  51, 103,  44, 131, 131, 123,  31,   6, 158 },
+            {  86,  40,  64, 135, 148, 224,  45, 183, 128 },
+            {  22,  26,  17, 131, 240, 154,  14,   1, 209 },
+            {  83,  12,  13,  54, 192, 255,  68,  47,  28 },
+            {  45,  16,  21,  91,  64, 222,   7,   1, 197 },
+            {  56,  21,  39, 155,  60, 138,  23, 102, 213 },
+            {  85,  26,  85,  85, 128, 128,  32, 146, 171 },
+            {  18,  11,   7,  63, 144, 171,   4,   4, 246 },
+            {  35,  27,  10, 146, 174, 171,  12,  26, 128 }
+        },
+        {
+            { 190,  80,  35,  99, 180,  80, 126,  54,  45 },
+            {  85, 126,  47,  87, 176,  51,  41,  20,  32 },
+            { 101,  75, 128, 139, 118, 146, 116, 128,  85 },
+            {  56,  41,  15, 176, 236,  85,  37,   9,  62 },
+            { 146,  36,  19,  30, 171, 255,  97,  27,  20 },
+            {  71,  30,  17, 119, 118, 255,  17,  18, 138 },
+            { 101,  38,  60, 138,  55,  70,  43,  26, 142 },
+            { 138,  45,  61,  62, 219,   1,  81, 188,  64 },
+            {  32,  41,  20, 117, 151, 142,  20,  21, 163 },
+            { 112,  19,  12,  61, 195, 128,  48,   4,  24 }
+        }
+    };
+
+    const TreeDecoder::tree_index uv_mode_tree[2 * (num_uv_modes - 1)] = {
+        -DC_PRED, 2,              /* root: DC_PRED = "0", "1" subtree */
+            -V_PRED, 4,           /* "1" subtree:  V_PRED = "10", "11" subtree */
+                -H_PRED, -TM_PRED /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
+    };
+    const Prob kf_uv_mode_prob [num_uv_modes - 1] = { 142, 114, 183 };
+
+    // "For macroblocks on the top row or left edge of the image, some of
+    //  the predictors will be non-existent.  Such predictors are taken
+    //  to have had the value B_DC_PRED, which, perhaps conveniently,
+    //  takes the value 0 in the enumeration above.
+    //  A simple management scheme for these contexts might maintain a row
+    //  of above predictors and four left predictors.  Before decoding the
+    //  frame, the entire row is initialized to B_DC_PRED; before decoding
+    //  each row of macroblocks, the four left predictors are also set to
+    //  B_DC_PRED.  After decoding a macroblock, the bottom four subblock
+    //  modes are copied into the row predictor (at the current position,
+    //  which then advances to be above the next macroblock), and the
+    //  right four subblock modes are copied into the left predictor."
+    Vector<intra_bmode> above;
+    TRY(above.try_resize(macroblock_width * 4)); // One per 4x4 subblock.
+    Vector<intra_bmode, 4> left; // One per 4x4 subblock.
+    TRY(left.try_resize(4)); // One per 4x4 subblock.
+
+    for (int mb_y = 0; mb_y < macroblock_height; ++mb_y) {
+        for (int i = 0; i < 4; ++i) left[i] = B_DC_PRED;
+
+        for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
+            const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
+            int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
+            dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", intra_y_mode, mb_y, mb_x);
+
+            // "If the Ymode is B_PRED, it is followed by a (tree-coded) mode for each of the 16 Y subblocks."
+            if (intra_y_mode == B_PRED) {
+                //for (int i = 0; i < 16; ++i) {
+                for (int y = 0; y < 4; ++y) {
+                    for (int x = 0; x < 4; ++x) {
+                        // "The outer two dimensions of this array are indexed by the already-
+                        //  coded subblock modes above and to the left of the current block,
+                        //  respectively."
+                        int A = above[mb_x * 4 + x];
+                        int L = left[mb_y];
+                        auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
+                        dbgln_if(WEBP_DEBUG, "intra_b_mode {} y {} x {}", (int)intra_b_mode, y, x);
+
+                        above[mb_x * 4 + x] = intra_b_mode;
+                        left[mb_y] = intra_b_mode;
+                    }
+                }
+            } else {
+                VERIFY (intra_y_mode < B_PRED);
+                constexpr intra_bmode b_mode_from_y_mode[] = { B_DC_PRED, B_VE_PRED, B_HE_PRED, B_TM_PRED };
+                intra_bmode intra_b_mode = b_mode_from_y_mode[intra_y_mode];
+                for (int i = 0; i < 4; ++i) {
+                    above[mb_x * 4 + i] = intra_b_mode;
+                    left[i] = intra_b_mode;
+                }
+            }
+
+            int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
+            dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
+        }
+    }
 
     (void)bitmap_format;
     return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps not yet implemented");
