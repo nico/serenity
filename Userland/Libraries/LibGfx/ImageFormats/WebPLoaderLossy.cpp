@@ -683,12 +683,26 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         B_VE_PRED,  /* predict rows using row above */
         B_HE_PRED,  /* predict columns using column to the left */
 
+#if 0
+// This is the order in the spec
         B_LD_PRED,  /* southwest (left and down) 45 degree diagonal
                        prediction */
         B_RD_PRED,  /* southeast (right and down) "" */
 
         B_VR_PRED,  /* SSE (vertical right) diagonal prediction */
         B_VL_PRED,  /* SSW (vertical left) "" */
+#else
+// This is the order in libwebp
+// Looks like libwebp commit f67b5939a accidentally (?) changed this (?)
+        B_RD_PRED,  /* southeast (right and down) "" */
+
+        B_VR_PRED,  /* SSE (vertical right) diagonal prediction */
+
+        B_LD_PRED,  /* southwest (left and down) 45 degree diagonal
+                       prediction */
+        B_VL_PRED,  /* SSW (vertical left) "" */
+#endif
+
         B_HD_PRED,  /* ESE (horizontal down) "" */
         B_HU_PRED,  /* ENE (horizontal up) "" */
 
