@@ -950,6 +950,8 @@ dbgln(" {} {} {} {} {} {} {} {} {}", t[0], t[1], t[2], t[3], t[4], t[5], t[6], t
         }
     }
 
+    dbgln_if(WEBP_DEBUG, "stream offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
+
     (void)bitmap_format;
     return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps not yet implemented");
 }
