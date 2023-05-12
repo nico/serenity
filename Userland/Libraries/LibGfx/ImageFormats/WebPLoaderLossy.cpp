@@ -210,8 +210,11 @@ ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes pro
     while (true) {
       u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
       i = m_tree[i + b];
-      if (i <= 0)
+      if (i <= 0) {
+//dbgln_if(WEBP_DEBUG, "found {} bit {}", -i, b);
           return -i;
+}
+//dbgln_if(WEBP_DEBUG, "tree i {} prob {}", i, probabilities[i >> 1]);
     }
 #endif
 }
@@ -830,6 +833,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         }
     };
 
+
     const TreeDecoder::tree_index uv_mode_tree[2 * (num_uv_modes - 1)] = {
         -DC_PRED, 2,              /* root: DC_PRED = "0", "1" subtree */
             -V_PRED, 4,           /* "1" subtree:  V_PRED = "10", "11" subtree */
@@ -887,6 +891,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  respectively."
                         int A = above[mb_x * 4 + x];
                         int L = left[y];
+
+if (mb_x == 21 && mb_y == 0 && x == 2 && y == 2) {
+dbgln(" {} {} {} {}", (int)above[4 * mb_x + 0], (int)above[4 * mb_x + 1], (int)above[4 * mb_x + 2], (int)above[4 * mb_x + 3]);
+dbgln(" {} {} {} {}", (int)left[0], (int)left[1], (int)left[2], (int)left[3]);
+Prob const* t = kf_bmode_prob[A][L];
+dbgln(" {} {} {} {} {} {} {} {} {}", t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8]);
+}
+
                         auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
                         dbgln_if(WEBP_DEBUG, "A {} L {} intra_b_mode {} y {} x {}", A, L, (int)intra_b_mode, y, x);
 
