@@ -607,10 +607,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 for (int l = 0; l < 11; l++) {
                     //u8 coeff_prob_update_flag = TRY(L(1));
                     u8 coeff_prob_update_flag = TRY(B(coeff_update_probs[i][j][k][l]));
-                    dbgln_if(WEBP_DEBUG, "coeff_prob_update_flag {}", coeff_prob_update_flag);
+                    //dbgln_if(WEBP_DEBUG, "coeff_prob_update_flag {}", coeff_prob_update_flag);
                     if (coeff_prob_update_flag) {
                         u8 coeff_prob = TRY(L(8));
-                        dbgln_if(WEBP_DEBUG, "coeff_prob {}", coeff_prob);
+                        //dbgln_if(WEBP_DEBUG, "coeff_prob {}", coeff_prob);
+                        (void)coeff_prob;
                     }
                 }
             }
@@ -885,18 +886,22 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  coded subblock modes above and to the left of the current block,
                         //  respectively."
                         int A = above[mb_x * 4 + x];
-                        int L = left[mb_y];
+                        int L = left[y];
                         auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
-                        dbgln_if(WEBP_DEBUG, "intra_b_mode {} y {} x {}", (int)intra_b_mode, y, x);
+                        dbgln_if(WEBP_DEBUG, "A {} L {} intra_b_mode {} y {} x {}", A, L, (int)intra_b_mode, y, x);
 
                         above[mb_x * 4 + x] = intra_b_mode;
-                        left[mb_y] = intra_b_mode;
+                        left[y] = intra_b_mode;
                     }
                 }
             } else {
-                VERIFY (intra_y_mode < B_PRED);
+                VERIFY(intra_y_mode < B_PRED);
+#if 0
                 constexpr intra_bmode b_mode_from_y_mode[] = { B_DC_PRED, B_VE_PRED, B_HE_PRED, B_TM_PRED };
                 intra_bmode intra_b_mode = b_mode_from_y_mode[intra_y_mode];
+#else
+                intra_bmode intra_b_mode = static_cast<intra_bmode>(intra_y_mode);
+#endif
                 for (int i = 0; i < 4; ++i) {
                     above[mb_x * 4 + i] = intra_b_mode;
                     left[i] = intra_b_mode;
