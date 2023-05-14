@@ -225,6 +225,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 {
     auto bitmap_format = include_alpha_channel ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
 
+    // The first partition stores header, per-segment state, and macroblock metadata.
+
     FixedMemoryStream memory_stream { vp8_header.lossy_data };
     BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
     auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
@@ -882,10 +884,25 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     Vector<intra_bmode, 4> left; // One per 4x4 subblock.
     TRY(left.try_resize(4)); // One per 4x4 subblock.
 
+    struct MacroblockMetadata {
+        // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
+        int segment_id; // 0, 1, 2, or 3. Fits in two bits.
+
+        // https://datatracker.ietf.org/doc/html/rfc6386#section-11.1 "mb_skip_coeff"
+        bool skip_coefficients;
+
+        intra_mbmode intra_y_mode;
+        intra_mbmode uv_mode;
+    };
+    Vector<MacroblockMetadata> macroblock_metadata;
+
     for (int mb_y = 0; mb_y < macroblock_height; ++mb_y) {
         for (int i = 0; i < 4; ++i) left[i] = B_DC_PRED;
 
         for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
+            int segment_id = 0;
+            bool skip_coefficients = false;
+
             if (update_mb_segmentation_map) {
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
                 const TreeDecoder::tree_index mb_segment_tree [2 * (4 - 1)] = {
@@ -893,12 +910,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     -0, -1, /* "00" = 0th value, "01" = 1st value */
                     -2, -3  /* "10" = 2nd value, "11" = 3rd value */
                 };
-                int segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, mb_segment_tree_probs));
+                segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, mb_segment_tree_probs));
                 dbgln_if(WEBP_DEBUG, "segment_id {}", segment_id);
             }
             if (mb_no_skip_coeff) {
                 u8 mb_skip_coeff = TRY(B(prob_skip_false));
                 dbgln_if(WEBP_DEBUG, "mb_skip_coeff {}", mb_skip_coeff);
+                skip_coefficients = mb_skip_coeff;
             }
 
             const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
@@ -915,13 +933,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  respectively."
                         int A = above[mb_x * 4 + x];
                         int L = left[y];
-
-if (mb_x == 21 && mb_y == 0 && x == 2 && y == 2) {
-dbgln(" {} {} {} {}", (int)above[4 * mb_x + 0], (int)above[4 * mb_x + 1], (int)above[4 * mb_x + 2], (int)above[4 * mb_x + 3]);
-dbgln(" {} {} {} {}", (int)left[0], (int)left[1], (int)left[2], (int)left[3]);
-Prob const* t = kf_bmode_prob[A][L];
-dbgln(" {} {} {} {} {} {} {} {} {}", t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8]);
-}
 
                         auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
                         dbgln_if(WEBP_DEBUG, "A {} L {} intra_b_mode {} y {} x {}", A, L, (int)intra_b_mode, y, x);
@@ -947,10 +958,91 @@ dbgln(" {} {} {} {} {} {} {} {} {}", t[0], t[1], t[2], t[3], t[4], t[5], t[6], t
 
             int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
             dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
+
+            TRY(macroblock_metadata.try_append(MacroblockMetadata { segment_id, skip_coefficients, static_cast<intra_mbmode>(intra_y_mode), static_cast<intra_mbmode>(uv_mode) }));
         }
     }
 
     dbgln_if(WEBP_DEBUG, "stream offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
+
+    // Done with the first partition!
+
+    if (number_of_dct_partitions > 1)
+        return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps with more than one dct partition not yet implemented");
+
+    // The second partition stores coefficients for all macroblocks.
+    {
+        FixedMemoryStream memory_stream { vp8_header.second_partition };
+        BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
+        auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
+
+        // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
+        enum dct_token {
+            DCT_0,      /* value 0 */
+            DCT_1,      /* 1 */
+            DCT_2,      /* 2 */
+            DCT_3,      /* 3 */
+            DCT_4,      /* 4 */
+            dct_cat1,   /* range 5 - 6  (size 2) */
+            dct_cat2,   /* 7 - 10   (4) */
+            dct_cat3,   /* 11 - 18  (8) */
+            dct_cat4,   /* 19 - 34  (16) */
+            dct_cat5,   /* 35 - 66  (32) */
+            dct_cat6,   /* 67 - 2048  (1982) */
+            dct_eob,    /* end of block */
+
+            num_dct_tokens   /* 12 */
+        };
+
+        const TreeDecoder::tree_index coeff_tree[2 * (num_dct_tokens - 1)] = {
+         -dct_eob, 2,               /* eob = "0"   */
+          -DCT_0, 4,                /* 0   = "10"  */
+           -DCT_1, 6,               /* 1   = "110" */
+            8, 12,
+             -DCT_2, 10,            /* 2   = "11100" */
+              -DCT_3, -DCT_4,       /* 3   = "111010", 4 = "111011" */
+             14, 16,
+              -dct_cat1, -dct_cat2, /* cat1 =  "111100",
+                                       cat2 = "111101" */
+             18, 20,
+              -dct_cat3, -dct_cat4, /* cat3 = "1111100",
+                                       cat4 = "1111101" */
+              -dct_cat5, -dct_cat6  /* cat4 = "1111110",
+                                       cat4 = "1111111" */
+        };
+
+        for (int mb_y = 0, i = 0; mb_y < macroblock_height; ++mb_y) {
+            for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++i) {
+                // See also https://datatracker.ietf.org/doc/html/rfc6386#section-19.3, residual_data() and residual_block()
+
+                auto const& metadata = macroblock_metadata[i];
+                // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
+
+                // https://datatracker.ietf.org/doc/html/rfc6386#section-13
+
+                // "For all intra- and inter-prediction modes apart from B_PRED (intra:
+                //  whose Y subblocks are independently predicted) and SPLITMV (inter),
+                //  each macroblock's residue record begins with the Y2 component of the
+                //  residue, coded using a WHT.  B_PRED and SPLITMV coded macroblocks
+                //  omit this WHT and specify the 0th DCT coefficient in each of the 16 Y
+                //  subblocks."
+                bool have_y2 = metadata.intra_y_mode != B_PRED;
+
+                // "After the optional Y2 block, the residue record continues with 16
+                //  DCTs for the Y subblocks, followed by 4 DCTs for the U subblocks,
+                //  ending with 4 DCTs for the V subblocks.  The subblocks occur in the
+                //  usual order."
+
+                /* (1 Y2)?, 16 Y, 4 U, 4 V */
+                for (int i = have_y2 ? 0 : 1; i < 25; ++i) {
+
+                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
+                    int token = TRY(TreeDecoder(coeff_tree).read(decoder, {}/* XXX prob */));
+                    (void)token;
+                }
+            }
+        }
+    }
 
     (void)bitmap_format;
     return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps not yet implemented");
