@@ -1319,8 +1319,19 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
                     };
 
+                    // "Lookup values from the above two tables are directly used in the DC
+                    //  and AC coefficients in Y1, respectively.  For Y2 and chroma, values
+                    //  from the above tables undergo either scaling or clamping before the
+                    //  multiplies.  Details regarding these scaling and clamping processes
+                    //  can be found in related lookup functions in dixie.c (Section 20.4)."
+                    // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
+                    // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
+                    // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
+                    //   (or, alternatively, the value is clamped ot 132 at most)
+
                     u8 dequantization_index = quantization_indices.y2_dc;  // XXX
 
+#if 0
                     if (update_mb_segmentation_map) {
                         auto const& data = segment_data[metadata.segment_id];
                         if (data.quantizer_update_value.has_value()) {
@@ -1330,11 +1341,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 dequantization_index = data.quantizer_update_value.value();
                         }
                     }
+#endif
 
-                    // XXX clamp
+                    // XXX clamp index
 
                     // "the multiplies are computed and stored using 16-bit signed integers."
                     i16 dequantized_value = (i16)dc_qlookup[dequantization_index] * (i16)v;
+
+                    VERIFY(is_y2);
+                    dequantized_value *= 2; // XXX 155 / 100 for ac
+
                     dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
 
                     (void)ac_qlookup;
