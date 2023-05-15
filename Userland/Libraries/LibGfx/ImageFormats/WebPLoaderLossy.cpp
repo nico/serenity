@@ -378,36 +378,20 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     u8 y_ac_qi = TRY(L(7));
     dbgln_if(WEBP_DEBUG, "y_ac_qi {}", y_ac_qi);
 
-    u8 y_dc_delta_present = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "y_dc_delta_present {}", y_dc_delta_present);
-    if (y_dc_delta_present) {
-      i8 y_dc_delta = TRY(L_signed(4));
-      dbgln_if(WEBP_DEBUG, "y_dc_delta {}", y_dc_delta);
-    }
-    u8 y2_dc_delta_present = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "y2_dc_delta_present {}", y2_dc_delta_present);
-    if (y2_dc_delta_present) {
-      i8 y2_dc_delta = TRY(L_signed(4));
-      dbgln_if(WEBP_DEBUG, "y2_dc_delta {}", y2_dc_delta);
-    }
-    u8 y2_ac_delta_present = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "y2_ac_delta_present {}", y2_ac_delta_present);
-    if (y2_ac_delta_present) {
-      i8 y2_ac_delta = TRY(L_signed(4));
-      dbgln_if(WEBP_DEBUG, "y2_ac_delta {}", y2_ac_delta);
-    }
-    u8 uv_dc_delta_present = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "uv_dc_delta_present {}", uv_dc_delta_present);
-    if (uv_dc_delta_present) {
-      i8 uv_dc_delta = TRY(L_signed(4));
-      dbgln_if(WEBP_DEBUG, "uv_dc_delta {}", uv_dc_delta);
-    }
-    u8 uv_ac_delta_present = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "uv_ac_delta_present {}", uv_ac_delta_present);
-    if (uv_ac_delta_present) {
-      i8 uv_ac_delta = TRY(L_signed(4));
-      dbgln_if(WEBP_DEBUG, "uv_ac_delta {}", uv_ac_delta);
-    }
+    auto read_delta = [&L, &L_signed](StringView name) -> ErrorOr<void> {
+        u8 is_present = TRY(L(1));
+        dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
+        if (is_present) {
+            i8 delta = TRY(L_signed(4));
+            dbgln_if(WEBP_DEBUG, "{}_delta {}", name, delta);
+        }
+        return {};
+    };
+    TRY(read_delta("y_dc_delta"sv));
+    TRY(read_delta("y2_dc_delta"sv));
+    TRY(read_delta("y2_ac_delta"sv));
+    TRY(read_delta("uv_dc_delta"sv));
+    TRY(read_delta("uv_ac_delta"sv));
 
     // Always key_frame in webp.
     u8 refresh_entropy_probs = TRY(L(1));
