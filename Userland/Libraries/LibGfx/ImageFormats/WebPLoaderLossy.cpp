@@ -236,6 +236,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
     auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
+    // Reads n bits followed by a sign bit (0: positive, 1: negative).
+    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
+        i32 i = TRY(decoder.read_literal(n));
+        if (TRY(decoder.read_literal(1)))
+            i = -i;
+        return i;
+    };
+
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.2 "Color Space and Pixel Type (Key Frames Only)"
@@ -282,18 +290,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 u8 quantizer_update = TRY(L(1));
                 dbgln_if(WEBP_DEBUG, "quantizer_update {}", quantizer_update);
                 if (quantizer_update) {
-                    u8 quantizer_update_value = TRY(L(7));
-                    u8 quantizer_update_sign = TRY(L(1));
-                    dbgln_if(WEBP_DEBUG, "quantizer_update_value {} quantizer_update_sign {}", quantizer_update_value, quantizer_update_sign);
+                    i8 quantizer_update_value = TRY(L_signed(7));
+                    dbgln_if(WEBP_DEBUG, "quantizer_update_value {}", quantizer_update_value);
                 }
             }
             for (int i = 0; i < 4; ++i) {
                 u8 loop_filter_update = TRY(L(1));
                 dbgln_if(WEBP_DEBUG, "loop_filter_update {}", loop_filter_update);
                 if (loop_filter_update) {
-                    u8 loop_filter_update_value = TRY(L(6));
-                    u8 loop_filter_update_sign = TRY(L(1));
-                    dbgln_if(WEBP_DEBUG, "loop_filter_update_value {} loop_filter_update_sign {}", loop_filter_update_value, loop_filter_update_sign);
+                    i8 loop_filter_update_value = TRY(L_signed(6));
+                    dbgln_if(WEBP_DEBUG, "loop_filter_update_value {}", loop_filter_update_value);
                 }
             }
         }
@@ -330,18 +336,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 u8 ref_frame_delta_update_flag = TRY(L(1));
                 dbgln_if(WEBP_DEBUG, "ref_frame_delta_update_flag {}", ref_frame_delta_update_flag);
                 if (ref_frame_delta_update_flag) {
-                    u8 delta_magnitude = TRY(L(6));
-                    u8 delta_sign = TRY(L(1)); // 0 - positive, 1 - negative
-                    dbgln_if(WEBP_DEBUG, "delta_magnitude {} loop_filter_update_sign {}", delta_magnitude, delta_sign);
+                    i8 delta = TRY(L_signed(6));
+                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
                 }
             }
             for (int i = 0; i < 4; ++i) {
                 u8 mb_mode_delta_update_flag = TRY(L(1));
                 dbgln_if(WEBP_DEBUG, "mb_mode_delta_update_flag {}", mb_mode_delta_update_flag);
                 if (mb_mode_delta_update_flag) {
-                    u8 delta_magnitude = TRY(L(6));
-                    u8 delta_sign = TRY(L(1));
-                    dbgln_if(WEBP_DEBUG, "delta_magnitude {} loop_filter_update_sign {}", delta_magnitude, delta_sign);
+                    i8 delta = TRY(L_signed(6));
+                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
                 }
             }
         }
@@ -377,37 +381,32 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     u8 y_dc_delta_present = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "y_dc_delta_present {}", y_dc_delta_present);
     if (y_dc_delta_present) {
-      u8 y_dc_delta_magnitude = TRY(L(4));
-      u8 y_dc_delta_sign = TRY(L(1));
-      dbgln_if(WEBP_DEBUG, "y_dc_delta_magnitude {} y_dc_delta_sign {}", y_dc_delta_magnitude, y_dc_delta_sign);
+      i8 y_dc_delta = TRY(L_signed(4));
+      dbgln_if(WEBP_DEBUG, "y_dc_delta {}", y_dc_delta);
     }
     u8 y2_dc_delta_present = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "y2_dc_delta_present {}", y2_dc_delta_present);
     if (y2_dc_delta_present) {
-      u8 y2_dc_delta_magnitude = TRY(L(4));
-      u8 y2_dc_delta_sign = TRY(L(1));
-      dbgln_if(WEBP_DEBUG, "y2_dc_delta_magnitude {} y2_dc_delta_sign {}", y2_dc_delta_magnitude, y2_dc_delta_sign);
+      i8 y2_dc_delta = TRY(L_signed(4));
+      dbgln_if(WEBP_DEBUG, "y2_dc_delta {}", y2_dc_delta);
     }
     u8 y2_ac_delta_present = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "y2_ac_delta_present {}", y2_ac_delta_present);
     if (y2_ac_delta_present) {
-      u8 y2_ac_delta_magnitude = TRY(L(4));
-      u8 y2_ac_delta_sign = TRY(L(1));
-      dbgln_if(WEBP_DEBUG, "y2_ac_delta_magnitude {} y2_ac_delta_sign {}", y2_ac_delta_magnitude, y2_ac_delta_sign);
+      i8 y2_ac_delta = TRY(L_signed(4));
+      dbgln_if(WEBP_DEBUG, "y2_ac_delta {}", y2_ac_delta);
     }
     u8 uv_dc_delta_present = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "uv_dc_delta_present {}", uv_dc_delta_present);
     if (uv_dc_delta_present) {
-      u8 uv_dc_delta_magnitude = TRY(L(4));
-      u8 uv_dc_delta_sign = TRY(L(1));
-      dbgln_if(WEBP_DEBUG, "uv_dc_delta_magnitude {} uv_dc_delta_sign {}", uv_dc_delta_magnitude, uv_dc_delta_sign);
+      i8 uv_dc_delta = TRY(L_signed(4));
+      dbgln_if(WEBP_DEBUG, "uv_dc_delta {}", uv_dc_delta);
     }
     u8 uv_ac_delta_present = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "uv_ac_delta_present {}", uv_ac_delta_present);
     if (uv_ac_delta_present) {
-      u8 uv_ac_delta_magnitude = TRY(L(4));
-      u8 uv_ac_delta_sign = TRY(L(1));
-      dbgln_if(WEBP_DEBUG, "uv_ac_delta_magnitude {} uv_ac_delta_sign {}", uv_ac_delta_magnitude, uv_ac_delta_sign);
+      i8 uv_ac_delta = TRY(L_signed(4));
+      dbgln_if(WEBP_DEBUG, "uv_ac_delta {}", uv_ac_delta);
     }
 
     // Always key_frame in webp.
