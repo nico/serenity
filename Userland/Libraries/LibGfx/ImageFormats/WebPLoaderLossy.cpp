@@ -268,22 +268,32 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     u8 segmentation_enabled = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "segmentation_enabled {}", (int)segmentation_enabled);
+
+    u8 update_segment_feature_data = false;
+    enum class SegmentFeatureMode {
+        AbsoluteValueMode = 0,
+        DeltaValueMode = 1,
+    };
+    auto segment_feature_mode = SegmentFeatureMode::AbsoluteValueMode;
+
+    struct SegmentData {
+        Optional<i8> quantizer_update_value;
+        Optional<i8> loop_filter_update_value;
+    };
+    SegmentData segment_data[4] = {};
+
     if (segmentation_enabled) {
         // "update_segmentation()" in 19.2
 
         // FIXME: Is this always true for keyframes in webp files? Should we return an Error if this is 0 instead?
         update_mb_segmentation_map = TRY(L(1));
-        u8 update_segment_feature_data = TRY(L(1));
+        update_segment_feature_data = TRY(L(1));
 
         dbgln_if(WEBP_DEBUG, "update_mb_segmentation_map {} update_segment_feature_data {}",
             update_mb_segmentation_map, update_segment_feature_data);
 
         if (update_segment_feature_data) {
-            enum class SegmentFeatureMode {
-                AbsoluteValueMode = 0,
-                DeltaValueMode = 1,
-            };
-            auto segment_feature_mode = static_cast<SegmentFeatureMode>(TRY(L(1)));
+            segment_feature_mode = static_cast<SegmentFeatureMode>(TRY(L(1)));
             dbgln_if(WEBP_DEBUG, "segment_feature_mode {}", (int)segment_feature_mode);
 
             for (int i = 0; i < 4; ++i) {
@@ -292,6 +302,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 if (quantizer_update) {
                     i8 quantizer_update_value = TRY(L_signed(7));
                     dbgln_if(WEBP_DEBUG, "quantizer_update_value {}", quantizer_update_value);
+                    segment_data[i].quantizer_update_value = quantizer_update_value;
                 }
             }
             for (int i = 0; i < 4; ++i) {
@@ -300,6 +311,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 if (loop_filter_update) {
                     i8 loop_filter_update_value = TRY(L_signed(6));
                     dbgln_if(WEBP_DEBUG, "loop_filter_update_value {}", loop_filter_update_value);
+                    segment_data[i].loop_filter_update_value = loop_filter_update_value;
                 }
             }
         }
