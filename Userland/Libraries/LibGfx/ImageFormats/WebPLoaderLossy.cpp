@@ -1074,6 +1074,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     struct MacroblockMetadata {
         // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
+        // Read only if `update_mb_segmentation_map` is set.
         int segment_id; // 0, 1, 2, or 3. Fits in two bits.
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-11.1 "mb_skip_coeff"
@@ -1244,10 +1245,17 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     // XXX implement trickiness
                     int tricky = 0;
 
+
+                    // "In general, all DCT coefficients are decoded using the same tree.
+                    //  However, if the preceding coefficient is a DCT_0, decoding will skip
+                    //  the first branch, since it is not possible for dct_eob to follow a
+                    //  DCT_0."
+                    // XXX implement the DCT_0 exception
+
                     int token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
                     dbgln_if(WEBP_DEBUG, "token {}", token);
 
-                    // XXX `val = (int)token` for [DCT_0, DCT_4]
+                    int v = (int)token; // For DCT_0 to DCT4
 
                     if (token >= dct_cat1 && token <= dct_cat6) {
                         int starts[] = { 5, 7, 11, 19, 35, 67 };
@@ -1262,7 +1270,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         Prob const Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129 };
                         Prob const* const Pcats[] = { Pcat1, Pcat2, Pcat3, Pcat4, Pcat5, Pcat6 };
 
-                        int v = 0;
+                        v = 0;
                         for (int i = 0; i < bits[token - dct_cat1]; ++i)
                             v = (v << 1) | TRY(decoder.read_bool(Pcats[token - dct_cat1][i]));
 
@@ -1275,6 +1283,61 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         dbgln_if(WEBP_DEBUG, "v {}", v);
                     }
+
+                    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
+                    // "before inverting the transform, each decoded coefficient
+                    //  is multiplied by one of six dequantization factors, the choice of
+                    //  which depends on the plane (Y, chroma = U or V, Y2) and coefficient
+                    //  position (DC = coefficient 0, AC = coefficients 1-15).  The six
+                    //  values are specified using 7-bit indices into six corresponding fixed
+                    //  tables (the tables are given in Section 14)."
+                    // Section 14 then lists two fixed tables.
+
+                    // https://datatracker.ietf.org/doc/html/rfc6386#section-14.1 "Dequantization"
+                    static int constexpr dc_qlookup[] = {
+                         4,   5,   6,   7,   8,   9,  10,  10,   11,  12,  13,  14,  15,
+                        16,  17,  17,  18,  19,  20,  20,  21,   21,  22,  22,  23,  23,
+                        24,  25,  25,  26,  27,  28,  29,  30,   31,  32,  33,  34,  35,
+                        36,  37,  37,  38,  39,  40,  41,  42,   43,  44,  45,  46,  46,
+                        47,  48,  49,  50,  51,  52,  53,  54,   55,  56,  57,  58,  59,
+                        60,  61,  62,  63,  64,  65,  66,  67,   68,  69,  70,  71,  72,
+                        73,  74,  75,  76,  76,  77,  78,  79,   80,  81,  82,  83,  84,
+                        85,  86,  87,  88,  89,  91,  93,  95,   96,  98, 100, 101, 102,
+                        104, 106, 108, 110, 112, 114, 116, 118, 122, 124, 126, 128, 130,
+                        132, 134, 136, 138, 140, 143, 145, 148, 151, 154, 157,
+                    };
+                    static int constexpr ac_qlookup[] = {
+                          4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,
+                         17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,
+                         30,  31,  32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,
+                         43,  44,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,
+                         56,  57,  58,  60,  62,  64,  66,  68,  70,  72,  74,  76,  78,
+                         80,  82,  84,  86,  88,  90,  92,  94,  96,  98, 100, 102, 104,
+                        106, 108, 110, 112, 114, 116, 119, 122, 125, 128, 131, 134, 137,
+                        140, 143, 146, 149, 152, 155, 158, 161, 164, 167, 170, 173, 177,
+                        181, 185, 189, 193, 197, 201, 205, 209, 213, 217, 221, 225, 229,
+                        234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
+                    };
+
+                    u8 dequantization_index = quantization_indices.y2_dc;  // XXX
+
+                    if (update_mb_segmentation_map) {
+                        auto const& data = segment_data[metadata.segment_id];
+                        if (data.quantizer_update_value.has_value()) {
+                            if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
+                                dequantization_index += data.quantizer_update_value.value();
+                            else
+                                dequantization_index = data.quantizer_update_value.value();
+                        }
+                    }
+
+                    // XXX clamp
+
+                    // "the multiplies are computed and stored using 16-bit signed integers."
+                    i16 dequantized_value = (i16)dc_qlookup[dequantization_index] * (i16)v;
+                    dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
+
+                    (void)ac_qlookup;
 
                     return Error::from_string_literal("WebPImageDecoderPlugin: decoding more than 1 token not yet implemented");
                 }
