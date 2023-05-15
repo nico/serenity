@@ -1247,6 +1247,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     int token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
                     dbgln_if(WEBP_DEBUG, "token {}", token);
 
+                    // XXX `val = (int)token` for [DCT_0, DCT_4]
+
                     if (token >= dct_cat1 && token <= dct_cat6) {
                         int starts[] = { 5, 7, 11, 19, 35, 67 };
                         //int sizes[] = { 2, 4, 8, 16, 32, 1982 };
