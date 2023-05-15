@@ -1188,6 +1188,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 // See also https://datatracker.ietf.org/doc/html/rfc6386#section-19.3, residual_data() and residual_block()
 
                 auto const& metadata = macroblock_metadata[i];
+
+                // XXX test this (add an Error:: return, check it gets hit during decoding, etc)
+                if (metadata.skip_coefficients)
+                    continue;
+
                 // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
 
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-13
