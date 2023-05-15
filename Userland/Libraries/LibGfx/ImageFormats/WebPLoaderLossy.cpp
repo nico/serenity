@@ -1237,7 +1237,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     //  from zero for block types 1, 2, or 3 and starting from one for block
                     //  type 0.  The second array index is then"
                     // "block type" here seems to refer to the "type of plane" in the previous paragraph.
-                    const int coeff_bands [16] = { 0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7 };
+                    const int coeff_bands[16] = { 0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7 };
                     int band = coeff_bands[i % 16];  // XXX is this right?
 
                     // "The third dimension is the trickiest."
@@ -1252,12 +1252,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //int sizes[] = { 2, 4, 8, 16, 32, 1982 };
                         int bits[] = { 1, 2, 3, 4, 5, 11 };
 
-                        Prob const Pcat1[] = { 159};
-                        Prob const Pcat2[] = { 165, 145};
-                        Prob const Pcat3[] = { 173, 148, 140};
-                        Prob const Pcat4[] = { 176, 155, 140, 135};
-                        Prob const Pcat5[] = { 180, 157, 141, 134, 130};
-                        Prob const Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129};
+                        Prob const Pcat1[] = { 159 };
+                        Prob const Pcat2[] = { 165, 145 };
+                        Prob const Pcat3[] = { 173, 148, 140 };
+                        Prob const Pcat4[] = { 176, 155, 140, 135 };
+                        Prob const Pcat5[] = { 180, 157, 141, 134, 130 };
+                        Prob const Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129 };
                         Prob const* const Pcats[] = { Pcat1, Pcat2, Pcat3, Pcat4, Pcat5, Pcat6 };
 
                         int v = 0;
