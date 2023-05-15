@@ -375,23 +375,42 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // "quant_indices()" in 19.2
     // Also https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
+    struct QuantizationIndices {
+        u8 y_ac;
+        u8 y_dc;
+
+        u8 y2_dc;
+        u8 y2_ac;
+
+        u8 uv_dc;
+        u8 uv_ac;
+    };
+
+    // "The first 7-bit index gives the dequantization table index for
+    //  Y-plane AC coefficients, called yac_qi.  It is always coded and acts
+    //  as a baseline for the other 5 quantization indices, each of which is
+    //  represented by a delta from this baseline index."
     u8 y_ac_qi = TRY(L(7));
     dbgln_if(WEBP_DEBUG, "y_ac_qi {}", y_ac_qi);
 
-    auto read_delta = [&L, &L_signed](StringView name) -> ErrorOr<void> {
+    auto quantization_indices = QuantizationIndices { y_ac_qi, y_ac_qi, y_ac_qi, y_ac_qi, y_ac_qi, y_ac_qi };
+    auto read_delta = [&L, &L_signed, y_ac_qi](StringView name, u8* destination) -> ErrorOr<void> {
         u8 is_present = TRY(L(1));
         dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
         if (is_present) {
             i8 delta = TRY(L_signed(4));
             dbgln_if(WEBP_DEBUG, "{}_delta {}", name, delta);
+            if (y_ac_qi + delta < 0)
+                return Error::from_string_literal("WebPImageDecoderPlugin: got negative quantization index");
+            *destination = y_ac_qi + delta;
         }
         return {};
     };
-    TRY(read_delta("y_dc_delta"sv));
-    TRY(read_delta("y2_dc_delta"sv));
-    TRY(read_delta("y2_ac_delta"sv));
-    TRY(read_delta("uv_dc_delta"sv));
-    TRY(read_delta("uv_ac_delta"sv));
+    TRY(read_delta("y_dc_delta"sv, &quantization_indices.y_dc));
+    TRY(read_delta("y2_dc_delta"sv, &quantization_indices.y2_dc));
+    TRY(read_delta("y2_ac_delta"sv, &quantization_indices.y2_ac));
+    TRY(read_delta("uv_dc_delta"sv, &quantization_indices.uv_dc));
+    TRY(read_delta("uv_ac_delta"sv, &quantization_indices.uv_ac));
 
     // Always key_frame in webp.
     u8 refresh_entropy_probs = TRY(L(1));
