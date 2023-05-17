@@ -1072,6 +1072,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     Vector<intra_bmode, 4> left; // One per 4x4 subblock.
     TRY(left.try_resize(4)); // One per 4x4 subblock.
 
+    // Similar to BlockContext in LibVideo/VP9/Context.h
     struct MacroblockMetadata {
         // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
         // Read only if `update_mb_segmentation_map` is set.
@@ -1211,156 +1212,171 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 //  usual order."
 
                 /* (1 Y2)?, 16 Y, 4 U, 4 V */
+                // Corresponds to `residual_data()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                 for (int i = have_y2 ? 0 : 1; i < 25; ++i) {
 
-                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
-                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.3 "Token Probabilities"
+                    // Corresponds to `residual_block()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
+                    // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
+                    int firstCoeff = have_y2 && (i >= 1 && i <= 16) ? 1 : 0;
+                    for (int j = firstCoeff; j < 16; ++j) {
+                        // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
+                        // https://datatracker.ietf.org/doc/html/rfc6386#section-13.3 "Token Probabilities"
 
-                    // "Working from the outside in, the outermost dimension is indexed by
-                    //  the type of plane being decoded:
-                    //  o  0 - Y beginning at coefficient 1 (i.e., Y after Y2)
-                    //  o  1 - Y2
-                    //  o  2 - U or V
-                    //  o  3 - Y beginning at coefficient 0 (i.e., Y in the absence of Y2)."
-                    bool is_y_after_y2 = i >= 1 && i <= 16 && have_y2;
-                    bool is_y2 = i == 0;
-                    bool is_u_or_v = i > 16;
-                    bool is_y_without_y2 = i >= 1 && i <= 16 && 1 && !have_y2;
-                    int plane;
-                    if (is_y_after_y2)
-                        plane = 0;
-                    else if (is_y2)
-                        plane = 1;
-                    else if (is_u_or_v)
-                        plane = 2;
-                    else {
-                        VERIFY(is_y_without_y2);
-                        plane = 3;
-                    }
-
-                    // "The next dimension is selected by the position of the coefficient
-                    //  being decoded.  That position, c, steps by ones up to 15, starting
-                    //  from zero for block types 1, 2, or 3 and starting from one for block
-                    //  type 0.  The second array index is then"
-                    // "block type" here seems to refer to the "type of plane" in the previous paragraph.
-                    const int coeff_bands[16] = { 0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7 };
-                    int band = coeff_bands[i % 16];  // XXX is this right?
-
-                    // "The third dimension is the trickiest."
-                    // XXX implement trickiness
-                    int tricky = 0;
-
-
-                    // "In general, all DCT coefficients are decoded using the same tree.
-                    //  However, if the preceding coefficient is a DCT_0, decoding will skip
-                    //  the first branch, since it is not possible for dct_eob to follow a
-                    //  DCT_0."
-                    // XXX implement the DCT_0 exception
-
-                    int token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
-                    dbgln_if(WEBP_DEBUG, "token {}", token);
-
-                    int v = (int)token; // For DCT_0 to DCT4
-
-                    if (token >= dct_cat1 && token <= dct_cat6) {
-                        int starts[] = { 5, 7, 11, 19, 35, 67 };
-                        //int sizes[] = { 2, 4, 8, 16, 32, 1982 };
-                        int bits[] = { 1, 2, 3, 4, 5, 11 };
-
-                        Prob const Pcat1[] = { 159 };
-                        Prob const Pcat2[] = { 165, 145 };
-                        Prob const Pcat3[] = { 173, 148, 140 };
-                        Prob const Pcat4[] = { 176, 155, 140, 135 };
-                        Prob const Pcat5[] = { 180, 157, 141, 134, 130 };
-                        Prob const Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129 };
-                        Prob const* const Pcats[] = { Pcat1, Pcat2, Pcat3, Pcat4, Pcat5, Pcat6 };
-
-                        v = 0;
-                        for (int i = 0; i < bits[token - dct_cat1]; ++i)
-                            v = (v << 1) | TRY(decoder.read_bool(Pcats[token - dct_cat1][i]));
-
-                        v += starts[token - dct_cat1];
-
-                        if (v) {
-                            if (TRY(decoder.read_bool(128)))
-                                v = -v;
+                        // "Working from the outside in, the outermost dimension is indexed by
+                        //  the type of plane being decoded:
+                        //  o  0 - Y beginning at coefficient 1 (i.e., Y after Y2)
+                        //  o  1 - Y2
+                        //  o  2 - U or V
+                        //  o  3 - Y beginning at coefficient 0 (i.e., Y in the absence of Y2)."
+                        bool is_y_after_y2 = i >= 1 && i <= 16 && have_y2;
+                        bool is_y2 = i == 0;
+                        bool is_u_or_v = i > 16;
+                        bool is_y_without_y2 = i >= 1 && i <= 16 && 1 && !have_y2;
+                        int plane;
+                        if (is_y_after_y2)
+                            plane = 0;
+                        else if (is_y2)
+                            plane = 1;
+                        else if (is_u_or_v)
+                            plane = 2;
+                        else {
+                            VERIFY(is_y_without_y2);
+                            plane = 3;
                         }
 
-                        dbgln_if(WEBP_DEBUG, "v {}", v);
-                    }
+                        // "The next dimension is selected by the position of the coefficient
+                        //  being decoded.  That position, c, steps by ones up to 15, starting
+                        //  from zero for block types 1, 2, or 3 and starting from one for block
+                        //  type 0.  The second array index is then"
+                        // "block type" here seems to refer to the "type of plane" in the previous paragraph.
+                        const int coeff_bands[16] = { 0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7 };
+                        int band = coeff_bands[j];
 
-                    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
-                    // "before inverting the transform, each decoded coefficient
-                    //  is multiplied by one of six dequantization factors, the choice of
-                    //  which depends on the plane (Y, chroma = U or V, Y2) and coefficient
-                    //  position (DC = coefficient 0, AC = coefficients 1-15).  The six
-                    //  values are specified using 7-bit indices into six corresponding fixed
-                    //  tables (the tables are given in Section 14)."
-                    // Section 14 then lists two fixed tables.
+                        // "The third dimension is the trickiest."
+                        // XXX implement trickiness
+                        int tricky = 0;
 
-                    // https://datatracker.ietf.org/doc/html/rfc6386#section-14.1 "Dequantization"
-                    static int constexpr dc_qlookup[] = {
-                         4,   5,   6,   7,   8,   9,  10,  10,   11,  12,  13,  14,  15,
-                        16,  17,  17,  18,  19,  20,  20,  21,   21,  22,  22,  23,  23,
-                        24,  25,  25,  26,  27,  28,  29,  30,   31,  32,  33,  34,  35,
-                        36,  37,  37,  38,  39,  40,  41,  42,   43,  44,  45,  46,  46,
-                        47,  48,  49,  50,  51,  52,  53,  54,   55,  56,  57,  58,  59,
-                        60,  61,  62,  63,  64,  65,  66,  67,   68,  69,  70,  71,  72,
-                        73,  74,  75,  76,  76,  77,  78,  79,   80,  81,  82,  83,  84,
-                        85,  86,  87,  88,  89,  91,  93,  95,   96,  98, 100, 101, 102,
-                        104, 106, 108, 110, 112, 114, 116, 118, 122, 124, 126, 128, 130,
-                        132, 134, 136, 138, 140, 143, 145, 148, 151, 154, 157,
-                    };
-                    static int constexpr ac_qlookup[] = {
-                          4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,
-                         17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,
-                         30,  31,  32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,
-                         43,  44,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,
-                         56,  57,  58,  60,  62,  64,  66,  68,  70,  72,  74,  76,  78,
-                         80,  82,  84,  86,  88,  90,  92,  94,  96,  98, 100, 102, 104,
-                        106, 108, 110, 112, 114, 116, 119, 122, 125, 128, 131, 134, 137,
-                        140, 143, 146, 149, 152, 155, 158, 161, 164, 167, 170, 173, 177,
-                        181, 185, 189, 193, 197, 201, 205, 209, 213, 217, 221, 225, 229,
-                        234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
-                    };
+                        // "In general, all DCT coefficients are decoded using the same tree.
+                        //  However, if the preceding coefficient is a DCT_0, decoding will skip
+                        //  the first branch, since it is not possible for dct_eob to follow a
+                        //  DCT_0."
 
-                    // "Lookup values from the above two tables are directly used in the DC
-                    //  and AC coefficients in Y1, respectively.  For Y2 and chroma, values
-                    //  from the above tables undergo either scaling or clamping before the
-                    //  multiplies.  Details regarding these scaling and clamping processes
-                    //  can be found in related lookup functions in dixie.c (Section 20.4)."
-                    // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
-                    // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
-                    // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
-                    //   (or, alternatively, the value is clamped ot 132 at most)
+                        int token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
+                        dbgln_if(WEBP_DEBUG, "token {}", token);
 
-                    u8 dequantization_index = quantization_indices.y2_dc;  // XXX
+                        if (token == dct_eob)
+                            break;
 
-#if 0
-                    if (update_mb_segmentation_map) {
-                        auto const& data = segment_data[metadata.segment_id];
-                        if (data.quantizer_update_value.has_value()) {
-                            if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
-                                dequantization_index += data.quantizer_update_value.value();
+                        // XXX implement the DCT_0 exception
+                        if (token == DCT_0)
+                            return Error::from_string_literal("XXX implement the DCT_0 exception");
+
+                        int v = (int)token; // For DCT_0 to DCT4
+
+                        if (token >= dct_cat1 && token <= dct_cat6) {
+                            int starts[] = { 5, 7, 11, 19, 35, 67 };
+                            //int sizes[] = { 2, 4, 8, 16, 32, 1982 };
+                            int bits[] = { 1, 2, 3, 4, 5, 11 };
+
+                            Prob const Pcat1[] = { 159 };
+                            Prob const Pcat2[] = { 165, 145 };
+                            Prob const Pcat3[] = { 173, 148, 140 };
+                            Prob const Pcat4[] = { 176, 155, 140, 135 };
+                            Prob const Pcat5[] = { 180, 157, 141, 134, 130 };
+                            Prob const Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129 };
+                            Prob const* const Pcats[] = { Pcat1, Pcat2, Pcat3, Pcat4, Pcat5, Pcat6 };
+
+                            v = 0;
+                            for (int i = 0; i < bits[token - dct_cat1]; ++i)
+                                v = (v << 1) | TRY(decoder.read_bool(Pcats[token - dct_cat1][i]));
+
+                            v += starts[token - dct_cat1];
+
+                            if (v) {
+                                if (TRY(decoder.read_bool(128)))
+                                    v = -v;
+                            }
+
+                            dbgln_if(WEBP_DEBUG, "v {}", v);
+                        }
+
+                        // https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
+                        // "before inverting the transform, each decoded coefficient
+                        //  is multiplied by one of six dequantization factors, the choice of
+                        //  which depends on the plane (Y, chroma = U or V, Y2) and coefficient
+                        //  position (DC = coefficient 0, AC = coefficients 1-15).  The six
+                        //  values are specified using 7-bit indices into six corresponding fixed
+                        //  tables (the tables are given in Section 14)."
+                        // Section 14 then lists two fixed tables.
+
+                        // https://datatracker.ietf.org/doc/html/rfc6386#section-14.1 "Dequantization"
+                        static int constexpr dc_qlookup[] = {
+                             4,   5,   6,   7,   8,   9,  10,  10,   11,  12,  13,  14,  15,
+                            16,  17,  17,  18,  19,  20,  20,  21,   21,  22,  22,  23,  23,
+                            24,  25,  25,  26,  27,  28,  29,  30,   31,  32,  33,  34,  35,
+                            36,  37,  37,  38,  39,  40,  41,  42,   43,  44,  45,  46,  46,
+                            47,  48,  49,  50,  51,  52,  53,  54,   55,  56,  57,  58,  59,
+                            60,  61,  62,  63,  64,  65,  66,  67,   68,  69,  70,  71,  72,
+                            73,  74,  75,  76,  76,  77,  78,  79,   80,  81,  82,  83,  84,
+                            85,  86,  87,  88,  89,  91,  93,  95,   96,  98, 100, 101, 102,
+                            104, 106, 108, 110, 112, 114, 116, 118, 122, 124, 126, 128, 130,
+                            132, 134, 136, 138, 140, 143, 145, 148, 151, 154, 157,
+                        };
+                        static int constexpr ac_qlookup[] = {
+                              4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,
+                             17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,
+                             30,  31,  32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,
+                             43,  44,  45,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,
+                             56,  57,  58,  60,  62,  64,  66,  68,  70,  72,  74,  76,  78,
+                             80,  82,  84,  86,  88,  90,  92,  94,  96,  98, 100, 102, 104,
+                            106, 108, 110, 112, 114, 116, 119, 122, 125, 128, 131, 134, 137,
+                            140, 143, 146, 149, 152, 155, 158, 161, 164, 167, 170, 173, 177,
+                            181, 185, 189, 193, 197, 201, 205, 209, 213, 217, 221, 225, 229,
+                            234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
+                        };
+
+                        // "Lookup values from the above two tables are directly used in the DC
+                        //  and AC coefficients in Y1, respectively.  For Y2 and chroma, values
+                        //  from the above tables undergo either scaling or clamping before the
+                        //  multiplies.  Details regarding these scaling and clamping processes
+                        //  can be found in related lookup functions in dixie.c (Section 20.4)."
+                        // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
+                        // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
+                        // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
+                        //   (or, alternatively, the value is clamped ot 132 at most)
+
+                        u8 dequantization_index = quantization_indices.y2_dc;  // XXX
+
+    #if 0
+                        if (update_mb_segmentation_map) {
+                            auto const& data = segment_data[metadata.segment_id];
+                            if (data.quantizer_update_value.has_value()) {
+                                if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
+                                    dequantization_index += data.quantizer_update_value.value();
+                                else
+                                    dequantization_index = data.quantizer_update_value.value();
+                            }
+                        }
+    #endif
+
+                        // XXX clamp index
+
+                        // "the multiplies are computed and stored using 16-bit signed integers."
+                        i16 dequantized_value = (i16)dc_qlookup[dequantization_index] * (i16)v;
+
+                        if (is_y2) {
+                            if (j == 0)
+                                dequantized_value *= 2;
                             else
-                                dequantization_index = data.quantizer_update_value.value();
+                                dequantized_value = (dequantized_value * 155) / 100;
                         }
+
+                        dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
+
+                        (void)ac_qlookup;
+
+                        return Error::from_string_literal("WebPImageDecoderPlugin: decoding more than 1 token not yet implemented");
                     }
-#endif
-
-                    // XXX clamp index
-
-                    // "the multiplies are computed and stored using 16-bit signed integers."
-                    i16 dequantized_value = (i16)dc_qlookup[dequantization_index] * (i16)v;
-
-                    VERIFY(is_y2);
-                    dequantized_value *= 2; // XXX 155 / 100 for ac
-
-                    dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
-
-                    (void)ac_qlookup;
-
-                    return Error::from_string_literal("WebPImageDecoderPlugin: decoding more than 1 token not yet implemented");
                 }
             }
         }
