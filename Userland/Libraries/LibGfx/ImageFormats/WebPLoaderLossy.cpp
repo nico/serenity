@@ -1184,6 +1184,23 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                        cat4 = "1111111" */
         };
 
+        // Store if each plane has nonzero coefficients in the block above and to the left of the current block.
+        Vector<bool> y2_above;
+        TRY(y2_above.try_resize(macroblock_width));
+        bool y2_left {};
+
+        Vector<bool> y_above;
+        TRY(y_above.try_resize(macroblock_width * 4));
+        bool y_left[4] {};
+
+        Vector<bool> u_above;
+        TRY(u_above.try_resize(macroblock_width * 2));
+        bool u_left[2] {};
+
+        Vector<bool> v_above;
+        TRY(v_above.try_resize(macroblock_width * 2));
+        bool v_left[2] {};
+
         for (int mb_y = 0, i = 0; mb_y < macroblock_height; ++mb_y) {
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++i) {
                 // See also https://datatracker.ietf.org/doc/html/rfc6386#section-19.3, residual_data() and residual_block()
@@ -1191,8 +1208,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 auto const& metadata = macroblock_metadata[i];
 
                 // XXX test this (add an Error:: return, check it gets hit during decoding, etc)
-                if (metadata.skip_coefficients)
-                    continue;
+                if (metadata.skip_coefficients) {
+                    // XXX when implementing this, update *_above / *_left here.
+                    return Error::from_string_literal("XXX impl and test coefficient skipping");
+                    //continue;
+                }
 
                 // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
 
@@ -1206,6 +1226,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 //  subblocks."
                 bool have_y2 = metadata.intra_y_mode != B_PRED;
 
+                // XXX copy over y2_left and y2_above
+
                 // "After the optional Y2 block, the residue record continues with 16
                 //  DCTs for the Y subblocks, followed by 4 DCTs for the U subblocks,
                 //  ending with 4 DCTs for the V subblocks.  The subblocks occur in the
@@ -1214,6 +1236,24 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 /* (1 Y2)?, 16 Y, 4 U, 4 V */
                 // Corresponds to `residual_data()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                 for (int i = have_y2 ? 0 : 1; i < 25; ++i) {
+
+                    bool subblock_has_nonzero_coefficients = false;
+
+                    u8 sub_x, sub_y;
+                    if (i >= 1 && i <= 16) {
+                        sub_x = (i - 1) % 4;
+                        sub_y = (i - 1) / 4;
+                    } else if (i >= 17 && i <= 20) {
+                        sub_x = (i - 17) % 2;
+                        sub_y = (i - 17) / 2;
+                    } else if (i >= 21) {
+                        sub_x = (i - 21) % 2;
+                        sub_y = (i - 21) / 2;
+                    }
+
+                    bool is_u = i >= 17 && i <= 20;
+                    bool is_v = i >= 21;
+                    bool is_y2 = i == 0;
 
                     // Corresponds to `residual_block()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                     // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
@@ -1230,7 +1270,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  o  2 - U or V
                         //  o  3 - Y beginning at coefficient 0 (i.e., Y in the absence of Y2)."
                         bool is_y_after_y2 = i >= 1 && i <= 16 && have_y2;
-                        bool is_y2 = i == 0;
                         bool is_u_or_v = i > 16;
                         bool is_y_without_y2 = i >= 1 && i <= 16 && 1 && !have_y2;
                         int plane;
@@ -1272,7 +1311,21 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  the top row or left edge of the frame.  These "non-existent"
                         //  predictors above and to the left of the image are simply taken to be
                         //  empty -- that is, taken to contain no non-zero coefficients."
-                        // XXX Implement
+                        if (j == firstCoeff) {
+                            if (is_y2) {
+                                if (y2_left) ++tricky;
+                                if (y2_above[mb_x]) ++tricky;
+                            } else if (is_u) {
+                                if (u_left[sub_y]) ++tricky;
+                                if (u_above[mb_x * 2 + sub_x]) ++tricky;
+                            } else if (is_v) {
+                                if (v_left[sub_y]) ++tricky;
+                                if (v_above[mb_x * 2 + sub_x]) ++tricky;
+                            } else { // Y
+                                if (y_left[sub_y]) ++tricky;
+                                if (y_above[mb_x * 4 + sub_x]) ++tricky;
+                            }
+                        }
 
                         // "Beyond the first coefficient, the context index is determined by the
                         //  absolute value of the most recently decoded coefficient (necessarily
@@ -1307,6 +1360,9 @@ dbgln();
                         // XXX implement the DCT_0 exception
                         if (token == DCT_0)
                             return Error::from_string_literal("XXX implement the DCT_0 exception");
+
+                        // Subblock has non-0 coefficients. Store that, so that `tricky` on the next subblock is initialized correctly.
+                        subblock_has_nonzero_coefficients = true;
 
                         int v = (int)token; // For DCT_0 to DCT4
 
@@ -1424,6 +1480,19 @@ dbgln();
 
                         dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
                         last_decoded_value = dequantized_value;
+                    }
+                    if (is_y2) {
+                        y2_left = subblock_has_nonzero_coefficients;
+                        y2_above[mb_x] = subblock_has_nonzero_coefficients;
+                    } else if (is_u) {
+                        u_left[sub_y] = subblock_has_nonzero_coefficients;
+                        u_above[mb_x * 2 + sub_x] = subblock_has_nonzero_coefficients;
+                    } else if (is_v) {
+                        v_left[sub_y] = subblock_has_nonzero_coefficients;
+                        v_above[mb_x * 2 + sub_x] = subblock_has_nonzero_coefficients;
+                    } else { // Y
+                        y_left[sub_y] = subblock_has_nonzero_coefficients;
+                        y_above[mb_x * 4 + sub_x] = subblock_has_nonzero_coefficients;
                     }
                 }
                 return Error::from_string_literal("WebPImageDecoderPlugin: decoding more than 1 token not yet implemented");
