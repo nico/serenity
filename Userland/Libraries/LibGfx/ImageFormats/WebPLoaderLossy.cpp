@@ -1218,6 +1218,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     // Corresponds to `residual_block()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                     // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
                     int firstCoeff = have_y2 && (i >= 1 && i <= 16) ? 1 : 0;
+                    i16 last_decoded_value = 0;
                     for (int j = firstCoeff; j < 16; ++j) {
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.3 "Token Probabilities"
@@ -1253,13 +1254,43 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         int band = coeff_bands[j];
 
                         // "The third dimension is the trickiest."
-                        // XXX implement trickiness
                         int tricky = 0;
+
+                        // "For the first coefficient (DC, unless the block type is 0), we
+                        //  consider the (already encoded) blocks within the same plane (Y2, Y,
+                        //  U, or V) above and to the left of the current block.  The context
+                        //  index is then the number (0, 1, or 2) of these blocks that had at
+                        //  least one non-zero coefficient in their residue record.  Specifically
+                        //  for Y2, because macroblocks above and to the left may or may not have
+                        //  a Y2 block, the block above is determined by the most recent
+                        //  macroblock in the same column that has a Y2 block, and the block to
+                        //  the left is determined by the most recent macroblock in the same row
+                        //  that has a Y2 block."
+                        // XXX Implement
+
+                        // "Beyond the first coefficient, the context index is determined by the
+                        //  absolute value of the most recently decoded coefficient (necessarily
+                        //  within the current block) and is 0 if the last coefficient was a
+                        //  zero, 1 if it was plus or minus one, and 2 if its absolute value
+                        //  exceeded one."
+                        if (j > firstCoeff) {
+                            if (last_decoded_value == 0)
+                                tricky = 0;
+                            else if (last_decoded_value == 1 || last_decoded_value == -1)
+                                tricky = 1;
+                            else
+                                tricky = 2;
+                        }
 
                         // "In general, all DCT coefficients are decoded using the same tree.
                         //  However, if the preceding coefficient is a DCT_0, decoding will skip
                         //  the first branch, since it is not possible for dct_eob to follow a
                         //  DCT_0."
+
+dbg("coeffs at {} {} {}:", plane, band, tricky);
+for (size_t i = 0; i < sizeof(coeff_probs[plane][band][tricky]); ++i)
+dbg(" {}", coeff_probs[plane][band][tricky][i]);
+dbgln();
 
                         int token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
                         dbgln_if(WEBP_DEBUG, "token {}", token);
@@ -1362,7 +1393,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         // XXX clamp index
 
                         // "the multiplies are computed and stored using 16-bit signed integers."
-                        i16 dequantized_value = (i16)dc_qlookup[dequantization_index] * (i16)v;
+                        i16 dequantized_value;
+                        if (j == 0)
+                            dequantized_value = (i16)dc_qlookup[dequantization_index] * (i16)v;
+                        else
+                            dequantized_value = (i16)ac_qlookup[dequantization_index] * (i16)v;
 
                         if (is_y2) {
                             if (j == 0)
@@ -1372,12 +1407,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         }
 
                         dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
-
-                        (void)ac_qlookup;
-
-                        return Error::from_string_literal("WebPImageDecoderPlugin: decoding more than 1 token not yet implemented");
+                        last_decoded_value = dequantized_value;
                     }
                 }
+                return Error::from_string_literal("WebPImageDecoderPlugin: decoding more than 1 token not yet implemented");
             }
         }
     }
