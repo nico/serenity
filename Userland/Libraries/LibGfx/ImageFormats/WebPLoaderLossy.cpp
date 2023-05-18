@@ -1218,7 +1218,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     // Corresponds to `residual_block()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                     // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
                     int firstCoeff = have_y2 && (i >= 1 && i <= 16) ? 1 : 0;
-                    i16 last_decoded_value = 0;
+                    i16 last_decoded_value = num_dct_tokens; // Start with an invalid value
                     for (int j = firstCoeff; j < 16; ++j) {
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.3 "Token Probabilities"
@@ -1265,7 +1265,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  a Y2 block, the block above is determined by the most recent
                         //  macroblock in the same column that has a Y2 block, and the block to
                         //  the left is determined by the most recent macroblock in the same row
-                        //  that has a Y2 block."
+                        //  that has a Y2 block.
+                        //  [...]
+                        //  As with other contexts used by VP8, the "neighboring block" context
+                        //  described here needs a special definition for subblocks lying along
+                        //  the top row or left edge of the frame.  These "non-existent"
+                        //  predictors above and to the left of the image are simply taken to be
+                        //  empty -- that is, taken to contain no non-zero coefficients."
                         // XXX Implement
 
                         // "Beyond the first coefficient, the context index is determined by the
@@ -1293,7 +1299,7 @@ dbg(" {}", coeff_probs[plane][band][tricky][i]);
 dbgln();
 
                         int token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
-                        dbgln_if(WEBP_DEBUG, "token {}", token);
+                        dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
 
                         if (token == dct_eob)
                             break;
@@ -1374,9 +1380,15 @@ dbgln();
                         // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
                         // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
                         // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
-                        //   (or, alternatively, the value is clamped ot 132 at most)
+                        //   (or, alternatively, the value is clamped to 132 at most)
 
-                        u8 dequantization_index = quantization_indices.y2_dc;  // XXX
+                        u8 dequantization_index;
+                        if (is_y2)
+                            dequantization_index = j == 0 ? quantization_indices.y2_dc : quantization_indices.y2_ac;
+                        else if (is_u_or_v)
+                            dequantization_index = j == 0 ? quantization_indices.uv_dc : quantization_indices.uv_ac;
+                        else
+                            dequantization_index = j == 0 ? quantization_indices.y_dc : quantization_indices.y_ac;
 
     #if 0
                         if (update_mb_segmentation_map) {
@@ -1390,7 +1402,11 @@ dbgln();
                         }
     #endif
 
-                        // XXX clamp index
+                        // clamp index
+                        if (is_u_or_v && j == 0)
+                            dequantization_index = min(dequantization_index, 117);
+                        else
+                            dequantization_index = min(dequantization_index, 127);
 
                         // "the multiplies are computed and stored using 16-bit signed integers."
                         i16 dequantized_value;
