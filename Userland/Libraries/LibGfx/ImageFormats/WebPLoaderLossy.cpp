@@ -1226,7 +1226,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 //  subblocks."
                 bool have_y2 = metadata.intra_y_mode != B_PRED;
 
-                // XXX copy over y2_left and y2_above
+                // "for Y2, because macroblocks above and to the left may or may not have
+                //  a Y2 block, the block above is determined by the most recent
+                //  macroblock in the same column that has a Y2 block, and the block to
+                //  the left is determined by the most recent macroblock in the same row
+                //  that has a Y2 block."
+                // We only write to y2_above / y2_left when it's present, so we don't need to do any explicit work to get the right behavior.
 
                 // "After the optional Y2 block, the residue record continues with 16
                 //  DCTs for the Y subblocks, followed by 4 DCTs for the U subblocks,
