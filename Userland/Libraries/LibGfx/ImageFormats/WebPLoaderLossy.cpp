@@ -1390,12 +1390,12 @@ dbgln();
 
                             v += starts[token - dct_cat1];
 
-                            if (v) {
-                                if (TRY(decoder.read_bool(128)))
-                                    v = -v;
-                            }
-
                             dbgln_if(WEBP_DEBUG, "v {}", v);
+                        }
+
+                        if (v) {
+                            if (TRY(decoder.read_bool(128)))
+                                v = -v;
                         }
 
                         // last_decoded_value is used for setting `tricky`. It needs to be set to the last decoded token, not to the last dequantized value.
