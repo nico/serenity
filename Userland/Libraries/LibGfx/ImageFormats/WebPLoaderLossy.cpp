@@ -1398,6 +1398,9 @@ dbgln();
                             dbgln_if(WEBP_DEBUG, "v {}", v);
                         }
 
+                        // last_decoded_value is used for setting `tricky`. It needs to be set to the last decoded token, not to the last dequantized value.
+                        last_decoded_value = v;
+
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
                         // "before inverting the transform, each decoded coefficient
                         //  is multiplied by one of six dequantization factors, the choice of
@@ -1484,7 +1487,6 @@ dbgln();
                         }
 
                         dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
-                        last_decoded_value = dequantized_value;
                     }
                     if (is_y2) {
                         y2_left = subblock_has_nonzero_coefficients;
