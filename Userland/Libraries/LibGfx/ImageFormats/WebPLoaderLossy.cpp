@@ -1101,7 +1101,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     -2, -3  /* "10" = 2nd value, "11" = 3rd value */
                 };
                 segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, mb_segment_tree_probs));
-                dbgln_if(WEBP_DEBUG, "segment_id {}", segment_id);
+                //dbgln_if(WEBP_DEBUG, "segment_id {}", segment_id);
             }
             if (mb_no_skip_coeff) {
                 u8 mb_skip_coeff = TRY(B(prob_skip_false));
@@ -1111,7 +1111,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
             const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
             int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
-            dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", intra_y_mode, mb_y, mb_x);
+            //dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", intra_y_mode, mb_y, mb_x);
 
             // "If the Ymode is B_PRED, it is followed by a (tree-coded) mode for each of the 16 Y subblocks."
             if (intra_y_mode == B_PRED) {
@@ -1125,7 +1125,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         int L = left[y];
 
                         auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
-                        dbgln_if(WEBP_DEBUG, "A {} L {} intra_b_mode {} y {} x {}", A, L, (int)intra_b_mode, y, x);
+                        //dbgln_if(WEBP_DEBUG, "A {} L {} intra_b_mode {} y {} x {}", A, L, (int)intra_b_mode, y, x);
 
                         above[mb_x * 4 + x] = intra_b_mode;
                         left[y] = intra_b_mode;
@@ -1147,7 +1147,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             }
 
             int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
-            dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
+            //dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
 
             TRY(macroblock_metadata.try_append(MacroblockMetadata { segment_id, skip_coefficients, static_cast<intra_mbmode>(intra_y_mode), static_cast<intra_mbmode>(uv_mode) }));
         }
@@ -1203,6 +1203,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
         for (int mb_y = 0, i = 0; mb_y < macroblock_height; ++mb_y) {
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++i) {
+                dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
+
                 // See also https://datatracker.ietf.org/doc/html/rfc6386#section-19.3, residual_data() and residual_block()
 
                 auto const& metadata = macroblock_metadata[i];
@@ -1259,6 +1261,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     bool is_u = i >= 17 && i <= 20;
                     bool is_v = i >= 21;
                     bool is_y2 = i == 0;
+
+                    if (is_y2) dbg("y2:");
+                    else if (is_u || is_v) dbg("uv {}:", (i - 17) % 4);
+                    else  dbg("y {:2}:", (i - 1));
 
                     // Corresponds to `residual_block()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                     // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
@@ -1351,23 +1357,22 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  the first branch, since it is not possible for dct_eob to follow a
                         //  DCT_0."
 
-dbg("coeffs at {} {} {}:", plane, band, tricky);
-for (size_t i = 0; i < sizeof(coeff_probs[plane][band][tricky]); ++i)
-dbg(" {}", coeff_probs[plane][band][tricky][i]);
-dbgln();
+//dbg("coeffs at {} {} {}:", plane, band, tricky);
+//for (size_t i = 0; i < sizeof(coeff_probs[plane][band][tricky]); ++i)
+//dbg(" {}", coeff_probs[plane][band][tricky][i]);
+//dbgln();
 
-                        int token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
-                        dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
+                        int token;
+                        if (last_decoded_value == DCT_0)
+                            token = TRY(TreeDecoder(ReadonlySpan<TreeDecoder::tree_index> { coeff_tree }.slice(2)).read(decoder, ReadonlyBytes { coeff_probs[plane][band][tricky] }.slice(1)));
+                        else
+                            token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
+                        //dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
 
-                        if (token == dct_eob)
+                        if (token == dct_eob) {
+                            dbg(" eob");
                             break;
-
-                        // XXX implement the DCT_0 exception
-                        if (token == DCT_0)
-                            return Error::from_string_literal("XXX implement the DCT_0 exception");
-
-                        // Subblock has non-0 coefficients. Store that, so that `tricky` on the next subblock is initialized correctly.
-                        subblock_has_nonzero_coefficients = true;
+                        }
 
                         int v = (int)token; // For DCT_0 to DCT4
 
@@ -1390,10 +1395,13 @@ dbgln();
 
                             v += starts[token - dct_cat1];
 
-                            dbgln_if(WEBP_DEBUG, "v {}", v);
+                            //dbgln_if(WEBP_DEBUG, "v {}", v);
                         }
 
                         if (v) {
+                            // Subblock has non-0 coefficients. Store that, so that `tricky` on the next subblock is initialized correctly.
+                            subblock_has_nonzero_coefficients = true;
+
                             if (TRY(decoder.read_bool(128)))
                                 v = -v;
                         }
@@ -1486,8 +1494,11 @@ dbgln();
                                 dequantized_value = (dequantized_value * 155) / 100;
                         }
 
-                        dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
+                        //dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
+                        dbg(" {}", dequantized_value);
                     }
+                    dbgln();
+
                     if (is_y2) {
                         y2_left = subblock_has_nonzero_coefficients;
                         y2_above[mb_x] = subblock_has_nonzero_coefficients;
@@ -1502,7 +1513,6 @@ dbgln();
                         y_above[mb_x * 4 + sub_x] = subblock_has_nonzero_coefficients;
                     }
                 }
-                return Error::from_string_literal("WebPImageDecoderPlugin: decoding more than 1 token not yet implemented");
             }
         }
     }
