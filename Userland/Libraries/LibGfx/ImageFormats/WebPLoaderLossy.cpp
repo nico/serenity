@@ -221,6 +221,8 @@ ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes pro
 
 }
 
+static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
+
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
 {
     auto bitmap_format = include_alpha_channel ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
@@ -1160,6 +1162,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     if (number_of_dct_partitions > 1)
         return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps with more than one dct partition not yet implemented");
 
+    auto bitmap = Bitmap::create(bitmap_format, { vp8_header.width, vp8_header.height });
+
     // The second partition stores coefficients for all macroblocks.
     {
         FixedMemoryStream memory_stream { vp8_header.second_partition };
@@ -1184,6 +1188,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                        cat4 = "1111111" */
         };
 
+        using Coefficients = i16[16];
+
         // Store if each plane has nonzero coefficients in the block above and to the left of the current block.
         Vector<bool> y2_above;
         TRY(y2_above.try_resize(macroblock_width));
@@ -1204,6 +1210,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         for (int mb_y = 0, i = 0; mb_y < macroblock_height; ++mb_y) {
 
             // XXX probably have to clear *_left on the start of each row?
+            // XXX just move def of these in here
             y2_left = false;
             for (int i = 0; i < 4; ++i) y_left[i] = false;
             for (int i = 0; i < 2; ++i) u_left[i] = false;
@@ -1211,6 +1218,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++i) {
                 dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
+
+                Coefficients y2_coeffs {};
+                Coefficients y_coeffs[16] {};
+                Coefficients u_coeffs[4] {};
+                Coefficients v_coeffs[4] {};
 
                 // See also https://datatracker.ietf.org/doc/html/rfc6386#section-19.3, residual_data() and residual_block()
 
@@ -1506,6 +1518,17 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
 //dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
                         dbg(" {}", dequantized_value);
+
+                        if (is_y2)
+                            y2_coeffs[j] = dequantized_value;
+                        else if (is_u)
+                            u_coeffs[i - 17][j] = dequantized_value;
+                        else if (is_v)
+                            v_coeffs[i - 21][j] = dequantized_value;
+                        else // Y
+                            y_coeffs[i - 1][j] = dequantized_value;
+
+
                     }
                     dbgln();
 
@@ -1523,12 +1546,68 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         y_above[mb_x * 4 + sub_x] = subblock_has_nonzero_coefficients;
                     }
                 }
+
+                // https://datatracker.ietf.org/doc/html/rfc6386#section-14.2 "Inverse Transforms"
+                // "If the Y2 residue block exists (i.e., the macroblock luma mode is not
+                //  SPLITMV or B_PRED), it is inverted first (using the inverse WHT) and
+                //  the element of the result at row i, column j is used as the 0th
+                //  coefficient of the Y subblock at position (i, j), that is, the Y
+                //  subblock whose index is (i * 4) + j."
+                if (have_y2) {
+                    Coefficients wht_output;
+                    vp8_short_inv_walsh4x4_c(y2_coeffs, wht_output);
+                    for (size_t i = 0; i < 16; ++i)
+                        y_coeffs[i][0] = wht_output[0];
+                }
             }
         }
+
+        dbgln_if(WEBP_DEBUG, "stream 2 offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
     }
 
-    (void)bitmap_format;
-    return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps not yet implemented");
+    return bitmap;
+}
+
+// https://datatracker.ietf.org/doc/html/rfc6386#section-14.3 "Implementation of the WHT Inversion"
+static void vp8_short_inv_walsh4x4_c(i16* input, i16* output)
+{
+    i16 *ip = input;
+    i16 *op = output;
+
+    for(int i = 0; i < 4; i++) {
+        int a1 = ip[0] + ip[12];
+        int b1 = ip[4] + ip[8];
+        int c1 = ip[4] - ip[8];
+        int d1 = ip[0] - ip[12];
+
+        op[0] = a1 + b1;
+        op[4] = c1 + d1;
+        op[8] = a1 - b1;
+        op[12]= d1 - c1;
+        ip++;
+        op++;
+    }
+
+    ip = output;
+    op = output;
+    for(int i = 0; i < 4; i++) {
+        int a1 = ip[0] + ip[3];
+        int b1 = ip[1] + ip[2];
+        int c1 = ip[1] - ip[2];
+        int d1 = ip[0] - ip[3];
+
+        int a2 = a1 + b1;
+        int b2 = c1 + d1;
+        int c2 = a1 - b1;
+        int d2 = d1 - c1;
+        op[0] = (a2 + 3) >> 3;
+        op[1] = (b2 + 3) >> 3;
+        op[2] = (c2 + 3) >> 3;
+        op[3] = (d2 + 3) >> 3;
+
+        ip += 4;
+        op += 4;
+    }
 }
 
 }
