@@ -184,7 +184,7 @@ public:
     {
     }
 
-    ErrorOr<int> read(BooleanEntropyDecoder&, ReadonlyBytes probabilities);
+    ErrorOr<int> read(BooleanEntropyDecoder&, ReadonlyBytes probabilities, int initial_i = 0);
 
 private:
    // "A tree may then be compactly represented as an array of (pairs of)
@@ -199,9 +199,9 @@ private:
 
 };
 
-ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes probabilities)
+ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes probabilities, int initial_i)
 {
-    tree_index i = 0;
+    tree_index i = initial_i;
 #if 0
     while ((i = m_tree[i + TRY(decoder.read_bool(probabilities[i >> 1]))]) > 0) {
     }
@@ -1364,7 +1364,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         int token;
                         if (last_decoded_value == DCT_0)
-                            token = TRY(TreeDecoder(ReadonlySpan<TreeDecoder::tree_index> { coeff_tree }.slice(2)).read(decoder, ReadonlyBytes { coeff_probs[plane][band][tricky] }.slice(1)));
+                            token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky], 2));
                         else
                             token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
                         //dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
