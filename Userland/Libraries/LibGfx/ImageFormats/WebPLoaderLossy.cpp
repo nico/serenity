@@ -1202,6 +1202,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         bool v_left[2] {};
 
         for (int mb_y = 0, i = 0; mb_y < macroblock_height; ++mb_y) {
+
+            // XXX probably have to clear *_left on the start of each row?
+            y2_left = false;
+            for (int i = 0; i < 4; ++i) y_left[i] = false;
+            for (int i = 0; i < 2; ++i) u_left[i] = false;
+            for (int i = 0; i < 2; ++i) v_left[i] = false;
+
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++i) {
                 dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
 
