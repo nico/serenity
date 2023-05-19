@@ -222,6 +222,7 @@ ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes pro
 }
 
 static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
+static void short_idct4x4llm_c(i16* input, i16* output, int pitch);
 
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
 {
@@ -1162,7 +1163,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     if (number_of_dct_partitions > 1)
         return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps with more than one dct partition not yet implemented");
 
-    auto bitmap = Bitmap::create(bitmap_format, { vp8_header.width, vp8_header.height });
+
+    // this can make the bitmap a bit too big; it's shrunk later if needed.
+    auto bitmap = TRY(Bitmap::create(bitmap_format, { macroblock_width * 16, macroblock_height * 16 }));
 
     // The second partition stores coefficients for all macroblocks.
     {
@@ -1559,12 +1562,36 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     for (size_t i = 0; i < 16; ++i)
                         y_coeffs[i][0] = wht_output[0];
                 }
+
+                // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
+                // Loop over the 4x4 subblocks
+                for (int y = 0, i = 0; y < 4; ++y) {
+                    for (int x = 0; x < 4; ++x, ++i) {
+                        Coefficients idct_output;
+                        short_idct4x4llm_c(y_coeffs[i], idct_output, 4 * sizeof(i16));
+
+                        // FIXME: sum with prediction
+                        // https://datatracker.ietf.org/doc/html/rfc6386#section-14.5 "Summation of Predictor and Residue"
+                        for (int py = 0, j = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
+                            for (int px = 0; px < 4; ++px, ++j) {
+                                // "is then saturated to 8-bit unsigned range (using, say, the
+                                //  clamp255 function defined above) before being stored as an 8-bit
+                                //  unsigned pixel value."
+                                u8 Y = clamp(idct_output[py * 4 + px], 0, 255);
+                                bitmap->scanline(mb_y * 16 + y * 4 + py)[mb_x * 16 + x * 4 + px] = Color(Y, Y, Y).value();
+                            }
+                        }
+                    }
+                }
             }
         }
 
         dbgln_if(WEBP_DEBUG, "stream 2 offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
     }
 
+    // XXX sink this check into Bitmap::cropped()
+    if (bitmap->physical_width() != (int)vp8_header.width || bitmap->physical_height() != (int)vp8_header.height)
+        return bitmap->cropped({ 0, 0, (int)vp8_header.width, (int)vp8_header.height });
     return bitmap;
 }
 
@@ -1607,6 +1634,61 @@ static void vp8_short_inv_walsh4x4_c(i16* input, i16* output)
 
         ip += 4;
         op += 4;
+    }
+}
+
+// https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
+static void short_idct4x4llm_c(i16* input, i16* output, int pitch)
+{
+    static constexpr int cospi8sqrt2minus1 = 20091;
+    static constexpr int sinpi8sqrt2       = 35468;
+
+    i16* ip = input;
+    i16* op = output;
+    int shortpitch = pitch >> 1;
+
+    for(int i = 0; i < 4; i++) {
+        int a1 = ip[0] + ip[8];
+        int b1 = ip[0] - ip[8];
+
+        int temp1 = (ip[4] * sinpi8sqrt2) >> 16;
+        int temp2 = ip[12] + ((ip[12] * cospi8sqrt2minus1) >> 16);
+        int c1 = temp1 - temp2;
+
+        temp1 = ip[4] + ((ip[4] * cospi8sqrt2minus1) >> 16);
+        temp2 = (ip[12] * sinpi8sqrt2) >> 16;
+        int d1 = temp1 + temp2;
+
+        op[shortpitch * 0] = a1 + d1;
+        op[shortpitch * 3] = a1 - d1;
+        op[shortpitch * 1] = b1 + c1;
+        op[shortpitch * 2] = b1 - c1;
+
+        ip++;
+        op++;
+    }
+
+    ip = output;
+    op = output;
+    for(int i = 0; i < 4; i++) {
+        int a1 = ip[0] + ip[2];
+        int b1 = ip[0] - ip[2];
+
+        int temp1 = (ip[1] * sinpi8sqrt2) >> 16;
+        int temp2 = ip[3] + ((ip[3] * cospi8sqrt2minus1) >> 16);
+        int c1 = temp1 - temp2;
+
+        temp1 = ip[1] + ((ip[1] * cospi8sqrt2minus1) >> 16);
+        temp2 = (ip[3] * sinpi8sqrt2) >> 16;
+        int d1 = temp1 + temp2;
+
+        op[0] = (a1 + d1 + 4) >> 3;
+        op[3] = (a1 - d1 + 4) >> 3;
+        op[1] = (b1 + c1 + 4) >> 3;
+        op[2] = (b1 - c1 + 4) >> 3;
+
+        ip += shortpitch;
+        op += shortpitch;
     }
 }
 
