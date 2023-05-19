@@ -1367,7 +1367,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky], 2));
                         else
                             token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
-                        //dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
+//dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
 
                         if (token == dct_eob) {
                             dbg(" eob");
@@ -1395,7 +1395,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                             v += starts[token - dct_cat1];
 
-                            //dbgln_if(WEBP_DEBUG, "v {}", v);
+//dbgln_if(WEBP_DEBUG, "v {}", v);
                         }
 
                         if (v) {
@@ -1451,6 +1451,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  can be found in related lookup functions in dixie.c (Section 20.4)."
                         // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
                         // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
+                        // * Also for y2, ac_qlookup is at least 8 for lower table entries
                         // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
                         //   (or, alternatively, the value is clamped to 132 at most)
 
@@ -1491,10 +1492,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             if (j == 0)
                                 dequantized_value *= 2;
                             else
-                                dequantized_value = (dequantized_value * 155) / 100;
+                                dequantized_value = (dequantized_value * 155) / 100;  // XXX this is wrong somehow, see `VP8DecodeMB 0 1` (but that doesn't affect bitstream decoding)
                         }
 
-                        //dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
+// XXX v is off in VP8DecodeMB 22 1
+
+//dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
                         dbg(" {}", dequantized_value);
                     }
                     dbgln();
