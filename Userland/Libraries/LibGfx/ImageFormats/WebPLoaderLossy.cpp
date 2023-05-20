@@ -1079,7 +1079,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         for (int py = 0, j = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
                             for (int px = 0; px < 4; ++px, ++j) {
                                 // sum with prediction
-                                i16& p = y_prediction[(4 * y + py) * 4 + (4 * x + px)];
+                                i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
                                 p += idct_output[py * 4 + px];
                                 // "is then saturated to 8-bit unsigned range (using, say, the
                                 //  clamp255 function defined above) before being stored as an 8-bit
