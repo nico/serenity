@@ -1058,6 +1058,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     };
     const Prob kf_uv_mode_prob [num_uv_modes - 1] = { 142, 114, 183 };
 
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-11.3 "Subblock Mode Contexts"
     // "For macroblocks on the top row or left edge of the image, some of
     //  the predictors will be non-existent.  Such predictors are taken
     //  to have had the value B_DC_PRED, which, perhaps conveniently,
@@ -1196,28 +1197,30 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         // Store if each plane has nonzero coefficients in the block above and to the left of the current block.
         Vector<bool> y2_above;
         TRY(y2_above.try_resize(macroblock_width));
-        bool y2_left {};
 
         Vector<bool> y_above;
         TRY(y_above.try_resize(macroblock_width * 4));
-        bool y_left[4] {};
 
         Vector<bool> u_above;
         TRY(u_above.try_resize(macroblock_width * 2));
-        bool u_left[2] {};
 
         Vector<bool> v_above;
         TRY(v_above.try_resize(macroblock_width * 2));
-        bool v_left[2] {};
+
+        Vector<i16> predicted_y_above;
+        TRY(predicted_y_above.try_resize(macroblock_width * 16));
+        for (size_t i = 0; i < predicted_y_above.size(); ++i)
+            predicted_y_above[i] = 127;
 
         for (int mb_y = 0, i = 0; mb_y < macroblock_height; ++mb_y) {
 
-            // XXX probably have to clear *_left on the start of each row?
-            // XXX just move def of these in here
-            y2_left = false;
-            for (int i = 0; i < 4; ++i) y_left[i] = false;
-            for (int i = 0; i < 2; ++i) u_left[i] = false;
-            for (int i = 0; i < 2; ++i) v_left[i] = false;
+            bool y2_left {};
+            bool y_left[4] {};
+            bool u_left[2] {};
+            bool v_left[2] {};
+
+            i16 predicted_y_left[16] { 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129 };
+            i16 y_truemotion_corner = 127;  // XXX spec doesn't say if this should be 127, 129, or something else :/
 
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++i) {
                 dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
@@ -1563,6 +1566,41 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         y_coeffs[i][0] = wht_output[0];
                 }
 
+                i16 y_prediction[16 * 16] {};
+                if (metadata.intra_y_mode == DC_PRED) {
+                    if (mb_x == 0 && mb_y == 0) {
+                        for (size_t i = 0; i < sizeof(y_prediction); ++i)
+                            y_prediction[i] = 128;
+                    } else {
+                        int sum = 0, n = 0;
+                        if (mb_x > 0) {
+                            for (int i = 0; i < 16; ++i)
+                                sum += predicted_y_left[i];
+                            n += 16;
+                        }
+                        if (mb_y > 0) {
+                            for (int i = 0; i < 16; ++i)
+                                sum += predicted_y_above[mb_x * 16 + i];
+                            n += 16;
+                        }
+                        i16 average = (sum + n/2) / n;
+                        for (size_t i = 0; i < sizeof(y_prediction); ++i)
+                            y_prediction[i] = average;
+                    }
+                } else if (metadata.intra_y_mode == H_PRED) {
+                    for (int y = 0; y < 16; ++y)
+                        for (int x = 0; x < 16; ++x)
+                            y_prediction[y * 16 + x] = predicted_y_left[y];
+                } else if (metadata.intra_y_mode == V_PRED) {
+                    for (int y = 0; y < 16; ++y)
+                        for (int x = 0; x < 16; ++x)
+                            y_prediction[y * 16 + x] = predicted_y_above[mb_x * 16 + x];
+                } else if (metadata.intra_y_mode == TM_PRED) {
+                    for (int y = 0; y < 16; ++y)
+                        for (int x = 0; x < 16; ++x)
+                            y_prediction[y * 16 + x] = predicted_y_left[y] + predicted_y_above[mb_x * 16 + x] - y_truemotion_corner;
+                }
+
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
                 // Loop over the 4x4 subblocks
                 for (int y = 0, i = 0; y < 4; ++y) {
@@ -1570,19 +1608,27 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         Coefficients idct_output;
                         short_idct4x4llm_c(y_coeffs[i], idct_output, 4 * sizeof(i16));
 
-                        // FIXME: sum with prediction
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-14.5 "Summation of Predictor and Residue"
                         for (int py = 0, j = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
                             for (int px = 0; px < 4; ++px, ++j) {
+                                // sum with prediction
+                                i16& p = y_prediction[(4 * y + py) * 4 + (4 * x + px)];
+                                p += idct_output[py * 4 + px];
                                 // "is then saturated to 8-bit unsigned range (using, say, the
                                 //  clamp255 function defined above) before being stored as an 8-bit
                                 //  unsigned pixel value."
-                                u8 Y = clamp(idct_output[py * 4 + px], 0, 255);
+                                u8 Y = clamp(p, 0, 255);
                                 bitmap->scanline(mb_y * 16 + y * 4 + py)[mb_x * 16 + x * 4 + px] = Color(Y, Y, Y).value();
                             }
                         }
                     }
                 }
+
+                y_truemotion_corner = predicted_y_above[mb_x * 16 + 15];
+                for (int i = 0; i < 16; ++i)
+                    predicted_y_left[i] = y_prediction[15 + i * 16];
+                for (int i = 0; i < 16; ++i)
+                    predicted_y_above[mb_x * 16 + i] = y_prediction[15 * 16 + i];
             }
         }
 
