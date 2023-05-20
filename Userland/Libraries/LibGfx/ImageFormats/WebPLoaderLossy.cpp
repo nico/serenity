@@ -703,7 +703,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         for (size_t i = 0; i < predicted_y_above.size(); ++i)
             predicted_y_above[i] = 127;
 
-        for (int mb_y = 0, i = 0; mb_y < macroblock_height; ++mb_y) {
+        for (int mb_y = 0, macroblock_index = 0; mb_y < macroblock_height; ++mb_y) {
 
             bool y2_left {};
             bool y_left[4] {};
@@ -713,7 +713,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             i16 predicted_y_left[16] { 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129 };
             i16 y_truemotion_corner = 127;  // XXX spec doesn't say if this should be 127, 129, or something else :/
 
-            for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++i) {
+            for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++macroblock_index) {
                 dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
 
                 Coefficients y2_coeffs {};
@@ -723,7 +723,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                 // See also https://datatracker.ietf.org/doc/html/rfc6386#section-19.3, residual_data() and residual_block()
 
-                auto const& metadata = macroblock_metadata[i];
+                auto const& metadata = macroblock_metadata[macroblock_index];
 
                 // XXX test this (add an Error:: return, check it gets hit during decoding, etc)
                 if (metadata.skip_coefficients) {
