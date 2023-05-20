@@ -1087,6 +1087,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
         intra_mbmode intra_y_mode;
         intra_mbmode uv_mode;
+
+        intra_bmode intra_b_modes[16];
     };
     Vector<MacroblockMetadata> macroblock_metadata;
 
@@ -1094,6 +1096,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         for (int i = 0; i < 4; ++i) left[i] = B_DC_PRED;
 
         for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
+            MacroblockMetadata metadata;
+
             int segment_id = 0;
             bool skip_coefficients = false;
 
@@ -1113,9 +1117,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 skip_coefficients = mb_skip_coeff;
             }
 
+            metadata.segment_id = segment_id;
+            metadata.skip_coefficients = skip_coefficients;
+
             const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
             int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
             //dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", intra_y_mode, mb_y, mb_x);
+
+            metadata.intra_y_mode = (intra_mbmode)intra_y_mode;
 
             // "If the Ymode is B_PRED, it is followed by a (tree-coded) mode for each of the 16 Y subblocks."
             if (intra_y_mode == B_PRED) {
@@ -1130,6 +1139,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
                         //dbgln_if(WEBP_DEBUG, "A {} L {} intra_b_mode {} y {} x {}", A, L, (int)intra_b_mode, y, x);
+                        metadata.intra_b_modes[y * 4 + x] = intra_b_mode;
 
                         above[mb_x * 4 + x] = intra_b_mode;
                         left[y] = intra_b_mode;
@@ -1152,8 +1162,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
             int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
             //dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
+            metadata.uv_mode = (intra_mbmode)uv_mode;
 
-            TRY(macroblock_metadata.try_append(MacroblockMetadata { segment_id, skip_coefficients, static_cast<intra_mbmode>(intra_y_mode), static_cast<intra_mbmode>(uv_mode) }));
+            TRY(macroblock_metadata.try_append(metadata));
         }
     }
 
@@ -1599,6 +1610,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     for (int y = 0; y < 16; ++y)
                         for (int x = 0; x < 16; ++x)
                             y_prediction[y * 16 + x] = predicted_y_left[y] + predicted_y_above[mb_x * 16 + x] - y_truemotion_corner;
+                } else {
+                    VERIFY(metadata.intra_y_mode == B_PRED);
                 }
 
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
