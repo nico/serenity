@@ -1076,8 +1076,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         short_idct4x4llm_c(y_coeffs[i], idct_output, 4 * sizeof(i16));
 
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-14.5 "Summation of Predictor and Residue"
-                        for (int py = 0, j = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
-                            for (int px = 0; px < 4; ++px, ++j) {
+                        for (int py = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
+                            for (int px = 0; px < 4; ++px) {
                                 // sum with prediction
                                 i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
                                 p += idct_output[py * 4 + px];
