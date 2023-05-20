@@ -1034,7 +1034,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 i16 y_prediction[16 * 16] {};
                 if (metadata.intra_y_mode == DC_PRED) {
                     if (mb_x == 0 && mb_y == 0) {
-                        for (size_t i = 0; i < sizeof(y_prediction); ++i)
+                        for (size_t i = 0; i < sizeof(y_prediction) / sizeof(y_prediction[0]); ++i)
                             y_prediction[i] = 128;
                     } else {
                         int sum = 0, n = 0;
@@ -1049,7 +1049,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             n += 16;
                         }
                         i16 average = (sum + n/2) / n;
-                        for (size_t i = 0; i < sizeof(y_prediction); ++i)
+                        for (size_t i = 0; i < sizeof(y_prediction) / sizeof(y_prediction[0]); ++i)
                             y_prediction[i] = average;
                     }
                 } else if (metadata.intra_y_mode == H_PRED) {
