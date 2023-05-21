@@ -1069,6 +1069,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     // Loop over the 4x4 subblocks
                     for (int y = 0, i = 0; y < 4; ++y) {
                         for (int x = 0; x < 4; ++x, ++i) {
+                            i16 corner = y_truemotion_corner;
+                            if (x > 0 && y == 0)
+                                corner = predicted_y_above[mb_x * 16 + 4 * x - 1];
+                            else if (x > 0 && y > 0)
+                                corner = y_prediction[(4 * y - 1) * 16 + 4 * x - 1];
+
                             i16 left[4], above[8];
                             for (int i = 0; i < 4; ++i) {
                                 if (x == 0)
@@ -1098,6 +1104,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 }
                             }
 
+                            auto at = [&y_prediction, y, x](int px, int py) -> i16& { return y_prediction[(4 * y + py) * 16 + 4 * x + px]; };
+
                             auto mode = metadata.intra_b_modes[y * 4 + x];
                             if (mode == B_DC_PRED) {
                                 // XXX spec text says this is like DC_PRED but predict_dc_nxn() in the sample impl looks like it doesn't do the "oob isn't read" part. what's right?
@@ -1120,20 +1128,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = above[px];
                             } else if (mode == B_TM_PRED) {
-                                i16 corner = y_truemotion_corner;
-                                if (x > 0 && y == 0)
-                                    corner = predicted_y_above[mb_x * 16 + 4 * x - 1];
-                                else if (x > 0 && y > 0)
-                                    corner = y_prediction[(4 * y - 1) * 16 + 4 * x - 1];
-
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
                             } else if (mode == B_LD_PRED) {
-                                // this is 45-deg prediction from above
-                                auto at = [&y_prediction, y, x](int px, int py) -> i16& {
-                                    return y_prediction[(4 * y + py) * 16 + 4 * x + px];
-                                };
+                                // this is 45-deg prediction from above, going left-down (i.e. isochromes on -1/+1 diags)
                                 // XXX this should be using averages
                                 at(0, 0) = above[1];
                                 at(0, 1) = at(1, 0) = above[2];
@@ -1142,6 +1141,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 at(1, 3) = at(2, 2) = at(3, 1) = above[5];
                                 at(2, 3) = at(3, 2) = above[6];
                                 at(3, 3) = above[7];
+                            } else if (mode == B_RD_PRED) {
+                                // this is 45-deg prediction from above / left, going right-down (i.e. isochromes on +1/+1 diags)
+                                // XXX this should be using averages
+                                at(0, 3) = left[2];
+                                at(0, 2) = at(1, 3) = left[1];
+                                at(0, 1) = at(1, 2) = at(2, 3) = left[0];
+                                at(0, 0) = at(1, 1) = at(2, 2) = at(3, 3) = corner;
+                                at(1, 0) = at(2, 1) = at(3, 2) = above[0];
+                                at(2, 0) = at(3, 1) = above[1];
+                                at(3, 0) = above[2];
                             } else {
                                 dbgln("unhandled {}", (int)mode);
                                 //for (int py = 0; py < 4; ++py)
