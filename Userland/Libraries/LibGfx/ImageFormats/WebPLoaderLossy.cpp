@@ -1069,20 +1069,33 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     // Loop over the 4x4 subblocks
                     for (int y = 0, i = 0; y < 4; ++y) {
                         for (int x = 0; x < 4; ++x, ++i) {
-                            i16 left[4], above[4];
-                            if (x == 0) {
-                                for (int i = 0; i < 4; ++i)
+                            i16 left[4], above[8];
+                            for (int i = 0; i < 4; ++i) {
+                                if (x == 0)
                                     left[i] = predicted_y_left[4 * y + i];
-                            } else {
-                                for (int i = 0; i < 4; ++i)
+                                else
                                     left[i] = y_prediction[(4 * y + i) * 16 + 4 * x - 1];
                             }
-                            if (y == 0) {
-                                for (int i = 0; i < 4; ++i)
+                            // Subblock prediction can read 8 pixels above the block.
+                            // For rightmost subblocks, the right 4 pixels there aren't initialized yet, so those get the 4 pixels to the right above the macroblock.
+                            // For the rightmost macroblock, there's no macroblock to its right, so there they get the rightmost pixel above.
+                            // But in the 0th row, there's no pixel above, so there they become 128.
+                            for (int i = 0; i < 8; ++i) {
+                                if (x == 3 && i >= 4) { // rightmost subblock, 4 right pixels?
+                                    if (mb_x == macroblock_width - 1) { // rightmost macroblock
+                                        if (mb_y == 0) { // topmost macroblock row
+                                            above[i] = 127;
+                                        } else {
+                                            above[i] = predicted_y_above[mb_x * 16 + 4 * x + 3];
+                                        }
+                                    } else {
+                                        above[i] = predicted_y_above[mb_x * 16 + 4 * x + i];
+                                    }
+                                } else if (y == 0) {
                                     above[i] = predicted_y_above[mb_x * 16 + 4 * x + i];
-                            } else {
-                                for (int i = 0; i < 4; ++i)
+                                } else {
                                     above[i] = y_prediction[(4 * y - 1) * 16 + 4 * x + i];
+                                }
                             }
 
                             auto mode = metadata.intra_b_modes[y * 4 + x];
