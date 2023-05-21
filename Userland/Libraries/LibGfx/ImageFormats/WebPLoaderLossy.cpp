@@ -275,10 +275,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     u8 update_segment_feature_data = false;
     enum class SegmentFeatureMode {
-        AbsoluteValueMode = 0,
-        DeltaValueMode = 1,
+        // Spec 19.2 says 0 is delta, 1 absolute; spec 9.3 has it the other way round. 19.2 is correct.
+        DeltaValueMode = 0,
+        AbsoluteValueMode = 1,
     };
-    auto segment_feature_mode = SegmentFeatureMode::AbsoluteValueMode;
+    auto segment_feature_mode = SegmentFeatureMode::DeltaValueMode;
 
     struct SegmentData {
         Optional<i8> quantizer_update_value;
@@ -392,13 +393,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     // Also https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
     struct QuantizationIndices {
         u8 y_ac;
-        u8 y_dc;
+        i8 y_dc_delta;
 
-        u8 y2_dc;
-        u8 y2_ac;
+        i8 y2_dc_delta;
+        i8 y2_ac_delta;
 
-        u8 uv_dc;
-        u8 uv_ac;
+        i8 uv_dc_delta;
+        i8 uv_ac_delta;
     };
 
     // "The first 7-bit index gives the dequantization table index for
@@ -408,8 +409,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     u8 y_ac_qi = TRY(L(7));
     dbgln_if(WEBP_DEBUG, "y_ac_qi {}", y_ac_qi);
 
-    auto quantization_indices = QuantizationIndices { y_ac_qi, y_ac_qi, y_ac_qi, y_ac_qi, y_ac_qi, y_ac_qi };
-    auto read_delta = [&L, &L_signed, y_ac_qi](StringView name, u8* destination) -> ErrorOr<void> {
+    auto quantization_indices = QuantizationIndices { y_ac_qi, 0, 0, 0, 0, 0 };
+    auto read_delta = [&L, &L_signed, y_ac_qi](StringView name, i8* destination) -> ErrorOr<void> {
         u8 is_present = TRY(L(1));
         dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
         if (is_present) {
@@ -417,15 +418,15 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             dbgln_if(WEBP_DEBUG, "{}_delta {}", name, delta);
             if (y_ac_qi + delta < 0)
                 return Error::from_string_literal("WebPImageDecoderPlugin: got negative quantization index");
-            *destination = y_ac_qi + delta;
+            *destination = delta;
         }
         return {};
     };
-    TRY(read_delta("y_dc_delta"sv, &quantization_indices.y_dc));
-    TRY(read_delta("y2_dc_delta"sv, &quantization_indices.y2_dc));
-    TRY(read_delta("y2_ac_delta"sv, &quantization_indices.y2_ac));
-    TRY(read_delta("uv_dc_delta"sv, &quantization_indices.uv_dc));
-    TRY(read_delta("uv_ac_delta"sv, &quantization_indices.uv_ac));
+    TRY(read_delta("y_dc_delta"sv, &quantization_indices.y_dc_delta));
+    TRY(read_delta("y2_dc_delta"sv, &quantization_indices.y2_dc_delta));
+    TRY(read_delta("y2_ac_delta"sv, &quantization_indices.y2_ac_delta));
+    TRY(read_delta("uv_dc_delta"sv, &quantization_indices.uv_dc_delta));
+    TRY(read_delta("uv_ac_delta"sv, &quantization_indices.uv_ac_delta));
 
     // Always key_frame in webp.
     u8 refresh_entropy_probs = TRY(L(1));
@@ -952,29 +953,29 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  can be found in related lookup functions in dixie.c (Section 20.4)."
                         // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
                         // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
-                        // * Also for y2, ac_qlookup is at least 8 for lower table entries
+                        // * Also for y2, ac_qlookup is at least 8 for lower table entries (XXX!)
                         // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
                         //   (or, alternatively, the value is clamped to 132 at most)
 
-                        u8 dequantization_index;
-                        if (is_y2)
-                            dequantization_index = j == 0 ? quantization_indices.y2_dc : quantization_indices.y2_ac;
-                        else if (is_u_or_v)
-                            dequantization_index = j == 0 ? quantization_indices.uv_dc : quantization_indices.uv_ac;
-                        else
-                            dequantization_index = j == 0 ? quantization_indices.y_dc : quantization_indices.y_ac;
-
-    #if 0
+                        u8 y_ac_base = quantization_indices.y_ac;
                         if (update_mb_segmentation_map) {
                             auto const& data = segment_data[metadata.segment_id];
                             if (data.quantizer_update_value.has_value()) {
                                 if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
-                                    dequantization_index += data.quantizer_update_value.value();
+                                    y_ac_base += data.quantizer_update_value.value();
                                 else
-                                    dequantization_index = data.quantizer_update_value.value();
+                                    y_ac_base = data.quantizer_update_value.value();
                             }
                         }
-    #endif
+
+                        u8 dequantization_index;
+                        if (is_y2)
+                            dequantization_index = y_ac_base + (j == 0 ? quantization_indices.y2_dc_delta : quantization_indices.y2_ac_delta);
+                        else if (is_u_or_v)
+                            dequantization_index = y_ac_base + (j == 0 ? quantization_indices.uv_dc_delta : quantization_indices.uv_ac_delta);
+                        else
+                            dequantization_index = j == 0 ? (y_ac_base + quantization_indices.y_dc_delta) : y_ac_base;
+
 
                         // clamp index
                         if (is_u_or_v && j == 0)
@@ -997,8 +998,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         }
 
                         i16 dequantized_value = dequantization_factor * (i16)v;
-
-// XXX v is off in VP8DecodeMB 22 1
 
 //dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
 if (v)
