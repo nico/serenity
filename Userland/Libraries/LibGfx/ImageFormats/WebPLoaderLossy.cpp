@@ -976,7 +976,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         else
                             dequantization_index = j == 0 ? (y_ac_base + quantization_indices.y_dc_delta) : y_ac_base;
 
-
                         // clamp index
                         if (is_u_or_v && j == 0)
                             dequantization_index = min(dequantization_index, 117);
@@ -1000,9 +999,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         i16 dequantized_value = dequantization_factor * (i16)v;
 
 //dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
-if (v)
-                        dbg(" {} * {} = {}", dequantization_factor, v, dequantized_value);
-else
+//if (v)
+                        //dbg(" {} * {} = {}", dequantization_factor, v, dequantized_value);
+//else
                         dbg(" {}", dequantized_value);
 
                         if (is_y2)
