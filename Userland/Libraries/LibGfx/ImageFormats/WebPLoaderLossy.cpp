@@ -1151,6 +1151,33 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 at(1, 0) = at(2, 1) = at(3, 2) = above[0];
                                 at(2, 0) = at(3, 1) = above[1];
                                 at(3, 0) = above[2];
+                            } else if (mode == B_VR_PRED) {
+                                // this is 22.5-deg prediction
+                                // XXX this REALLY should be using averages
+                                at(0, 3) = left[1];
+                                at(0, 2) = left[0];
+                                at(1, 3) = at(0, 1) = corner;
+                                at(1, 2) = at(0, 0) = corner;
+                                at(2, 3) = at(1, 1) = above[0];
+                                at(2, 2) = at(1, 0) = above[0];
+                                at(3, 3) = at(2, 1) = above[1];
+                                at(3, 2) = at(2, 0) = above[1];
+                                at(3, 1) = above[2];
+                                at(3, 0) = above[2];
+                            } else if (mode == B_VL_PRED) {
+                                // this is 22.5-deg prediction
+                                // XXX this REALLY should be using averages
+                                at(0, 0) = above[0];
+                                at(0, 1) = above[1];
+                                at(0, 2) = at(1, 0) = above[1];
+                                at(1, 1) = at(0, 3) = above[2];
+                                at(1, 2) = at(2, 0) = above[2];
+                                at(1, 3) = at(2, 1) = above[3];
+                                at(2, 2) = at(3, 0) = above[3];
+                                at(2, 3) = at(3, 1) = above[4];
+                                /* Last two values do not strictly follow the pattern. */
+                                at(3, 2) = above[5];
+                                at(3, 3) = above[5];
                             } else {
                                 dbgln("unhandled {}", (int)mode);
                                 //for (int py = 0; py < 4; ++py)
