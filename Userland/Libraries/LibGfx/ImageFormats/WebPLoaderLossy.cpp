@@ -1066,6 +1066,38 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             y_prediction[y * 16 + x] = predicted_y_left[y] + predicted_y_above[mb_x * 16 + x] - y_truemotion_corner;
                 } else {
                     VERIFY(metadata.intra_y_mode == B_PRED);
+                    // Loop over the 4x4 subblocks
+                    for (int y = 0, i = 0; y < 4; ++y) {
+                        for (int x = 0; x < 4; ++x, ++i) {
+                            // XXX this does the wrong thing for in-block things atm
+                            auto mode = metadata.intra_b_modes[y * 4 + x];
+                            if (mode == B_DC_PRED) {
+                                // XXX spec text says this is like DC_PRED but predict_dc_nxn() in the sample impl looks like it doesn't do the "oob isn't read" part. what's right?
+                                // DC16NoTopLeft_C vs DC4_C in libwebp dec.c / common_dec.h suggests the spec text is incomplete :/
+                                int sum = 0, n = 8;
+                                for (int i = 0; i < 4; ++i)
+                                    sum += predicted_y_left[4 * y + i] + predicted_y_above[mb_x * 16 + 4 * x + i];
+                                i16 average = (sum + n/2) / n;
+                                for (int py = 0; py < 4; ++py)
+                                    for (int px = 0; px < 4; ++px)
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = average;
+                            } else if (mode == B_HE_PRED) {
+                                for (int py = 0; py < 4; ++py)
+                                    for (int px = 0; px < 4; ++px)
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = predicted_y_left[4 * y + py];
+                            } else if (mode == B_VE_PRED) {
+                                for (int py = 0; py < 4; ++py)
+                                    for (int px = 0; px < 4; ++px)
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = predicted_y_above[mb_x * 16 + 4 * x + px];
+                            } else if (mode == B_TM_PRED) {
+                                for (int py = 0; py < 4; ++py)
+                                    for (int px = 0; px < 4; ++px)
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = predicted_y_left[4 * y + py] + predicted_y_above[mb_x * 16 + 4 * x + px] - y_truemotion_corner;
+                            } else {
+                                dbgln("unhandled {}", (int)mode);
+                            }
+                        }
+                    }
                 }
 
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
