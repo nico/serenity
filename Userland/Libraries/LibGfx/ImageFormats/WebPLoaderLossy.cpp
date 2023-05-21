@@ -1129,6 +1129,19 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
+                            } else if (mode == B_LD_PRED) {
+                                // this is 45-deg prediction from above
+                                auto at = [&y_prediction, y, x](int px, int py) -> i16& {
+                                    return y_prediction[(4 * y + py) * 16 + 4 * x + px];
+                                };
+                                // XXX this should be using averages
+                                at(0, 0) = above[1];
+                                at(0, 1) = at(1, 0) = above[2];
+                                at(0, 2) = at(1, 1) = at(2, 0) = above[3];
+                                at(0, 3) = at(1, 2) = at(2, 1) = at(3, 0) = above[4];
+                                at(1, 3) = at(2, 2) = at(3, 1) = above[5];
+                                at(2, 3) = at(3, 2) = above[6];
+                                at(3, 3) = above[7];
                             } else {
                                 dbgln("unhandled {}", (int)mode);
                                 //for (int py = 0; py < 4; ++py)
