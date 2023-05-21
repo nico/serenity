@@ -1178,11 +1178,33 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 /* Last two values do not strictly follow the pattern. */
                                 at(3, 2) = above[5];
                                 at(3, 3) = above[5];
+                            } else if (mode == B_HD_PRED) {
+                                // this is 22.5-deg prediction
+                                // XXX this REALLY should be using averages
+                                at(0, 3) = left[3];
+                                at(1, 3) = left[2];
+                                at(0, 2) = at(2, 3) = left[2];
+                                at(1, 2) = at(3, 3) = left[1];
+                                at(2, 2) = at(0, 1) = left[1];
+                                at(3, 2) = at(1, 1) = left[0];
+                                at(2, 1) = at(0, 0) = left[0];
+                                at(3, 1) = at(1, 0) = corner;
+                                at(2, 0) = above[0];
+                                at(3, 0) = above[1];
                             } else {
-                                dbgln("unhandled {}", (int)mode);
-                                //for (int py = 0; py < 4; ++py)
-                                    //for (int px = 0; px < 4; ++px)
-                                        //y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py];
+                                VERIFY(mode == B_HU_PRED);
+                                // this is 22.5-deg prediction
+                                // XXX this REALLY should be using averages
+                                at(0, 0) = left[0];
+                                at(1, 0) = left[1];
+                                at(2, 0) = at(0, 1) = left[1];
+                                at(3, 0) = at(1, 1) = left[2];
+                                at(2, 1) = at(0, 2) = left[2];
+                                at(3, 1) = at(1, 2) = left[3];
+                                /* Not possible to follow pattern for much of the bottom
+                                   row because no (nearby) already-constructed pixels lie
+                                   on the diagonals in question. */
+                                at(2, 2) = at(3, 2) = at(0, 3) = at(1, 3) = at(2, 3) = at(3, 3) = left[3];
                             }
                         }
                     }
