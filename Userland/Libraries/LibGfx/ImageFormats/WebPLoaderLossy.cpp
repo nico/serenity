@@ -983,18 +983,20 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             dequantization_index = min(dequantization_index, 127);
 
                         // "the multiplies are computed and stored using 16-bit signed integers."
-                        i16 dequantized_value;
+                        i16 dequantization_factor;
                         if (j == 0)
-                            dequantized_value = (i16)dc_qlookup[dequantization_index] * (i16)v;
+                            dequantization_factor = (i16)dc_qlookup[dequantization_index];
                         else
-                            dequantized_value = (i16)ac_qlookup[dequantization_index] * (i16)v;
+                            dequantization_factor = (i16)ac_qlookup[dequantization_index];
 
                         if (is_y2) {
                             if (j == 0)
-                                dequantized_value *= 2;
+                                dequantization_factor *= 2;
                             else
-                                dequantized_value = (dequantized_value * 155) / 100;  // XXX this is wrong somehow, see `VP8DecodeMB 0 1` (but that doesn't affect bitstream decoding)
+                                dequantization_factor = (dequantization_factor * 155) / 100;
                         }
+
+                        i16 dequantized_value = dequantization_factor * (i16)v;
 
 // XXX v is off in VP8DecodeMB 22 1
 
