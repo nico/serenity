@@ -1069,32 +1069,58 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     // Loop over the 4x4 subblocks
                     for (int y = 0, i = 0; y < 4; ++y) {
                         for (int x = 0; x < 4; ++x, ++i) {
-                            // XXX this does the wrong thing for in-block things atm
+                            i16 left[4], above[4];
+                            if (x == 0) {
+                                for (int i = 0; i < 4; ++i)
+                                    left[i] = predicted_y_left[4 * y + i];
+                            } else {
+                                for (int i = 0; i < 4; ++i)
+                                    left[i] = y_prediction[(4 * y + i) * 16 + 4 * x - 1];
+                            }
+                            if (y == 0) {
+                                for (int i = 0; i < 4; ++i)
+                                    above[i] = predicted_y_above[mb_x * 16 + 4 * x + i];
+                            } else {
+                                for (int i = 0; i < 4; ++i)
+                                    above[i] = y_prediction[(4 * y - 1) * 16 + 4 * x + i];
+                            }
+
                             auto mode = metadata.intra_b_modes[y * 4 + x];
                             if (mode == B_DC_PRED) {
                                 // XXX spec text says this is like DC_PRED but predict_dc_nxn() in the sample impl looks like it doesn't do the "oob isn't read" part. what's right?
                                 // DC16NoTopLeft_C vs DC4_C in libwebp dec.c / common_dec.h suggests the spec text is incomplete :/
                                 int sum = 0, n = 8;
                                 for (int i = 0; i < 4; ++i)
-                                    sum += predicted_y_left[4 * y + i] + predicted_y_above[mb_x * 16 + 4 * x + i];
+                                    sum += left[i] + above[i];
                                 i16 average = (sum + n/2) / n;
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = average;
                             } else if (mode == B_HE_PRED) {
+                                // XXX this should be using averages
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = predicted_y_left[4 * y + py];
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py];
                             } else if (mode == B_VE_PRED) {
+                                // XXX this should be using averages
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = predicted_y_above[mb_x * 16 + 4 * x + px];
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = above[px];
                             } else if (mode == B_TM_PRED) {
+                                i16 corner = y_truemotion_corner;
+                                if (x > 0 && y == 0)
+                                    corner = predicted_y_above[mb_x * 16 + 4 * x - 1];
+                                else if (x > 0 && y > 0)
+                                    corner = y_prediction[(4 * y - 1) * 16 + 4 * x - 1];
+
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = predicted_y_left[4 * y + py] + predicted_y_above[mb_x * 16 + 4 * x + px] - y_truemotion_corner;
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
                             } else {
                                 dbgln("unhandled {}", (int)mode);
+                                //for (int py = 0; py < 4; ++py)
+                                    //for (int px = 0; px < 4; ++px)
+                                        //y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py];
                             }
                         }
                     }
