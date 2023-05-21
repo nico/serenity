@@ -704,6 +704,17 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             predicted_y_above[i] = 127;
 
         for (int mb_y = 0, macroblock_index = 0; mb_y < macroblock_height; ++mb_y) {
+            for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
+                auto const& metadata = macroblock_metadata[mb_y * macroblock_width + mb_x];
+                dbgln_if(WEBP_DEBUG, "segment_id {}", metadata.segment_id);
+                dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", (int)metadata.intra_y_mode, mb_y, mb_x);
+                if (metadata.intra_y_mode == B_PRED)
+                    for (int y = 0; y < 4; ++y)
+                        for (int x = 0; x < 4; ++x)
+                            dbgln_if(WEBP_DEBUG, "intra_b_mode {} y {} x {}", (int)metadata.intra_b_modes[y * 4 + x], y, x);
+                dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", (int)metadata.uv_mode, mb_y, mb_x);
+            }
+
 
             bool y2_left {};
             bool y_left[4] {};
@@ -988,6 +999,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 // XXX v is off in VP8DecodeMB 22 1
 
 //dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
+if (v)
+                        dbg(" {} * {} = {}", dequantization_factor, v, dequantized_value);
+else
                         dbg(" {}", dequantized_value);
 
                         if (is_y2)
