@@ -1149,12 +1149,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = above[px];
                             } else if (mode == B_TM_PRED) {
 if (mb_y == 0) {
-dbgln("mb_x {} x {} y {}", mb_x, x, y);
+//dbgln("mb_x {} x {} y {}", mb_x, x, y);
+dbg("top:");
+for (int i = 0; i < 4; ++i) dbg(" {}", above[i]);
+dbgln();
 dbg("left:");
 for (int i = 0; i < 4; ++i) dbg(" {}", left[i]);
-dbgln();
-dbg("above:");
-for (int i = 0; i < 4; ++i) dbg(" {}", above[i]);
 dbgln();
 dbgln("corner: {}", corner);
 }
@@ -1271,22 +1271,22 @@ if (mb_y == 0 && mb_x < 300) {
                                 }
                             }
 
-if (mb_y == 0 && mb_x < 300) {
-    dbgln("coeffs:");
-    for (int k = 0; k < 16; ++k) {
-    dbg(" {}", y_coeffs[4 * y + x][k]);
-    }
-    dbgln();
-
-    int j, k;
-    dbgln("transformed:");
-    for (j = 0; j < 4; ++j) {
-    for (k = 0; k < 4; ++k) {
-      dbg(" {}", y_prediction[(4 * y + j) * 16 + 4 * x + k]);
-    }
-    dbgln();
-    }
-}
+//if (mb_y == 0 && mb_x < 300) {
+//    dbgln("coeffs:");
+//    for (int k = 0; k < 16; ++k) {
+//    dbg(" {}", y_coeffs[4 * y + x][k]);
+//    }
+//    dbgln();
+//
+//    int j, k;
+//    dbgln("transformed:");
+//    for (j = 0; j < 4; ++j) {
+//    for (k = 0; k < 4; ++k) {
+//      dbg(" {}", y_prediction[(4 * y + j) * 16 + 4 * x + k]);
+//    }
+//    dbgln();
+//    }
+//}
 
                         }
                     }
