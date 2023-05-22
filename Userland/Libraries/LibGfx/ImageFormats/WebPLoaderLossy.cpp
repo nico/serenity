@@ -1084,6 +1084,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             y_prediction[y * 16 + x] = predicted_y_left[y] + predicted_y_above[mb_x * 16 + x] - y_truemotion_corner;
                 } else {
                     VERIFY(metadata.intra_y_mode == B_PRED);
+
+                    auto weighted_average = [](i16 x, i16 y, i16 z) { return (x + 2 * y + z + 2) / 4; };
+                    auto average = [](i16 x, i16 y) { return (x + y + 1) / 2; };
+
                     // Loop over the 4x4 subblocks
                     for (int y = 0, i = 0; y < 4; ++y) {
                         for (int x = 0; x < 4; ++x, ++i) {
@@ -1164,14 +1168,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
                             } else if (mode == B_LD_PRED) {
                                 // this is 45-deg prediction from above, going left-down (i.e. isochromes on -1/+1 diags)
-                                // XXX this should be using averages
-                                at(0, 0) = above[1];
-                                at(0, 1) = at(1, 0) = above[2];
-                                at(0, 2) = at(1, 1) = at(2, 0) = above[3];
-                                at(0, 3) = at(1, 2) = at(2, 1) = at(3, 0) = above[4];
-                                at(1, 3) = at(2, 2) = at(3, 1) = above[5];
-                                at(2, 3) = at(3, 2) = above[6];
-                                at(3, 3) = above[7];
+                                at(0, 0) = weighted_average(above[0], above[1], above[2]);
+                                at(0, 1) = at(1, 0) = weighted_average(above[1], above[2], above[3]);
+                                at(0, 2) = at(1, 1) = at(2, 0) = weighted_average(above[2], above[3], above[4]);
+                                at(0, 3) = at(1, 2) = at(2, 1) = at(3, 0) = weighted_average(above[3], above[4], above[5]);
+                                at(1, 3) = at(2, 2) = at(3, 1) = weighted_average(above[4], above[5], above[6]);
+                                at(2, 3) = at(3, 2) = weighted_average(above[5], above[6], above[7]);
+                                at(3, 3) = weighted_average(above[6], above[7], above[7]); // intentionally 6, 7, 7
                             } else if (mode == B_RD_PRED) {
                                 // this is 45-deg prediction from above / left, going right-down (i.e. isochromes on +1/+1 diags)
                                 // XXX this should be using averages
@@ -1200,18 +1203,17 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 //for (int i = 0; i < 8; ++i) dbg(" {}", above[i]);
 //dbgln();
                                 // this is 22.5-deg prediction
-                                // XXX this REALLY should be using averages
-                                at(0, 0) = above[0];
-                                at(0, 1) = above[1];
-                                at(0, 2) = at(1, 0) = above[1];
-                                at(1, 1) = at(0, 3) = above[2];
-                                at(1, 2) = at(2, 0) = above[2];
-                                at(1, 3) = at(2, 1) = above[3];
-                                at(2, 2) = at(3, 0) = above[3];
-                                at(2, 3) = at(3, 1) = above[4];
+                                at(0, 0) = average(above[0], above[1]);
+                                at(0, 1) = weighted_average(above[0], above[1], above[2]);
+                                at(0, 2) = at(1, 0) = average(above[1], above[2]);
+                                at(1, 1) = at(0, 3) = weighted_average(above[1], above[2], above[3]);
+                                at(1, 2) = at(2, 0) = average(above[2], above[3]);
+                                at(1, 3) = at(2, 1) = weighted_average(above[2], above[3], above[4]);
+                                at(2, 2) = at(3, 0) = average(above[3], above[4]);
+                                at(2, 3) = at(3, 1) = weighted_average(above[3], above[4], above[5]);
                                 /* Last two values do not strictly follow the pattern. */
-                                at(3, 2) = above[5];
-                                at(3, 3) = above[6];
+                                at(3, 2) = weighted_average(above[4], above[5], above[6]);
+                                at(3, 3) = weighted_average(above[5], above[6], above[7]);
                             } else if (mode == B_HD_PRED) {
                                 // this is 22.5-deg prediction
                                 // XXX this REALLY should be using averages
@@ -1228,13 +1230,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             } else {
                                 VERIFY(mode == B_HU_PRED);
                                 // this is 22.5-deg prediction
-                                // XXX this REALLY should be using averages
-                                at(0, 0) = left[0];
-                                at(1, 0) = left[1];
-                                at(2, 0) = at(0, 1) = left[1];
-                                at(3, 0) = at(1, 1) = left[2];
-                                at(2, 1) = at(0, 2) = left[2];
-                                at(3, 1) = at(1, 2) = left[3];
+                                at(0, 0) = average(left[0], left[1]);
+                                at(1, 0) = weighted_average(left[0], left[1], left[2]);
+                                at(2, 0) = at(0, 1) = average(left[1], left[2]);
+                                at(3, 0) = at(1, 1) = weighted_average(left[1], left[2], left[3]);
+                                at(2, 1) = at(0, 2) = average(left[2], left[3]);
+                                at(3, 1) = at(1, 2) = weighted_average(left[2], left[3], left[3]); // Intentionally 2, 3, 3
                                 /* Not possible to follow pattern for much of the bottom
                                    row because no (nearby) already-constructed pixels lie
                                    on the diagonals in question. */
