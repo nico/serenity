@@ -723,7 +723,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             bool v_left[2] {};
 
             i16 predicted_y_left[16] { 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129 };
-            i16 y_truemotion_corner = 127;  // XXX spec doesn't say if this should be 127, 129, or something else :/
+
+            // XXX spec doesn't say if this should be 127, 129, or something else :/
+            // but ReconstructRow in frame_dec.c in libwebp suggests 129.
+            i16 y_truemotion_corner = 129;
 
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++macroblock_index) {
                 dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
