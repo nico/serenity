@@ -1046,7 +1046,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     Coefficients wht_output;
                     vp8_short_inv_walsh4x4_c(y2_coeffs, wht_output);
                     for (size_t i = 0; i < 16; ++i)
-                        y_coeffs[i][0] = wht_output[0];
+                        y_coeffs[i][0] = wht_output[i];
                 }
 
                 i16 y_prediction[16 * 16] {};
