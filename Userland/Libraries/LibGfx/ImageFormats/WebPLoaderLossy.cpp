@@ -1144,7 +1144,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             } else if (mode == B_TM_PRED) {
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner; // XXX spec has a clamp here
                             } else if (mode == B_VE_PRED) {
                                 // XXX this should be using averages
                                 for (int py = 0; py < 4; ++py)
