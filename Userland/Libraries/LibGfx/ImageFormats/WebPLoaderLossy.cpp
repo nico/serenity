@@ -1152,17 +1152,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = above[px];
                             } else if (mode == B_TM_PRED) {
-//if (mb_y == 0) {
-////dbgln("mb_x {} x {} y {}", mb_x, x, y);
-//dbg("top:");
-//for (int i = 0; i < 4; ++i) dbg(" {}", above[i]);
-//dbgln();
-//dbg("left:");
-//for (int i = 0; i < 4; ++i) dbg(" {}", left[i]);
-//dbgln();
-//dbgln("corner: {}", corner);
-//}
-
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
@@ -1242,7 +1231,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 at(2, 2) = at(3, 2) = at(0, 3) = at(1, 3) = at(2, 3) = at(3, 3) = left[3];
                             }
 
-if (mb_y == 0 && mb_x < 300) {
+if (mb_y <= 1 && mb_x < 300) {
     auto mode = metadata.intra_b_modes[y * 4 + x];
     int j, k;
     dbgln("block x {} y {} n {} mode {}", mb_x, mb_y, 4*y + x, (int)mode);
@@ -1294,7 +1283,7 @@ if (mb_y == 0 && mb_x < 300) {
                 }
 
 if (metadata.intra_y_mode != B_PRED) {
-if (mb_y == 0 && mb_x < 300) {
+if (mb_y <= 1 && mb_x < 300) {
   int j, k;
   dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.intra_y_mode);
   for (j = 0; j < 16; ++j) {
