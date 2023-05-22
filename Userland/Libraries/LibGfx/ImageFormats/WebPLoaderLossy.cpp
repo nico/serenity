@@ -1092,6 +1092,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 corner = predicted_y_above[mb_x * 16 + 4 * x - 1];
                             else if (x > 0 && y > 0)
                                 corner = y_prediction[(4 * y - 1) * 16 + 4 * x - 1];
+                            else if (x == 0 && y > 0)
+                                corner = predicted_y_left[4 * y - 1];
 
                             i16 left[4], above[8];
                             for (int i = 0; i < 4; ++i) {
