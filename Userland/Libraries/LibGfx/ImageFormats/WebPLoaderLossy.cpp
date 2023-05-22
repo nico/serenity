@@ -704,6 +704,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         for (size_t i = 0; i < predicted_y_above.size(); ++i)
             predicted_y_above[i] = 127;
 
+        Vector<i16> predicted_u_above;
+        TRY(predicted_u_above.try_resize(macroblock_width * 8));
+        for (size_t i = 0; i < predicted_u_above.size(); ++i)
+            predicted_u_above[i] = 127;
+
+        Vector<i16> predicted_v_above;
+        TRY(predicted_v_above.try_resize(macroblock_width * 8));
+        for (size_t i = 0; i < predicted_v_above.size(); ++i)
+            predicted_v_above[i] = 127;
+
         for (int mb_y = 0, macroblock_index = 0; mb_y < macroblock_height; ++mb_y) {
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
                 auto const& metadata = macroblock_metadata[mb_y * macroblock_width + mb_x];
@@ -723,10 +733,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             bool v_left[2] {};
 
             i16 predicted_y_left[16] { 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129 };
+            i16 predicted_u_left[8] { 129, 129, 129, 129, 129, 129, 129, 129 };
+            i16 predicted_v_left[8] { 129, 129, 129, 129, 129, 129, 129, 129 };
 
             // XXX spec doesn't say if this should be 127, 129, or something else :/
             // but ReconstructRow in frame_dec.c in libwebp suggests 129.
             i16 y_truemotion_corner = 129;
+            i16 u_truemotion_corner = 129;
+            i16 v_truemotion_corner = 129;
 
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++macroblock_index) {
                 //dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
@@ -1050,6 +1064,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 }
 
                 i16 y_prediction[16 * 16] {};
+                i16 u_prediction[8 * 8] {};
+                i16 v_prediction[8 * 8] {};
                 if (metadata.intra_y_mode == DC_PRED) {
                     if (mb_x == 0 && mb_y == 0) {
                         for (size_t i = 0; i < 16 * 16; ++i)
@@ -1236,17 +1252,17 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 at(2, 2) = at(3, 2) = at(0, 3) = at(1, 3) = at(2, 3) = at(3, 3) = left[3];
                             }
 
-if (mb_y <= 100 && mb_x < 300) {
-    auto mode = metadata.intra_b_modes[y * 4 + x];
-    int j, k;
-    dbgln("block x {} y {} n {} mode {}", mb_x, mb_y, 4*y + x, (int)mode);
-    for (j = 0; j < 4; ++j) {
-    for (k = 0; k < 4; ++k) {
-      dbg(" {}", y_prediction[(4 * y + j) * 16 + 4 * x + k]);
-    }
-    dbgln();
-    }
-}
+//if (mb_y <= 100 && mb_x < 300) {
+//    auto mode = metadata.intra_b_modes[y * 4 + x];
+//    int j, k;
+//    dbgln("block x {} y {} n {} mode {}", mb_x, mb_y, 4*y + x, (int)mode);
+//    for (j = 0; j < 4; ++j) {
+//    for (k = 0; k < 4; ++k) {
+//      dbg(" {}", y_prediction[(4 * y + j) * 16 + 4 * x + k]);
+//    }
+//    dbgln();
+//    }
+//}
 
                             Coefficients idct_output;
                             short_idct4x4llm_c(y_coeffs[4 * y + x], idct_output, 4 * sizeof(i16));
@@ -1282,19 +1298,97 @@ if (mb_y <= 100 && mb_x < 300) {
                     }
                 }
 
-if (metadata.intra_y_mode != B_PRED) {
+                if (metadata.uv_mode == DC_PRED) {
+                    if (mb_x == 0 && mb_y == 0) {
+                        for (size_t i = 0; i < 8 * 8; ++i) {
+                            u_prediction[i] = 128;
+                            v_prediction[i] = 128;
+                        }
+                    } else {
+                        int sum = 0, n = 0;
+                        if (mb_x > 0) {
+                            for (int i = 0; i < 8; ++i)
+                                sum += predicted_u_left[i];
+                            n += 8;
+                        }
+                        if (mb_y > 0) {
+                            for (int i = 0; i < 8; ++i)
+                                sum += predicted_u_above[mb_x * 8 + i];
+                            n += 8;
+                        }
+                        i16 average = (sum + n/2) / n;
+                        for (size_t i = 0; i < 8 * 8; ++i)
+                            u_prediction[i] = average;
+
+                        sum = 0, n = 0;
+                        if (mb_x > 0) {
+                            for (int i = 0; i < 8; ++i)
+                                sum += predicted_v_left[i];
+                            n += 8;
+                        }
+                        if (mb_y > 0) {
+                            for (int i = 0; i < 8; ++i)
+                                sum += predicted_v_above[mb_x * 8 + i];
+                            n += 8;
+                        }
+                        average = (sum + n/2) / n;
+                        for (size_t i = 0; i < 8 * 8; ++i)
+                            v_prediction[i] = average;
+                    }
+                } else if (metadata.uv_mode == H_PRED) {
+                    for (int y = 0; y < 8; ++y)
+                        for (int x = 0; x < 8; ++x)
+                            u_prediction[y * 8 + x] = predicted_u_left[y];
+                    for (int y = 0; y < 8; ++y)
+                        for (int x = 0; x < 8; ++x)
+                            v_prediction[y * 8 + x] = predicted_v_left[y];
+                } else if (metadata.uv_mode == V_PRED) {
+                    for (int y = 0; y < 8; ++y)
+                        for (int x = 0; x < 8; ++x)
+                            u_prediction[y * 8 + x] = predicted_u_above[mb_x * 8 + x];
+                    for (int y = 0; y < 8; ++y)
+                        for (int x = 0; x < 8; ++x)
+                            v_prediction[y * 8 + x] = predicted_v_above[mb_x * 8 + x];
+                } else {
+                    VERIFY(metadata.uv_mode == TM_PRED);
+                    for (int y = 0; y < 8; ++y)
+                        for (int x = 0; x < 8; ++x)
+                            u_prediction[y * 8 + x] = predicted_u_left[y] + predicted_u_above[mb_x * 8 + x] - u_truemotion_corner;
+                    for (int y = 0; y < 8; ++y)
+                        for (int x = 0; x < 8; ++x)
+                            v_prediction[y * 8 + x] = predicted_v_left[y] + predicted_v_above[mb_x * 8 + x] - v_truemotion_corner;
+                }
+
+//if (metadata.intra_y_mode != B_PRED) {
+//if (mb_y <= 100 && mb_x < 300) {
+//  int j, k;
+//  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.intra_y_mode);
+//  for (j = 0; j < 16; ++j) {
+//  for (k = 0; k < 16; ++k) {
+//    dbg(" {}", y_prediction[j * 16 + k]);
+//  }
+//  dbgln();
+//  }
+//}
+//}
 if (mb_y <= 100 && mb_x < 300) {
   int j, k;
-  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.intra_y_mode);
-  for (j = 0; j < 16; ++j) {
-  for (k = 0; k < 16; ++k) {
-    dbg(" {}", y_prediction[j * 16 + k]);
+  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.uv_mode);
+  for (j = 0; j < 8; ++j) {
+  for (k = 0; k < 8; ++k) {
+    dbg(" {}", u_prediction[j * 8 + k]);
+  }
+  dbgln();
+  }
+  for (j = 0; j < 8; ++j) {
+  for (k = 0; k < 8; ++k) {
+    dbg(" {}", v_prediction[j * 8 + k]);
   }
   dbgln();
   }
 }
-}
 
+                // Y, no subblocks
 if (metadata.intra_y_mode != B_PRED) {
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
                 // Loop over the 4x4 subblocks
@@ -1334,6 +1428,47 @@ if (metadata.intra_y_mode != B_PRED) {
 //    }
 //}
 }
+                // UV
+                for (int y = 0, i = 0; y < 2; ++y) {
+                    for (int x = 0; x < 2; ++x, ++i) {
+                        Coefficients idct_output;
+                        short_idct4x4llm_c(u_coeffs[i], idct_output, 4 * sizeof(i16));
+                        for (int py = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
+                            for (int px = 0; px < 4; ++px) {
+                                i16& p = u_prediction[(4 * y + py) * 8 + (4 * x + px)];
+                                p += idct_output[py * 4 + px];
+                                //p = clamp(p, 0, 255);
+                            }
+                        }
+
+                        short_idct4x4llm_c(v_coeffs[i], idct_output, 4 * sizeof(i16));
+                        for (int py = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
+                            for (int px = 0; px < 4; ++px) {
+                                i16& p = v_prediction[(4 * y + py) * 8 + (4 * x + px)];
+                                p += idct_output[py * 4 + px];
+                                //p = clamp(p, 0, 255);
+                            }
+                        }
+                    }
+                }
+//if (mb_y == 0 && mb_x < 300) {
+//    for (int i = 0; i < 4; ++i) {
+//    dbg("coeffs {}:", i);
+//    for (int k = 0; k < 16; ++k) {
+//    dbg(" {}", u_coeffs[i][k]);
+//    }
+//    dbgln();
+//    }
+//
+//    int j, k;
+//    dbgln("transformed:");
+//    for (j = 0; j < 8; ++j) {
+//    for (k = 0; k < 8; ++k) {
+//      dbg(" {}", u_prediction[j * 8 + k]);
+//    }
+//    dbgln();
+//    }
+//}
 
                 // Convert YUV to RGB.
                 for (int y = 0, i = 0; y < 16; ++y) {
@@ -1351,6 +1486,18 @@ if (metadata.intra_y_mode != B_PRED) {
                     predicted_y_left[i] = y_prediction[15 + i * 16];
                 for (int i = 0; i < 16; ++i)
                     predicted_y_above[mb_x * 16 + i] = y_prediction[15 * 16 + i];
+
+                u_truemotion_corner = predicted_u_above[mb_x * 8 + 7];
+                for (int i = 0; i < 8; ++i)
+                    predicted_u_left[i] = u_prediction[7 + i * 8];
+                for (int i = 0; i < 8; ++i)
+                    predicted_u_above[mb_x * 8 + i] = u_prediction[7 * 8 + i];
+
+                v_truemotion_corner = predicted_v_above[mb_x * 8 + 7];
+                for (int i = 0; i < 8; ++i)
+                    predicted_v_left[i] = v_prediction[7 + i * 8];
+                for (int i = 0; i < 8; ++i)
+                    predicted_v_above[mb_x * 8 + i] = v_prediction[7 * 8 + i];
             }
         }
 
