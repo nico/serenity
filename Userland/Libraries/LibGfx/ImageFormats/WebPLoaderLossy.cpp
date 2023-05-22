@@ -1258,11 +1258,6 @@ if (mb_y <= 1 && mb_x < 300) {
                                     i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
                                     p += idct_output[py * 4 + px];
                                     //p = clamp(p, 0, 255);
-                                    // "is then saturated to 8-bit unsigned range (using, say, the
-                                    //  clamp255 function defined above) before being stored as an 8-bit
-                                    //  unsigned pixel value."
-                                    u8 Y = clamp(p, 0, 255);
-                                    bitmap->scanline(mb_y * 16 + y * 4 + py)[mb_x * 16 + x * 4 + px] = Color(Y, Y, Y).value();
                                 }
                             }
 
@@ -1315,11 +1310,6 @@ if (metadata.intra_y_mode != B_PRED) {
                                 i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
                                 p += idct_output[py * 4 + px];
                                 //p = clamp(p, 0, 255);
-                                // "is then saturated to 8-bit unsigned range (using, say, the
-                                //  clamp255 function defined above) before being stored as an 8-bit
-                                //  unsigned pixel value."
-                                u8 Y = clamp(p, 0, 255);
-                                bitmap->scanline(mb_y * 16 + y * 4 + py)[mb_x * 16 + x * 4 + px] = Color(Y, Y, Y).value();
                             }
                         }
                     }
@@ -1344,6 +1334,17 @@ if (metadata.intra_y_mode != B_PRED) {
 //    }
 //}
 }
+
+                // Convert YUV to RGB.
+                for (int y = 0, i = 0; y < 16; ++y) {
+                    for (int x = 0; x < 16; ++x, ++i) {
+                        // "is then saturated to 8-bit unsigned range (using, say, the
+                        //  clamp255 function defined above) before being stored as an 8-bit
+                        //  unsigned pixel value."
+                        u8 Y = clamp(y_prediction[y * 16 + x], 0, 255);
+                        bitmap->scanline(mb_y * 16 + y)[mb_x * 16 + x] = Color(Y, Y, Y).value();
+                    }
+                }
 
                 y_truemotion_corner = predicted_y_above[mb_x * 16 + 15];
                 for (int i = 0; i < 16; ++i)
