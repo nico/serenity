@@ -1146,10 +1146,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner; // XXX spec has a clamp here
                             } else if (mode == B_VE_PRED) {
-                                // XXX this should be using averages
                                 for (int py = 0; py < 4; ++py)
-                                    for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = above[px];
+                                    for (int px = 0; px < 4; ++px) {
+                                        auto top_left = (px > 0 ? above[px - 1] : corner);
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = weighted_average(top_left, above[px], above[px + 1]);
+                                    }
                             } else if (mode == B_HE_PRED) {
                                 // XXX this should be using averages
                                 for (int py = 0; py < 4; ++py)
@@ -1176,17 +1177,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 at(3, 0) = above[2];
                             } else if (mode == B_VR_PRED) {
                                 // this is 22.5-deg prediction
-                                // XXX this REALLY should be using averages
-                                at(0, 3) = left[1];
-                                at(0, 2) = left[0];
-                                at(1, 3) = at(0, 1) = corner;
-                                at(1, 2) = at(0, 0) = corner;
-                                at(2, 3) = at(1, 1) = above[0];
-                                at(2, 2) = at(1, 0) = above[0];
-                                at(3, 3) = at(2, 1) = above[1];
-                                at(3, 2) = at(2, 0) = above[1];
-                                at(3, 1) = above[2];
-                                at(3, 0) = above[2];
+                                at(0, 3) = weighted_average(left[2], left[1], left[0]);
+                                at(0, 2) = weighted_average(left[1], left[0], corner);
+                                at(1, 3) = at(0, 1) = weighted_average(left[0], corner, above[0]);
+                                at(1, 2) = at(0, 0) = average(corner, above[0]);
+                                at(2, 3) = at(1, 1) = weighted_average(corner, above[0], above[1]);
+                                at(2, 2) = at(1, 0) = average(above[0], above[1]);
+                                at(3, 3) = at(2, 1) = weighted_average(above[0], above[1], above[2]);
+                                at(3, 2) = at(2, 0) = average(above[1], above[2]);
+                                at(3, 1) = weighted_average(above[1], above[2], above[3]);
+                                at(3, 0) = average(above[2], above[3]);
                             } else if (mode == B_VL_PRED) {
 //dbg("B_VL_PRED above:");
 //for (int i = 0; i < 8; ++i) dbg(" {}", above[i]);
@@ -1205,17 +1205,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 at(3, 3) = weighted_average(above[5], above[6], above[7]);
                             } else if (mode == B_HD_PRED) {
                                 // this is 22.5-deg prediction
-                                // XXX this REALLY should be using averages
-                                at(0, 3) = left[3];
-                                at(1, 3) = left[2];
-                                at(0, 2) = at(2, 3) = left[2];
-                                at(1, 2) = at(3, 3) = left[1];
-                                at(2, 2) = at(0, 1) = left[1];
-                                at(3, 2) = at(1, 1) = left[0];
-                                at(2, 1) = at(0, 0) = left[0];
-                                at(3, 1) = at(1, 0) = corner;
-                                at(2, 0) = above[0];
-                                at(3, 0) = above[1];
+                                at(0, 3) = average(left[3], left[2]);
+                                at(1, 3) = weighted_average(left[3], left[2], left[1]);
+                                at(0, 2) = at(2, 3) = average(left[2], left[1]);
+                                at(1, 2) = at(3, 3) = weighted_average(left[2], left[1], left[0]);
+                                at(2, 2) = at(0, 1) = average(left[1], left[0]);
+                                at(3, 2) = at(1, 1) = weighted_average(left[1], left[0], corner);
+                                at(2, 1) = at(0, 0) = average(left[0], corner);
+                                at(3, 1) = at(1, 0) = weighted_average(left[0], corner, above[0]);
+                                at(2, 0) = weighted_average(corner, above[0], above[1]);
+                                at(3, 0) = weighted_average(above[0], above[1], above[2]);
                             } else {
                                 VERIFY(mode == B_HU_PRED);
                                 // this is 22.5-deg prediction
