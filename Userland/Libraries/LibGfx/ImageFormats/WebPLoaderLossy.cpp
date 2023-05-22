@@ -1211,7 +1211,7 @@ dbgln();
                                 at(2, 3) = at(3, 1) = above[4];
                                 /* Last two values do not strictly follow the pattern. */
                                 at(3, 2) = above[5];
-                                at(3, 3) = above[5];
+                                at(3, 3) = above[6];
                             } else if (mode == B_HD_PRED) {
                                 // this is 22.5-deg prediction
                                 // XXX this REALLY should be using averages
