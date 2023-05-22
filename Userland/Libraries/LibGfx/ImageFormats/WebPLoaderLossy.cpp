@@ -94,7 +94,6 @@ public:
 
     ErrorOr<bool> read_bool(u8 probability);
     ErrorOr<u32> read_literal(u8 bits);
-    ErrorOr<i32> read_signed_literal(u8 bits);
     size_t bits_remaining() const;
 
 private:
@@ -159,18 +158,6 @@ ErrorOr<u32> BooleanEntropyDecoder::read_literal(u8 bits)
 {
     u32 result = 0;
     for (size_t i = 0; i < bits; i++)
-        result = 2 * result + TRY(read_bool(128));
-    return result;
-}
-
-ErrorOr<i32> BooleanEntropyDecoder::read_signed_literal(u8 bits)
-{
-    if (!bits)
-        return 0;
-    i32 result = 0;
-    if (TRY(read_bool(128)))
-        result = -1;
-    for (size_t i = 1; i < bits; i++)
         result = 2 * result + TRY(read_bool(128));
     return result;
 }
