@@ -1102,7 +1102,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             // Subblock prediction can read 8 pixels above the block.
                             // For rightmost subblocks, the right 4 pixels there aren't initialized yet, so those get the 4 pixels to the right above the macroblock.
                             // For the rightmost macroblock, there's no macroblock to its right, so there they get the rightmost pixel above.
-                            // But in the 0th row, there's no pixel above, so there they become 128.
+                            // But in the 0th row, there's no pixel above, so there they become 127.
                             for (int i = 0; i < 8; ++i) {
                                 if (x == 3 && i >= 4) { // rightmost subblock, 4 right pixels?
                                     if (mb_x == macroblock_width - 1) { // rightmost macroblock
