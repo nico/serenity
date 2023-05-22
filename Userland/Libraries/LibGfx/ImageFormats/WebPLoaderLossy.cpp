@@ -729,7 +729,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             i16 y_truemotion_corner = 129;
 
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++macroblock_index) {
-                dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
+                //dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
 
                 Coefficients y2_coeffs {};
                 Coefficients y_coeffs[16] {};
@@ -793,9 +793,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     bool is_v = i >= 21;
                     bool is_y2 = i == 0;
 
-                    if (is_y2) dbg("y2:");
-                    else if (is_u || is_v) dbg("uv {}:", (i - 17) % 4);
-                    else  dbg("y {:2}:", (i - 1));
+                    //if (is_y2) dbg("y2:");
+                    //else if (is_u || is_v) dbg("uv {}:", (i - 17) % 4);
+                    //else  dbg("y {:2}:", (i - 1));
 
                     // Corresponds to `residual_block()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                     // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
@@ -901,7 +901,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 //dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
 
                         if (token == dct_eob) {
-                            dbg(" eob");
+                            //dbg(" eob");
                             break;
                         }
 
@@ -1005,7 +1005,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 //if (v)
                         //dbg(" {} * {} = {}", dequantization_factor, v, dequantized_value);
 //else
-                        dbg(" {}", dequantized_value);
+                        //dbg(" {}", dequantized_value);
 
                         static int constexpr Zigzag[] = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
                         if (is_y2)
@@ -1019,7 +1019,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
 
                     }
-                    dbgln();
+                    //dbgln();
 
                     if (is_y2) {
                         y2_left = subblock_has_nonzero_coefficients;
@@ -1148,16 +1148,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = above[px];
                             } else if (mode == B_TM_PRED) {
-if (mb_y == 0) {
-//dbgln("mb_x {} x {} y {}", mb_x, x, y);
-dbg("top:");
-for (int i = 0; i < 4; ++i) dbg(" {}", above[i]);
-dbgln();
-dbg("left:");
-for (int i = 0; i < 4; ++i) dbg(" {}", left[i]);
-dbgln();
-dbgln("corner: {}", corner);
-}
+//if (mb_y == 0) {
+////dbgln("mb_x {} x {} y {}", mb_x, x, y);
+//dbg("top:");
+//for (int i = 0; i < 4; ++i) dbg(" {}", above[i]);
+//dbgln();
+//dbg("left:");
+//for (int i = 0; i < 4; ++i) dbg(" {}", left[i]);
+//dbgln();
+//dbgln("corner: {}", corner);
+//}
 
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
@@ -1196,9 +1196,9 @@ dbgln("corner: {}", corner);
                                 at(3, 1) = above[2];
                                 at(3, 0) = above[2];
                             } else if (mode == B_VL_PRED) {
-dbg("B_VL_PRED above:");
-for (int i = 0; i < 8; ++i) dbg(" {}", above[i]);
-dbgln();
+//dbg("B_VL_PRED above:");
+//for (int i = 0; i < 8; ++i) dbg(" {}", above[i]);
+//dbgln();
                                 // this is 22.5-deg prediction
                                 // XXX this REALLY should be using averages
                                 at(0, 0) = above[0];
@@ -1295,7 +1295,7 @@ if (mb_y == 0 && mb_x < 300) {
 if (metadata.intra_y_mode != B_PRED) {
 if (mb_y == 0 && mb_x < 300) {
   int j, k;
-  dbgln("block x {} y {}", mb_x, mb_y);
+  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.intra_y_mode);
   for (j = 0; j < 16; ++j) {
   for (k = 0; k < 16; ++k) {
     dbg(" {}", y_prediction[j * 16 + k]);
@@ -1329,6 +1329,25 @@ if (metadata.intra_y_mode != B_PRED) {
                         }
                     }
                 }
+
+//if (mb_y == 0 && mb_x < 300) {
+//    for (int i = 0; i < 16; ++i) {
+//    dbg("coeffs {}:", i);
+//    for (int k = 0; k < 16; ++k) {
+//    dbg(" {}", y_coeffs[i][k]);
+//    }
+//    dbgln();
+//    }
+//
+//    int j, k;
+//    dbgln("transformed:");
+//    for (j = 0; j < 16; ++j) {
+//    for (k = 0; k < 16; ++k) {
+//      dbg(" {}", y_prediction[j * 16 + k]);
+//    }
+//    dbgln();
+//    }
+//}
 }
 
                 y_truemotion_corner = predicted_y_above[mb_x * 16 + 15];
