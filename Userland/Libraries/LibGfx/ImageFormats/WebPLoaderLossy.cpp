@@ -1477,7 +1477,16 @@ if (metadata.intra_y_mode != B_PRED) {
                         //  clamp255 function defined above) before being stored as an 8-bit
                         //  unsigned pixel value."
                         u8 Y = clamp(y_prediction[y * 16 + x], 0, 255);
-                        bitmap->scanline(mb_y * 16 + y)[mb_x * 16 + x] = Color(Y, Y, Y).value();
+
+                        // FIXME: Could do nicer upsampling than just nearest neighbor
+                        u8 U = clamp(u_prediction[(y/2) * 8 + x/2], 0, 255);
+                        u8 V = clamp(v_prediction[(y/2) * 8 + x/2], 0, 255);
+
+                        int r = Y + 1.402f * (U - 128);
+                        int g = Y - 0.3441f * (V - 128) - 0.7141f * (V - 128);
+                        int b = Y + 1.772f * (V - 128);
+
+                        bitmap->scanline(mb_y * 16 + y)[mb_x * 16 + x] = Color(clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255)).value();
                     }
                 }
 
