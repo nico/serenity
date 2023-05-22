@@ -389,7 +389,6 @@ enum intra_bmode {
     B_RD_PRED,  /* southeast (right and down) "" */
 
     B_VR_PRED,  /* SSE (vertical right) diagonal prediction */
-    B_VL_PRED,  /* SSW (vertical left) "" */
 #else
 // This is the order in libwebp
 // Looks like libwebp commit f67b5939a accidentally (?) changed this (?)
@@ -399,8 +398,9 @@ enum intra_bmode {
 
     B_LD_PRED,  /* southwest (left and down) 45 degree diagonal
                    prediction */
-    B_VL_PRED,  /* SSW (vertical left) "" */
 #endif
+
+    B_VL_PRED,  /* SSW (vertical left) "" */
 
     B_HD_PRED,  /* ESE (horizontal down) "" */
     B_HU_PRED,  /* ENE (horizontal up) "" */
