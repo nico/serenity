@@ -1482,9 +1482,10 @@ if (metadata.intra_y_mode != B_PRED) {
                         u8 U = clamp(u_prediction[(y/2) * 8 + x/2], 0, 255);
                         u8 V = clamp(v_prediction[(y/2) * 8 + x/2], 0, 255);
 
-                        int r = Y + 1.402f * (U - 128);
-                        int g = Y - 0.3441f * (V - 128) - 0.7141f * (V - 128);
-                        int b = Y + 1.772f * (V - 128);
+                        // XXX: These numbers are from the fixed-point values in libwebp's yuv.h. There's probably a better reference somewhere.
+                        int r = 1.1655 * Y + 1.596 * V - 222.4;
+                        int g = 1.1655 * Y - 0.3917 * U - 0.8129 * V + 136.0625;
+                        int b = 1.1655 * Y + 2.0172 * U - 276.33;
 
                         bitmap->scanline(mb_y * 16 + y)[mb_x * 16 + x] = Color(clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255)).value();
                     }
