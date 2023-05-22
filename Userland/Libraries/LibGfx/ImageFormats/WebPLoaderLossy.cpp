@@ -1152,10 +1152,17 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = weighted_average(top_left, above[px], above[px + 1]);
                                     }
                             } else if (mode == B_HE_PRED) {
-                                // XXX this should be using averages
                                 for (int py = 0; py < 4; ++py)
-                                    for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py];
+                                    for (int px = 0; px < 4; ++px) {
+                                        if (py == 0) {
+                                            y_prediction[(4 * y + py) * 16 + 4 * x + px] = weighted_average(corner, left[py], left[py + 1]);
+                                        } else if (py == 3) {
+                                            /* Bottom row is exceptional because L[4] does not exist */
+                                            y_prediction[(4 * y + py) * 16 + 4 * x + px] = weighted_average(left[2], left[3], left[3]);
+                                        } else {
+                                            y_prediction[(4 * y + py) * 16 + 4 * x + px] = weighted_average(left[py - 1], left[py], left[py + 1]);
+                                        }
+                                    }
                             } else if (mode == B_LD_PRED) {
                                 // this is 45-deg prediction from above, going left-down (i.e. isochromes on -1/+1 diags)
                                 at(0, 0) = weighted_average(above[0], above[1], above[2]);
@@ -1167,14 +1174,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 at(3, 3) = weighted_average(above[6], above[7], above[7]); // intentionally 6, 7, 7
                             } else if (mode == B_RD_PRED) {
                                 // this is 45-deg prediction from above / left, going right-down (i.e. isochromes on +1/+1 diags)
-                                // XXX this should be using averages
-                                at(0, 3) = left[2];
-                                at(0, 2) = at(1, 3) = left[1];
-                                at(0, 1) = at(1, 2) = at(2, 3) = left[0];
-                                at(0, 0) = at(1, 1) = at(2, 2) = at(3, 3) = corner;
-                                at(1, 0) = at(2, 1) = at(3, 2) = above[0];
-                                at(2, 0) = at(3, 1) = above[1];
-                                at(3, 0) = above[2];
+                                at(0, 3) = weighted_average(left[3], left[2], left[1]);
+                                at(0, 2) = at(1, 3) = weighted_average(left[2], left[1], left[0]);
+                                at(0, 1) = at(1, 2) = at(2, 3) = weighted_average(left[1], left[0], corner);
+                                at(0, 0) = at(1, 1) = at(2, 2) = at(3, 3) = weighted_average(left[0], corner, above[0]);
+                                at(1, 0) = at(2, 1) = at(3, 2) = weighted_average(corner, above[0], above[1]);
+                                at(2, 0) = at(3, 1) = weighted_average(above[0], above[1], above[2]);
+                                at(3, 0) = weighted_average(above[1], above[2], above[3]);
                             } else if (mode == B_VR_PRED) {
                                 // this is 22.5-deg prediction
                                 at(0, 3) = weighted_average(left[2], left[1], left[0]);
