@@ -1141,6 +1141,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = average;
+                            } else if (mode == B_TM_PRED) {
+                                for (int py = 0; py < 4; ++py)
+                                    for (int px = 0; px < 4; ++px)
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
                             } else if (mode == B_HE_PRED) {
                                 // XXX this should be using averages
                                 for (int py = 0; py < 4; ++py)
@@ -1151,10 +1155,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
                                         y_prediction[(4 * y + py) * 16 + 4 * x + px] = above[px];
-                            } else if (mode == B_TM_PRED) {
-                                for (int py = 0; py < 4; ++py)
-                                    for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner;
                             } else if (mode == B_LD_PRED) {
                                 // this is 45-deg prediction from above, going left-down (i.e. isochromes on -1/+1 diags)
                                 at(0, 0) = weighted_average(above[0], above[1], above[2]);
