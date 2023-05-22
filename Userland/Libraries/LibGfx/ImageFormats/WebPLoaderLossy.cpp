@@ -715,16 +715,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             predicted_v_above[i] = 127;
 
         for (int mb_y = 0, macroblock_index = 0; mb_y < macroblock_height; ++mb_y) {
-            for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
-                auto const& metadata = macroblock_metadata[mb_y * macroblock_width + mb_x];
-                dbgln_if(WEBP_DEBUG, "segment_id {}", metadata.segment_id);
-                dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", (int)metadata.intra_y_mode, mb_y, mb_x);
-                if (metadata.intra_y_mode == B_PRED)
-                    for (int y = 0; y < 4; ++y)
-                        for (int x = 0; x < 4; ++x)
-                            dbgln_if(WEBP_DEBUG, "intra_b_mode {} y {} x {}", (int)metadata.intra_b_modes[y * 4 + x], y, x);
-                dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", (int)metadata.uv_mode, mb_y, mb_x);
-            }
+            //for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
+            //    auto const& metadata = macroblock_metadata[mb_y * macroblock_width + mb_x];
+            //    dbgln_if(WEBP_DEBUG, "segment_id {}", metadata.segment_id);
+            //    dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", (int)metadata.intra_y_mode, mb_y, mb_x);
+            //    if (metadata.intra_y_mode == B_PRED)
+            //        for (int y = 0; y < 4; ++y)
+            //            for (int x = 0; x < 4; ++x)
+            //                dbgln_if(WEBP_DEBUG, "intra_b_mode {} y {} x {}", (int)metadata.intra_b_modes[y * 4 + x], y, x);
+            //    dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", (int)metadata.uv_mode, mb_y, mb_x);
+            //}
 
 
             bool y2_left {};
@@ -1371,22 +1371,22 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 //  }
 //}
 //}
-if (mb_y <= 100 && mb_x < 300) {
-  int j, k;
-  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.uv_mode);
-  for (j = 0; j < 8; ++j) {
-  for (k = 0; k < 8; ++k) {
-    dbg(" {}", u_prediction[j * 8 + k]);
-  }
-  dbgln();
-  }
-  for (j = 0; j < 8; ++j) {
-  for (k = 0; k < 8; ++k) {
-    dbg(" {}", v_prediction[j * 8 + k]);
-  }
-  dbgln();
-  }
-}
+//if (mb_y <= 100 && mb_x < 300) {
+//  int j, k;
+//  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.uv_mode);
+//  for (j = 0; j < 8; ++j) {
+//  for (k = 0; k < 8; ++k) {
+//    dbg(" {}", u_prediction[j * 8 + k]);
+//  }
+//  dbgln();
+//  }
+//  for (j = 0; j < 8; ++j) {
+//  for (k = 0; k < 8; ++k) {
+//    dbg(" {}", v_prediction[j * 8 + k]);
+//  }
+//  dbgln();
+//  }
+//}
 
                 // Y, no subblocks
 if (metadata.intra_y_mode != B_PRED) {
