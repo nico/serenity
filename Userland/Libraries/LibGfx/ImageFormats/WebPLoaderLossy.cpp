@@ -1223,10 +1223,29 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                    on the diagonals in question. */
                                 at(2, 2) = at(3, 2) = at(0, 3) = at(1, 3) = at(2, 3) = at(3, 3) = left[3];
                             }
+
+                            Coefficients idct_output;
+                            short_idct4x4llm_c(y_coeffs[4 * y + x], idct_output, 4 * sizeof(i16));
+
+                            // https://datatracker.ietf.org/doc/html/rfc6386#section-14.5 "Summation of Predictor and Residue"
+                            for (int py = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
+                                for (int px = 0; px < 4; ++px) {
+                                    // sum with prediction
+                                    i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
+                                    p += idct_output[py * 4 + px];
+                                    //p = clamp(p, 0, 255);
+                                    // "is then saturated to 8-bit unsigned range (using, say, the
+                                    //  clamp255 function defined above) before being stored as an 8-bit
+                                    //  unsigned pixel value."
+                                    u8 Y = clamp(p, 0, 255);
+                                    bitmap->scanline(mb_y * 16 + y * 4 + py)[mb_x * 16 + x * 4 + px] = Color(Y, Y, Y).value();
+                                }
+                            }
                         }
                     }
                 }
 
+if (metadata.intra_y_mode != B_PRED) {
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
                 // Loop over the 4x4 subblocks
                 for (int y = 0, i = 0; y < 4; ++y) {
@@ -1240,6 +1259,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 // sum with prediction
                                 i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
                                 p += idct_output[py * 4 + px];
+                                //p = clamp(p, 0, 255);
                                 // "is then saturated to 8-bit unsigned range (using, say, the
                                 //  clamp255 function defined above) before being stored as an 8-bit
                                 //  unsigned pixel value."
@@ -1249,6 +1269,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         }
                     }
                 }
+}
 
                 y_truemotion_corner = predicted_y_above[mb_x * 16 + 15];
                 for (int i = 0; i < 16; ++i)
