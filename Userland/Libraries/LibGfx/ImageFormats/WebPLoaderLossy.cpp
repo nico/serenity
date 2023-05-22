@@ -1469,6 +1469,8 @@ if (metadata.intra_y_mode != B_PRED) {
 //    dbgln();
 //    }
 //}
+                // FIXME: insert loop filtering here
+                // https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
 
                 // Convert YUV to RGB.
                 for (int y = 0, i = 0; y < 16; ++y) {
