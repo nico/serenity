@@ -1007,14 +1007,15 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 //else
                         dbg(" {}", dequantized_value);
 
+                        static int constexpr Zigzag[] = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
                         if (is_y2)
-                            y2_coeffs[j] = dequantized_value;
+                            y2_coeffs[Zigzag[j]] = dequantized_value;
                         else if (is_u)
-                            u_coeffs[i - 17][j] = dequantized_value;
+                            u_coeffs[i - 17][Zigzag[j]] = dequantized_value;
                         else if (is_v)
-                            v_coeffs[i - 21][j] = dequantized_value;
+                            v_coeffs[i - 21][Zigzag[j]] = dequantized_value;
                         else // Y
-                            y_coeffs[i - 1][j] = dequantized_value;
+                            y_coeffs[i - 1][Zigzag[j]] = dequantized_value;
 
 
                     }
