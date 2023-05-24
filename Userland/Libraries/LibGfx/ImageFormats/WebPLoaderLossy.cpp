@@ -89,12 +89,6 @@ class BooleanEntropyDecoder {
 public:
     static ErrorOr<BooleanEntropyDecoder> initialize(BigEndianInputBitStream& bit_stream);
 
-    template<Unsigned T = u64>
-    ErrorOr<T> read_bits(size_t count)
-    {
-        return m_bit_stream.read_bits<T>(count);
-    }
-
     ErrorOr<bool> read_bool(u8 probability);
     ErrorOr<u32> read_literal(u8 bits);
 
@@ -223,7 +217,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
-    //auto f = [&decoder](u32 n) { return decoder.read_bits(n); };
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
     auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
