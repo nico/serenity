@@ -82,6 +82,69 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
 
 namespace {
 
+
+using uint8 = u8;
+using uint32 = u32;
+typedef struct {
+     uint8   *input;     /* pointer to next compressed data byte */
+     uint32  range;      /* always identical to encoder's range */
+     uint32  value;      /* contains at least 8 significant bits */
+     int     bit_count;  /* # of bits shifted out of
+                            value, at most 7 */
+   } bool_decoder;
+
+   /* Call this function before reading any bools from the
+      partition. */
+
+   void init_bool_decoder(bool_decoder *d, uint8 *start_partition)
+   {
+     {
+       int i = 0;
+       d->value = 0;           /* value = first 2 input bytes */
+       while (++i <= 2)
+
+         d->value = (d->value << 8)  |  *start_partition++;
+     }
+
+     d->input = start_partition;  /* ptr to next byte to be read */
+     d->range = 255;           /* initial range is full */
+     d->bit_count = 0;         /* have not yet shifted out any bits */
+   }
+
+   /* Main function reads a bool encoded at probability prob/256,
+      which of course must agree with the probability used when the
+      bool was written. */
+
+   int spec_read_bool(bool_decoder *d, Prob prob)
+   {
+     /* range and split are identical to the corresponding values
+        used by the encoder when this bool was written */
+
+     uint32  split = 1 + (((d->range - 1) * prob) >> 8);
+     uint32  SPLIT = split << 8;
+     int     retval;           /* will be 0 or 1 */
+     if (d->value >= SPLIT) {  /* encoded a one */
+       retval = 1;
+       d->range -= split;  /* reduce range */
+       d->value -= SPLIT;  /* subtract off left endpoint of interval */
+     } else {              /* encoded a zero */
+       retval = 0;
+       d->range = split;  /* reduce range, no change in left endpoint */
+     }
+
+     while (d->range < 128) {  /* shift out irrelevant value bits */
+       d->value <<= 1;
+       d->range <<= 1;
+       if (++d->bit_count == 8) {  /* shift in new bits 8 at a time */
+         d->bit_count = 0;
+         d->value |= *d->input++;
+       }
+     }
+     return retval;
+   }
+
+#define SPEC 1
+
 // https://datatracker.ietf.org/doc/html/rfc6386#section-7 "Boolean Entropy Decoder"
 // XXX code copied from LibVideo/VP9/BooleanDecoder.{h,cpp} and tweaked minorly
 // Differences:
@@ -89,36 +152,62 @@ namespace {
 // * we don't need to check padding bits being zero, so we don't need m_bits_left
 class BooleanEntropyDecoder {
 public:
+#if !SPEC
     static ErrorOr<BooleanEntropyDecoder> initialize(BigEndianInputBitStream& bit_stream);
+#else
+    static ErrorOr<BooleanEntropyDecoder> initialize(ReadonlyBytes);
+#endif
 
     ErrorOr<bool> read_bool(u8 probability);
     ErrorOr<u32> read_literal(u8 bits);
 
 private:
+#if !SPEC
     BooleanEntropyDecoder(BigEndianInputBitStream& bit_stream, u32 value, u32 range)
         : m_bit_stream(bit_stream)
         , m_value(value)
         , m_range(range)
     {
     }
+#else
+#endif
 
+
+#if !SPEC
     BigEndianInputBitStream& m_bit_stream;
     u32 m_value { 0 };
     u32 m_range { 0 };
+#else
+    bool_decoder m_dec;
+#endif
 };
 
+#if !SPEC
 ErrorOr<BooleanEntropyDecoder> BooleanEntropyDecoder::initialize(BigEndianInputBitStream& bit_stream)
+#else
+ErrorOr<BooleanEntropyDecoder> BooleanEntropyDecoder::initialize(ReadonlyBytes data)
+#endif
 {
+#if !SPEC
     VERIFY(bit_stream.is_aligned_to_byte_boundary());
-    u16 value = TRY(bit_stream.read_value<u8>());
-    value = (value << 8) | TRY(bit_stream.read_value<u8>());
+
+    //u16 value = TRY(bit_stream.read_value<u8>());
+    //value = (value << 8) | TRY(bit_stream.read_value<u8>());
+    u16 value = TRY(bit_stream.read_bits<u8>(8));
+    value = (value << 8) | TRY(bit_stream.read_bits<u8>(8));
     u8 range = 255;
     BooleanEntropyDecoder decoder { bit_stream, value, range };
+#else
+    BooleanEntropyDecoder decoder;
+    init_bool_decoder(&decoder.m_dec, const_cast<u8*>(data.data()));
+#endif
+
     return decoder;
 }
 
 ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
 {
+#if !SPEC
     auto split = 1u + (((m_range - 1u) * probability) >> 8u);
     u32 SPLIT = split << 8;
 
@@ -154,6 +243,9 @@ ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
 #endif
 
     return return_bool;
+#else
+    return spec_read_bool(&m_dec, probability);
+#endif
 }
 
 ErrorOr<u32> BooleanEntropyDecoder::read_literal(u8 bits)
@@ -220,9 +312,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // The first partition stores header, per-segment state, and macroblock metadata.
 
+#if !SPEC
     FixedMemoryStream memory_stream { vp8_header.lossy_data };
     BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
     auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
+#else
+    auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.lossy_data));
+#endif
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -630,14 +726,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             }
 
             int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
-            //dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
+            dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
             metadata.uv_mode = (intra_mbmode)uv_mode;
 
             TRY(macroblock_metadata.try_append(metadata));
         }
     }
 
+#if !SPEC
     dbgln_if(WEBP_DEBUG, "stream offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
+#endif
 
     // Done with the first partition!
 
@@ -650,9 +748,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // The second partition stores coefficients for all macroblocks.
     {
+#if !SPEC
         FixedMemoryStream memory_stream { vp8_header.second_partition };
         BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
         auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
+#else
+        auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.lossy_data));
+#endif
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
         const TreeDecoder::tree_index coeff_tree[2 * (num_dct_tokens - 1)] = {
@@ -1501,7 +1603,9 @@ if (metadata.intra_y_mode != B_PRED) {
             }
         }
 
+#if !SPEC
         dbgln_if(WEBP_DEBUG, "stream 2 offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
+#endif
     }
 
     // XXX sink this check into Bitmap::cropped()
