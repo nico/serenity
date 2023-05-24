@@ -133,12 +133,18 @@ ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
         m_range = split;
     }
 
+
 #if 1
     if (m_range < 128) {
         VERIFY(m_range != 0);
         u8 bits_to_shift_into_range = count_leading_zeroes((u8)m_range);
         m_range <<= bits_to_shift_into_range;
-        m_value = (m_value << bits_to_shift_into_range) | TRY(m_bit_stream.read_bits<u32>(bits_to_shift_into_range));
+        m_value = (m_value << bits_to_shift_into_range);
+
+        // XXX without the eof check, runs out of data for e.g. 2.webp. but with it, 2.webp colors look a bit off. is this right?
+        // (looks like this eagerly precomputes stuff for the next bit, which isn't right on the last few bits i suppose)
+        if (!m_bit_stream.is_eof())
+            m_value |= TRY(m_bit_stream.read_bits<u32>(bits_to_shift_into_range));
     }
 #else
      while (m_range < 128) {  /* shift out irrelevant value bits */
@@ -739,8 +745,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 // XXX test this (add an Error:: return, check it gets hit during decoding, etc)
                 if (metadata.skip_coefficients) {
                     // XXX when implementing this, update *_above / *_left here.
-                    return Error::from_string_literal("XXX impl and test coefficient skipping");
-                    //continue;
+                    //return Error::from_string_literal("XXX impl and test coefficient skipping");
+                    continue;
                 }
 
                 // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
