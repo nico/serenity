@@ -82,6 +82,9 @@ namespace {
 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-7 "Boolean Entropy Decoder"
 // XXX code copied from LibVideo/VP9/BooleanDecoder.{h,cpp} and tweaked minorly
+// Differences:
+// * initialize() does not read a marker bit
+// * we don't need to check padding bits being zero, so we don't need m_bits_left
 class BooleanEntropyDecoder {
 public:
     static ErrorOr<BooleanEntropyDecoder> initialize(BigEndianInputBitStream& bit_stream);
@@ -94,7 +97,6 @@ public:
 
     ErrorOr<bool> read_bool(u8 probability);
     ErrorOr<u32> read_literal(u8 bits);
-    size_t bits_remaining() const;
 
 private:
     BooleanEntropyDecoder(BigEndianInputBitStream& bit_stream, u32 value, u32 range)
@@ -127,12 +129,10 @@ ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
     bool return_bool;
 
     if (m_value >= SPLIT) {
-//fprintf(stderr, "bit 1 range %d split %d value %d SPLIT %d\n", m_range, split, m_value, SPLIT);
         return_bool = true;
         m_range -= split;
         m_value -= SPLIT;
     } else {
-//fprintf(stderr, "bit 0 range %d split %d value %d SPLIT %d\n", m_range, split, m_value, SPLIT);
         return_bool = false;
         m_range = split;
     }
