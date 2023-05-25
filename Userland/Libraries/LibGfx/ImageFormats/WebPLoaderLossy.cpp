@@ -1260,7 +1260,7 @@ clear_flags:
                             } else if (mode == B_TM_PRED) {
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px)
-                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = left[py] + above[px] - corner; // XXX spec has a clamp here
+                                        y_prediction[(4 * y + py) * 16 + 4 * x + px] = clamp(left[py] + above[px] - corner, 0, 255);
                             } else if (mode == B_VE_PRED) {
                                 for (int py = 0; py < 4; ++py)
                                     for (int px = 0; px < 4; ++px) {
