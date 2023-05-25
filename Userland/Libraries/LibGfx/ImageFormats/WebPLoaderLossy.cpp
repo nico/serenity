@@ -82,7 +82,10 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
 
 namespace {
 
+#define SPEC 1
 
+
+#if SPEC
 using uint8 = u8;
 using uint32 = u32;
 typedef struct {
@@ -142,8 +145,7 @@ typedef struct {
      }
      return retval;
    }
-
-#define SPEC 1
+#endif
 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-7 "Boolean Entropy Decoder"
 // XXX code copied from LibVideo/VP9/BooleanDecoder.{h,cpp} and tweaked minorly
