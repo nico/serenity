@@ -753,7 +753,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
         auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
 #else
-        auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.lossy_data));
+        auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.second_partition));
 #endif
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
