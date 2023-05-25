@@ -686,7 +686,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             }
             if (mb_no_skip_coeff) {
                 u8 mb_skip_coeff = TRY(B(prob_skip_false));
-                dbgln_if(WEBP_DEBUG, "mb_skip_coeff {}", mb_skip_coeff);
+                //dbgln_if(WEBP_DEBUG, "mb_skip_coeff {}", mb_skip_coeff);
                 skip_coefficients = mb_skip_coeff;
             }
 
@@ -734,7 +734,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             }
 
             int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
-            dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
+            //dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
             metadata.uv_mode = (intra_mbmode)uv_mode;
 
             TRY(macroblock_metadata.try_append(metadata));
