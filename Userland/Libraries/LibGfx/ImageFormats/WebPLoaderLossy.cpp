@@ -846,13 +846,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                 auto const& metadata = macroblock_metadata[macroblock_index];
 
-                // XXX test this (add an Error:: return, check it gets hit during decoding, etc)
-                if (metadata.skip_coefficients) {
-                    // XXX when implementing this, update *_above / *_left here.
-                    //return Error::from_string_literal("XXX impl and test coefficient skipping");
-                    continue;
-                }
-
                 // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
 
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-13
@@ -907,6 +900,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
                     int firstCoeff = have_y2 && (i >= 1 && i <= 16) ? 1 : 0;
                     i16 last_decoded_value = num_dct_tokens; // Start with an invalid value
+
+                    // XXX test this (add an Error:: return, check it gets hit during decoding, etc)
+                    if (metadata.skip_coefficients) {
+                        // XXX when implementing this, update *_above / *_left here.
+                        //return Error::from_string_literal("XXX impl and test coefficient skipping");
+                        goto clear_flags;
+                    }
+
                     for (int j = firstCoeff; j < 16; ++j) {
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.3 "Token Probabilities"
@@ -1127,6 +1128,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     }
                     //dbgln();
 
+clear_flags:
                     if (is_y2) {
                         y2_left = subblock_has_nonzero_coefficients;
                         y2_above[mb_x] = subblock_has_nonzero_coefficients;
