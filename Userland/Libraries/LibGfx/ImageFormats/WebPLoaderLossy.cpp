@@ -225,6 +225,10 @@ ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
     }
 
 
+    // This below (both branches, they do the same -- pretend the eof check isn't there) isn't quite right:
+    // it immediately refills single bits, which can cause decoding of an additional byte to early.
+    // the reference decoder allows up to 7 pending zero bits, which means at the very end of a stream,
+    // the code here can load a last byte that doesn't exist. The reference decoder doesn't have that problem.
 #if 1
     if (m_range < 128) {
         VERIFY(m_range != 0);
@@ -234,7 +238,9 @@ ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
 
         // XXX without the eof check, runs out of data for e.g. 2.webp. but with it, 2.webp colors look a bit off. is this right?
         // (looks like this eagerly precomputes stuff for the next bit, which isn't right on the last few bits i suppose)
-        if (!m_bit_stream.is_eof())
+        // ...see commit message from just now. doesn't work with the check either, since not being eof() only guarantees
+        // presence of one more bit, and this branch reads more than 1 at once. it'd probably work in the below branch.
+        //if (!m_bit_stream.is_eof())
             m_value |= TRY(m_bit_stream.read_bits<u32>(bits_to_shift_into_range));
     }
 #else
