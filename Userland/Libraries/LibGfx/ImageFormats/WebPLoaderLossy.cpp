@@ -215,11 +215,8 @@ ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes pro
     while (true) {
       u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
       i = m_tree[i + b];
-      if (i <= 0) {
-//dbgln_if(WEBP_DEBUG, "found {} bit {}", -i, b);
+      if (i <= 0)
           return -i;
-}
-//dbgln_if(WEBP_DEBUG, "tree i {} prob {}", i, probabilities[i >> 1]);
     }
 #endif
 }
@@ -455,10 +452,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 for (int l = 0; l < 11; l++) {
                     //u8 coeff_prob_update_flag = TRY(L(1));
                     u8 coeff_prob_update_flag = TRY(B(coeff_update_probs[i][j][k][l]));
-                    //dbgln_if(WEBP_DEBUG, "coeff_prob_update_flag {}", coeff_prob_update_flag);
                     if (coeff_prob_update_flag) {
                         u8 coeff_prob = TRY(L(8));
-                        //dbgln_if(WEBP_DEBUG, "coeff_prob {}", coeff_prob);
                         coeff_probs[i][j][k][l] = coeff_prob;
                     }
                 }
@@ -591,11 +586,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     -2, -3  /* "10" = 2nd value, "11" = 3rd value */
                 };
                 segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, mb_segment_tree_probs));
-                //dbgln_if(WEBP_DEBUG, "segment_id {}", segment_id);
             }
             if (mb_no_skip_coeff) {
                 u8 mb_skip_coeff = TRY(B(prob_skip_false));
-                //dbgln_if(WEBP_DEBUG, "mb_skip_coeff {}", mb_skip_coeff);
                 skip_coefficients = mb_skip_coeff;
             }
 
@@ -604,7 +597,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
             const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
             int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
-            //dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", intra_y_mode, mb_y, mb_x);
 
             metadata.intra_y_mode = (intra_mbmode)intra_y_mode;
 
@@ -620,7 +612,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         int L = left[y];
 
                         auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
-                        //dbgln_if(WEBP_DEBUG, "A {} L {} intra_b_mode {} y {} x {}", A, L, (int)intra_b_mode, y, x);
                         metadata.intra_b_modes[y * 4 + x] = intra_b_mode;
 
                         above[mb_x * 4 + x] = intra_b_mode;
@@ -638,7 +629,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             }
 
             int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
-            //dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", uv_mode, mb_y, mb_x);
             metadata.uv_mode = (intra_mbmode)uv_mode;
 
             TRY(macroblock_metadata.try_append(metadata));
@@ -707,18 +697,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             predicted_v_above[i] = 127;
 
         for (int mb_y = 0, macroblock_index = 0; mb_y < macroblock_height; ++mb_y) {
-            //for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
-            //    auto const& metadata = macroblock_metadata[mb_y * macroblock_width + mb_x];
-            //    dbgln_if(WEBP_DEBUG, "segment_id {}", metadata.segment_id);
-            //    dbgln_if(WEBP_DEBUG, "intra_y_mode {} mb_y {} mb_x {}", (int)metadata.intra_y_mode, mb_y, mb_x);
-            //    if (metadata.intra_y_mode == B_PRED)
-            //        for (int y = 0; y < 4; ++y)
-            //            for (int x = 0; x < 4; ++x)
-            //                dbgln_if(WEBP_DEBUG, "intra_b_mode {} y {} x {}", (int)metadata.intra_b_modes[y * 4 + x], y, x);
-            //    dbgln_if(WEBP_DEBUG, "uv_mode {} mb_y {} mb_x {}", (int)metadata.uv_mode, mb_y, mb_x);
-            //}
-
-
             bool y2_left {};
             bool y_left[4] {};
             bool u_left[2] {};
@@ -735,8 +713,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             i16 v_truemotion_corner = 129;
 
             for (int mb_x = 0; mb_x < macroblock_width; ++mb_x, ++macroblock_index) {
-                //dbgln_if(WEBP_DEBUG, "VP8DecodeMB {} {}", mb_x, mb_y);
-
                 Coefficients y2_coeffs {};
                 Coefficients y_coeffs[16] {};
                 Coefficients u_coeffs[4] {};
@@ -791,10 +767,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     bool is_u = i >= 17 && i <= 20;
                     bool is_v = i >= 21;
                     bool is_y2 = i == 0;
-
-                    //if (is_y2) dbg("y2:");
-                    //else if (is_u || is_v) dbg("uv {}:", (i - 17) % 4);
-                    //else  dbg("y {:2}:", (i - 1));
 
                     // Corresponds to `residual_block()` in https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
                     // "firstCoeff is 1 for luma blocks of macroblocks containing Y2 subblock; otherwise 0"
@@ -891,22 +863,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  the first branch, since it is not possible for dct_eob to follow a
                         //  DCT_0."
 
-//dbg("coeffs at {} {} {}:", plane, band, tricky);
-//for (size_t i = 0; i < sizeof(coeff_probs[plane][band][tricky]); ++i)
-//dbg(" {}", coeff_probs[plane][band][tricky][i]);
-//dbgln();
-
                         int token;
                         if (last_decoded_value == DCT_0)
                             token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky], 2));
                         else
                             token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
-//dbgln_if(WEBP_DEBUG, "token {} at j {} i {} mb_y {} mb_x {}", token, j, i, mb_y, mb_x);
 
-                        if (token == dct_eob) {
-                            //dbg(" eob");
+                        if (token == dct_eob)
                             break;
-                        }
 
                         int v = (int)token; // For DCT_0 to DCT4
 
@@ -928,8 +892,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                                 v = (v << 1) | TRY(decoder.read_bool(Pcats[token - dct_cat1][i]));
 
                             v += starts[token - dct_cat1];
-
-//dbgln_if(WEBP_DEBUG, "v {}", v);
                         }
 
                         if (v) {
@@ -1004,12 +966,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         i16 dequantized_value = dequantization_factor * (i16)v;
 
-//dbgln_if(WEBP_DEBUG, "dequantized {} index {}", dequantized_value, dequantization_index);
-//if (v)
-                        //dbg(" {} * {} = {}", dequantization_factor, v, dequantized_value);
-//else
-                        //dbg(" {}", dequantized_value);
-
                         static int constexpr Zigzag[] = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
                         if (is_y2)
                             y2_coeffs[Zigzag[j]] = dequantized_value;
@@ -1022,7 +978,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
 
                     }
-                    //dbgln();
 
 clear_flags:
                     if (is_y2) {
@@ -1200,9 +1155,6 @@ clear_flags:
                                 at(3, 1) = weighted_average(above[1], above[2], above[3]);
                                 at(3, 0) = average(above[2], above[3]);
                             } else if (mode == B_VL_PRED) {
-//dbg("B_VL_PRED above:");
-//for (int i = 0; i < 8; ++i) dbg(" {}", above[i]);
-//dbgln();
                                 // this is 22.5-deg prediction
                                 at(0, 0) = average(above[0], above[1]);
                                 at(0, 1) = weighted_average(above[0], above[1], above[2]);
@@ -1242,18 +1194,6 @@ clear_flags:
                                 at(2, 2) = at(3, 2) = at(0, 3) = at(1, 3) = at(2, 3) = at(3, 3) = left[3];
                             }
 
-//if (mb_y <= 100 && mb_x < 300) {
-//    auto mode = metadata.intra_b_modes[y * 4 + x];
-//    int j, k;
-//    dbgln("block x {} y {} n {} mode {}", mb_x, mb_y, 4*y + x, (int)mode);
-//    for (j = 0; j < 4; ++j) {
-//    for (k = 0; k < 4; ++k) {
-//      dbg(" {}", y_prediction[(4 * y + j) * 16 + 4 * x + k]);
-//    }
-//    dbgln();
-//    }
-//}
-
                             Coefficients idct_output;
                             short_idct4x4llm_c(y_coeffs[4 * y + x], idct_output, 4 * sizeof(i16));
 
@@ -1266,24 +1206,6 @@ clear_flags:
                                     //p = clamp(p, 0, 255);
                                 }
                             }
-
-//if (mb_y == 0 && mb_x < 300) {
-//    dbgln("coeffs:");
-//    for (int k = 0; k < 16; ++k) {
-//    dbg(" {}", y_coeffs[4 * y + x][k]);
-//    }
-//    dbgln();
-//
-//    int j, k;
-//    dbgln("transformed:");
-//    for (j = 0; j < 4; ++j) {
-//    for (k = 0; k < 4; ++k) {
-//      dbg(" {}", y_prediction[(4 * y + j) * 16 + 4 * x + k]);
-//    }
-//    dbgln();
-//    }
-//}
-
                         }
                     }
                 }
@@ -1349,35 +1271,6 @@ clear_flags:
                             v_prediction[y * 8 + x] = predicted_v_left[y] + predicted_v_above[mb_x * 8 + x] - v_truemotion_corner;
                 }
 
-//if (metadata.intra_y_mode != B_PRED) {
-//if (mb_y <= 100 && mb_x < 300) {
-//  int j, k;
-//  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.intra_y_mode);
-//  for (j = 0; j < 16; ++j) {
-//  for (k = 0; k < 16; ++k) {
-//    dbg(" {}", y_prediction[j * 16 + k]);
-//  }
-//  dbgln();
-//  }
-//}
-//}
-//if (mb_y <= 100 && mb_x < 300) {
-//  int j, k;
-//  dbgln("block x {} y {} mode {}", mb_x, mb_y, (int)metadata.uv_mode);
-//  for (j = 0; j < 8; ++j) {
-//  for (k = 0; k < 8; ++k) {
-//    dbg(" {}", u_prediction[j * 8 + k]);
-//  }
-//  dbgln();
-//  }
-//  for (j = 0; j < 8; ++j) {
-//  for (k = 0; k < 8; ++k) {
-//    dbg(" {}", v_prediction[j * 8 + k]);
-//  }
-//  dbgln();
-//  }
-//}
-
                 // Y, no subblocks
 if (metadata.intra_y_mode != B_PRED) {
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
@@ -1399,24 +1292,6 @@ if (metadata.intra_y_mode != B_PRED) {
                     }
                 }
 
-//if (mb_y == 0 && mb_x < 300) {
-//    for (int i = 0; i < 16; ++i) {
-//    dbg("coeffs {}:", i);
-//    for (int k = 0; k < 16; ++k) {
-//    dbg(" {}", y_coeffs[i][k]);
-//    }
-//    dbgln();
-//    }
-//
-//    int j, k;
-//    dbgln("transformed:");
-//    for (j = 0; j < 16; ++j) {
-//    for (k = 0; k < 16; ++k) {
-//      dbg(" {}", y_prediction[j * 16 + k]);
-//    }
-//    dbgln();
-//    }
-//}
 }
                 // UV
                 for (int y = 0, i = 0; y < 2; ++y) {
@@ -1441,24 +1316,7 @@ if (metadata.intra_y_mode != B_PRED) {
                         }
                     }
                 }
-//if (mb_y == 0 && mb_x < 300) {
-//    for (int i = 0; i < 4; ++i) {
-//    dbg("coeffs {}:", i);
-//    for (int k = 0; k < 16; ++k) {
-//    dbg(" {}", u_coeffs[i][k]);
-//    }
-//    dbgln();
-//    }
-//
-//    int j, k;
-//    dbgln("transformed:");
-//    for (j = 0; j < 8; ++j) {
-//    for (k = 0; k < 8; ++k) {
-//      dbg(" {}", u_prediction[j * 8 + k]);
-//    }
-//    dbgln();
-//    }
-//}
+
                 // FIXME: insert loop filtering here
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-15.4 "Calculation of Control Parameters"
