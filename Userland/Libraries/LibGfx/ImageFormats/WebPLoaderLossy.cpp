@@ -589,13 +589,13 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     // Repeated in https://datatracker.ietf.org/doc/html/rfc6386#section-11.2 "Luma Modes"
     enum intra_mbmode {
         DC_PRED, /* predict DC using row above and column to the left */
-#if 0
+#if SPECTAB
 // from spec
         V_PRED,  /* predict rows using row above */
         H_PRED,  /* predict columns using column to the left */
         TM_PRED, /* propagate second differences a la "True Motion" */
 #else
-// from libwebp
+// from libwebp, not touched in f67b5939a though :thonk:
         TM_PRED, /* propagate second differences a la "True Motion" */
         V_PRED,  /* predict rows using row above */
         H_PRED,  /* predict columns using column to the left */
@@ -729,7 +729,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 }
             } else {
                 VERIFY(intra_y_mode < B_PRED);
-#if 0
+#if SPECTAB
                 constexpr intra_bmode b_mode_from_y_mode[] = { B_DC_PRED, B_VE_PRED, B_HE_PRED, B_TM_PRED };
                 intra_bmode intra_b_mode = b_mode_from_y_mode[intra_y_mode];
 #else
