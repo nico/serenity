@@ -82,10 +82,6 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
 
 namespace {
 
-#define SPEC 1
-
-
-#if SPEC
 using uint8 = u8;
 using uint32 = u32;
 typedef struct {
@@ -145,7 +141,6 @@ typedef struct {
      }
      return retval;
    }
-#endif
 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-7 "Boolean Entropy Decoder"
 // XXX code copied from LibVideo/VP9/BooleanDecoder.{h,cpp} and tweaked minorly
@@ -154,106 +149,26 @@ typedef struct {
 // * we don't need to check padding bits being zero, so we don't need m_bits_left
 class BooleanEntropyDecoder {
 public:
-#if !SPEC
-    static ErrorOr<BooleanEntropyDecoder> initialize(BigEndianInputBitStream& bit_stream);
-#else
     static ErrorOr<BooleanEntropyDecoder> initialize(ReadonlyBytes);
-#endif
 
     ErrorOr<bool> read_bool(u8 probability);
     ErrorOr<u32> read_literal(u8 bits);
 
 private:
-#if !SPEC
-    BooleanEntropyDecoder(BigEndianInputBitStream& bit_stream, u32 value, u32 range)
-        : m_bit_stream(bit_stream)
-        , m_value(value)
-        , m_range(range)
-    {
-    }
-#else
-#endif
-
-
-#if !SPEC
-    BigEndianInputBitStream& m_bit_stream;
-    u32 m_value { 0 };
-    u32 m_range { 0 };
-#else
     bool_decoder m_dec;
-#endif
 };
 
-#if !SPEC
-ErrorOr<BooleanEntropyDecoder> BooleanEntropyDecoder::initialize(BigEndianInputBitStream& bit_stream)
-#else
 ErrorOr<BooleanEntropyDecoder> BooleanEntropyDecoder::initialize(ReadonlyBytes data)
-#endif
 {
-#if !SPEC
-    VERIFY(bit_stream.is_aligned_to_byte_boundary());
-
-    //u16 value = TRY(bit_stream.read_value<u8>());
-    //value = (value << 8) | TRY(bit_stream.read_value<u8>());
-    u16 value = TRY(bit_stream.read_bits<u8>(8));
-    value = (value << 8) | TRY(bit_stream.read_bits<u8>(8));
-    u8 range = 255;
-    BooleanEntropyDecoder decoder { bit_stream, value, range };
-#else
     BooleanEntropyDecoder decoder;
     init_bool_decoder(&decoder.m_dec, const_cast<u8*>(data.data()));
-#endif
 
     return decoder;
 }
 
 ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
 {
-#if !SPEC
-    auto split = 1u + (((m_range - 1u) * probability) >> 8u);
-    u32 SPLIT = split << 8;
-
-    bool return_bool;
-
-    if (m_value >= SPLIT) {
-        return_bool = true;
-        m_range -= split;
-        m_value -= SPLIT;
-    } else {
-        return_bool = false;
-        m_range = split;
-    }
-
-
-    // This below (both branches, they do the same -- pretend the eof check isn't there) isn't quite right:
-    // it immediately refills single bits, which can cause decoding of an additional byte to early.
-    // the reference decoder allows up to 7 pending zero bits, which means at the very end of a stream,
-    // the code here can load a last byte that doesn't exist. The reference decoder doesn't have that problem.
-#if 1
-    if (m_range < 128) {
-        VERIFY(m_range != 0);
-        u8 bits_to_shift_into_range = count_leading_zeroes((u8)m_range);
-        m_range <<= bits_to_shift_into_range;
-        m_value = (m_value << bits_to_shift_into_range);
-
-        // XXX without the eof check, runs out of data for e.g. 2.webp. but with it, 2.webp colors look a bit off. is this right?
-        // (looks like this eagerly precomputes stuff for the next bit, which isn't right on the last few bits i suppose)
-        // ...see commit message from just now. doesn't work with the check either, since not being eof() only guarantees
-        // presence of one more bit, and this branch reads more than 1 at once. it'd probably work in the below branch.
-        //if (!m_bit_stream.is_eof())
-            m_value |= TRY(m_bit_stream.read_bits<u32>(bits_to_shift_into_range));
-    }
-#else
-     while (m_range < 128) {  /* shift out irrelevant value bits */
-       m_value = (m_value << 1) | TRY(m_bit_stream.read_bits<u32>(1));
-       m_range <<= 1;
-     }
-#endif
-
-    return return_bool;
-#else
     return spec_read_bool(&m_dec, probability);
-#endif
 }
 
 ErrorOr<u32> BooleanEntropyDecoder::read_literal(u8 bits)
@@ -320,13 +235,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // The first partition stores header, per-segment state, and macroblock metadata.
 
-#if !SPEC
-    FixedMemoryStream memory_stream { vp8_header.lossy_data };
-    BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
-    auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
-#else
     auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.lossy_data));
-#endif
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -750,10 +659,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         }
     }
 
-#if !SPEC
-    dbgln_if(WEBP_DEBUG, "stream offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
-#endif
-
     // Done with the first partition!
 
     if (number_of_dct_partitions > 1)
@@ -765,13 +670,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // The second partition stores coefficients for all macroblocks.
     {
-#if !SPEC
-        FixedMemoryStream memory_stream { vp8_header.second_partition };
-        BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
-        auto decoder = TRY(BooleanEntropyDecoder::initialize(bit_stream));
-#else
         auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.second_partition));
-#endif
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
         const TreeDecoder::tree_index coeff_tree[2 * (num_dct_tokens - 1)] = {
@@ -1648,10 +1547,6 @@ if (metadata.intra_y_mode != B_PRED) {
                     predicted_v_above[mb_x * 8 + i] = v_prediction[7 * 8 + i];
             }
         }
-
-#if !SPEC
-        dbgln_if(WEBP_DEBUG, "stream 2 offset {} size {}", TRY(memory_stream.tell()), TRY(memory_stream.size()));
-#endif
     }
 
     // XXX sink this check into Bitmap::cropped()
