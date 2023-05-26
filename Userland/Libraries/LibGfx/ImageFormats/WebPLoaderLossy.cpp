@@ -382,7 +382,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     if (segmentation_enabled) {
         // "update_segmentation()" in 19.2
 
-        // FIXME: Is this always true for keyframes in webp files? Should we return an Error if this is 0 instead?
         update_mb_segmentation_map = TRY(L(1));
         update_segment_feature_data = TRY(L(1));
 
