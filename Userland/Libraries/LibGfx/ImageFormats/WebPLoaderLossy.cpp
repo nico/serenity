@@ -1294,10 +1294,7 @@ if (metadata.intra_y_mode != B_PRED) {
         }
     }
 
-    // XXX sink this check into Bitmap::cropped()
-    if (bitmap->physical_width() != (int)vp8_header.width || bitmap->physical_height() != (int)vp8_header.height)
-        return bitmap->cropped({ 0, 0, (int)vp8_header.width, (int)vp8_header.height });
-    return bitmap;
+    return bitmap->cropped({ 0, 0, (int)vp8_header.width, (int)vp8_header.height });
 }
 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-14.3 "Implementation of the WHT Inversion"
