@@ -434,18 +434,26 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", filter_type, loop_filter_level, sharpness_level);
 
     // "mb_lf_adjustments()" in 19.2
+    struct LoopFilterUpdateDelta {
+        Optional<i8> ref_frame_delta[4];
+        Optional<i8> mb_mode_delta[4];
+    };
+    Optional<LoopFilterUpdateDelta> loop_filter_update_delta;
+
     u8 loop_filter_adj_enable = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "loop_filter_adj_enable {}", loop_filter_adj_enable);
     if (loop_filter_adj_enable) {
         u8 mode_ref_lf_delta_update = TRY(L(1));
         dbgln_if(WEBP_DEBUG, "mode_ref_lf_delta_update {}", mode_ref_lf_delta_update);
         if (mode_ref_lf_delta_update) {
+            LoopFilterUpdateDelta update;
             for (int i = 0; i < 4; ++i) {
                 u8 ref_frame_delta_update_flag = TRY(L(1));
                 dbgln_if(WEBP_DEBUG, "ref_frame_delta_update_flag {}", ref_frame_delta_update_flag);
                 if (ref_frame_delta_update_flag) {
                     i8 delta = TRY(L_signed(6));
                     dbgln_if(WEBP_DEBUG, "delta {}", delta);
+                    update.ref_frame_delta[i] = delta;
                 }
             }
             for (int i = 0; i < 4; ++i) {
@@ -454,8 +462,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 if (mb_mode_delta_update_flag) {
                     i8 delta = TRY(L_signed(6));
                     dbgln_if(WEBP_DEBUG, "delta {}", delta);
+                    update.mb_mode_delta[i] = delta;
                 }
             }
+            loop_filter_update_delta = update;
         }
     }
 
@@ -1571,6 +1581,37 @@ if (metadata.intra_y_mode != B_PRED) {
 //}
                 // FIXME: insert loop filtering here
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
+                // https://datatracker.ietf.org/doc/html/rfc6386#section-15.4 "Calculation of Control Parameters"
+                (void)sharpness_level; // Constant per frame
+                u8 mb_loop_filter_level = loop_filter_level;
+                if (update_mb_segmentation_map) {
+                    auto const& data = segment_data[metadata.segment_id];
+                    if (data.loop_filter_update_value.has_value()) {
+                        if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
+                            mb_loop_filter_level += data.loop_filter_update_value.value();
+                        else
+                            mb_loop_filter_level = data.loop_filter_update_value.value();
+                    }
+                    mb_loop_filter_level = clamp(mb_loop_filter_level, 0, 63); // in calculate_filter_parameters (spec text doesn't mention this)
+                }
+
+                if (loop_filter_update_delta.has_value()) {
+                    if (loop_filter_update_delta->ref_frame_delta[0].has_value()) // key frames always use CURRENT_FRAME, probably (spec is silent on this (?))
+                        mb_loop_filter_level += loop_filter_update_delta->ref_frame_delta[0].value();
+
+                    // spec doesn't say what to do with mb_mode_delta as far as I can tell, but calculate_filter_parameters() uses index 0 for CURRENT_FRAME / B_PRED,
+                    // index 1 and 3 for some interprediction modes which don't happen in keyframe-only webp files, and mode 2 else.
+                    if (metadata.intra_y_mode == B_PRED) {  // key frames always use CURRENT_FRAME, probably (spec is silent on this (?))
+                        if (loop_filter_update_delta->mb_mode_delta[0].has_value())
+                            mb_loop_filter_level += loop_filter_update_delta->mb_mode_delta[0].value();
+                    } else {
+                        if (loop_filter_update_delta->mb_mode_delta[2].has_value())
+                            mb_loop_filter_level += loop_filter_update_delta->mb_mode_delta[2].value();
+                    }
+                    mb_loop_filter_level = clamp(mb_loop_filter_level, 0, 63); // in calculate_filter_parameters (spec text doesn't talk about anything loop_filter_update_delta related)
+                }
+
+                // See calculate_filter_parameters() in spec for how to compute interior_limit, or see spec text itself
 
                 // Convert YUV to RGB.
                 for (int y = 0, i = 0; y < 16; ++y) {
