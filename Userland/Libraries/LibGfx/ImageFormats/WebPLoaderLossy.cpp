@@ -12,6 +12,7 @@
 #include <AK/Format.h>
 #include <AK/MemoryStream.h>
 #include <AK/Vector.h>
+#include <LibGfx/ImageFormats/BooleanDecoder.h>
 #include <LibGfx/ImageFormats/WebPLoaderLossy.h>
 #include <LibGfx/ImageFormats/WebPLoaderLossyTables.h>
 
@@ -82,103 +83,6 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
 
 namespace {
 
-using uint8 = u8;
-using uint32 = u32;
-typedef struct {
-     uint8   *input;     /* pointer to next compressed data byte */
-     uint32  range;      /* always identical to encoder's range */
-     uint32  value;      /* contains at least 8 significant bits */
-     int     bit_count;  /* # of bits shifted out of
-                            value, at most 7 */
-   } bool_decoder;
-
-   /* Call this function before reading any bools from the
-      partition. */
-
-   void init_bool_decoder(bool_decoder *d, uint8 *start_partition)
-   {
-     {
-       int i = 0;
-       d->value = 0;           /* value = first 2 input bytes */
-       while (++i <= 2)
-
-         d->value = (d->value << 8)  |  *start_partition++;
-     }
-
-     d->input = start_partition;  /* ptr to next byte to be read */
-     d->range = 255;           /* initial range is full */
-     d->bit_count = 0;         /* have not yet shifted out any bits */
-   }
-
-   /* Main function reads a bool encoded at probability prob/256,
-      which of course must agree with the probability used when the
-      bool was written. */
-
-   int spec_read_bool(bool_decoder *d, Prob prob)
-   {
-     /* range and split are identical to the corresponding values
-        used by the encoder when this bool was written */
-
-     uint32  split = 1 + (((d->range - 1) * prob) >> 8);
-     uint32  SPLIT = split << 8;
-     int     retval;           /* will be 0 or 1 */
-     if (d->value >= SPLIT) {  /* encoded a one */
-       retval = 1;
-       d->range -= split;  /* reduce range */
-       d->value -= SPLIT;  /* subtract off left endpoint of interval */
-     } else {              /* encoded a zero */
-       retval = 0;
-       d->range = split;  /* reduce range, no change in left endpoint */
-     }
-
-     while (d->range < 128) {  /* shift out irrelevant value bits */
-       d->value <<= 1;
-       d->range <<= 1;
-       if (++d->bit_count == 8) {  /* shift in new bits 8 at a time */
-         d->bit_count = 0;
-         d->value |= *d->input++;
-       }
-     }
-     return retval;
-   }
-
-// https://datatracker.ietf.org/doc/html/rfc6386#section-7 "Boolean Entropy Decoder"
-// XXX code copied from LibVideo/VP9/BooleanDecoder.{h,cpp} and tweaked minorly
-// Differences:
-// * initialize() does not read a marker bit
-// * we don't need to check padding bits being zero, so we don't need m_bits_left
-class BooleanEntropyDecoder {
-public:
-    static ErrorOr<BooleanEntropyDecoder> initialize(ReadonlyBytes);
-
-    ErrorOr<bool> read_bool(u8 probability);
-    ErrorOr<u32> read_literal(u8 bits);
-
-private:
-    bool_decoder m_dec;
-};
-
-ErrorOr<BooleanEntropyDecoder> BooleanEntropyDecoder::initialize(ReadonlyBytes data)
-{
-    BooleanEntropyDecoder decoder;
-    init_bool_decoder(&decoder.m_dec, const_cast<u8*>(data.data()));
-
-    return decoder;
-}
-
-ErrorOr<bool> BooleanEntropyDecoder::read_bool(u8 probability)
-{
-    return spec_read_bool(&m_dec, probability);
-}
-
-ErrorOr<u32> BooleanEntropyDecoder::read_literal(u8 bits)
-{
-    u32 result = 0;
-    for (size_t i = 0; i < bits; i++)
-        result = 2 * result + TRY(read_bool(128));
-    return result;
-}
-
 // https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
 class TreeDecoder {
 public:
@@ -189,7 +93,7 @@ public:
     {
     }
 
-    ErrorOr<int> read(BooleanEntropyDecoder&, ReadonlyBytes probabilities, int initial_i = 0);
+    ErrorOr<int> read(BooleanDecoder&, ReadonlyBytes probabilities, int initial_i = 0);
 
 private:
    // "A tree may then be compactly represented as an array of (pairs of)
@@ -204,7 +108,7 @@ private:
 
 };
 
-ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes probabilities, int initial_i)
+ErrorOr<int> TreeDecoder::read(BooleanDecoder& decoder, ReadonlyBytes probabilities, int initial_i)
 {
     tree_index i = initial_i;
     while (true) {
@@ -226,7 +130,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // The first partition stores header, per-segment state, and macroblock metadata.
 
-    auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.lossy_data));
+    FixedMemoryStream memory_stream { vp8_header.lossy_data };
+    BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
+    auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream} , vp8_header.lossy_data.size() * 8));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -639,7 +545,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // The second partition stores coefficients for all macroblocks.
     {
-        auto decoder = TRY(BooleanEntropyDecoder::initialize(vp8_header.second_partition));
+        FixedMemoryStream memory_stream { vp8_header.second_partition };
+        BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
+        auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream }, vp8_header.second_partition.size() * 8));
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
         const TreeDecoder::tree_index coeff_tree[2 * (num_dct_tokens - 1)] = {
