@@ -705,8 +705,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             i16 predicted_u_left[8] { 129, 129, 129, 129, 129, 129, 129, 129 };
             i16 predicted_v_left[8] { 129, 129, 129, 129, 129, 129, 129, 129 };
 
-            // XXX spec doesn't say if this should be 127, 129, or something else :/
-            // but ReconstructRow in frame_dec.c in libwebp suggests 129.
+            // The spec doesn't say if this should be 127, 129, or something else.
+            // But ReconstructRow in frame_dec.c in libwebp suggests 129.
             i16 y_truemotion_corner = 129;
             i16 u_truemotion_corner = 129;
             i16 v_truemotion_corner = 129;
