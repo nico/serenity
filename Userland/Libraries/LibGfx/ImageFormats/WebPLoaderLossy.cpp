@@ -207,18 +207,12 @@ private:
 ErrorOr<int> TreeDecoder::read(BooleanEntropyDecoder& decoder, ReadonlyBytes probabilities, int initial_i)
 {
     tree_index i = initial_i;
-#if 0
-    while ((i = m_tree[i + TRY(decoder.read_bool(probabilities[i >> 1]))]) > 0) {
-    }
-    return -i;
-#else
     while (true) {
       u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
       i = m_tree[i + b];
       if (i <= 0)
           return -i;
     }
-#endif
 }
 
 }
