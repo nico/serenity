@@ -498,18 +498,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     // Repeated in https://datatracker.ietf.org/doc/html/rfc6386#section-11.2 "Luma Modes"
     enum intra_mbmode {
         DC_PRED, /* predict DC using row above and column to the left */
-#if SPECTAB
-// from spec
         V_PRED,  /* predict rows using row above */
         H_PRED,  /* predict columns using column to the left */
         TM_PRED, /* propagate second differences a la "True Motion" */
-#else
-// from libwebp, not touched in f67b5939a though :thonk:
-        TM_PRED, /* propagate second differences a la "True Motion" */
-        V_PRED,  /* predict rows using row above */
-        H_PRED,  /* predict columns using column to the left */
-#endif
- 
         B_PRED,  /* each Y subblock is independently predicted */
 
         num_uv_modes = B_PRED,  /* first four modes apply to chroma */
@@ -638,13 +629,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 }
             } else {
                 VERIFY(intra_y_mode < B_PRED);
-#if SPECTAB
                 constexpr intra_bmode b_mode_from_y_mode[] = { B_DC_PRED, B_VE_PRED, B_HE_PRED, B_TM_PRED };
                 intra_bmode intra_b_mode = b_mode_from_y_mode[intra_y_mode];
-#else
-// With libwebp enum changes, the modes match exactly.
-                intra_bmode intra_b_mode = static_cast<intra_bmode>(intra_y_mode);
-#endif
                 for (int i = 0; i < 4; ++i) {
                     above[mb_x * 4 + i] = intra_b_mode;
                     left[i] = intra_b_mode;
