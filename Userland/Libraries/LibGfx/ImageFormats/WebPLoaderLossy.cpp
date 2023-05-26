@@ -439,10 +439,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     u8 refresh_entropy_probs = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "refresh_entropy_probs {}", refresh_entropy_probs);
 
-    // "token_prob_update()" in 19.2
-    // XXX token_prob_update says L(1) and L(8), but they should be B(p) and L(8) (?!)
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates"
-
     Prob coeff_probs[4][8][3][num_dct_tokens - 1];
     memcpy(coeff_probs, default_coeff_probs, sizeof(coeff_probs));
 
@@ -450,7 +446,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         for (int j = 0; j < 8; j++) {
             for (int k = 0; k < 3; k++) {
                 for (int l = 0; l < 11; l++) {
-                    //u8 coeff_prob_update_flag = TRY(L(1));
+                    // "token_prob_update()" in 19.2
+                    // token_prob_update says L(1) and L(8), but it's actually be B(p) and L(8).
+                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates"
+                    // describes it correctly.
                     u8 coeff_prob_update_flag = TRY(B(coeff_update_probs[i][j][k][l]));
                     if (coeff_prob_update_flag) {
                         u8 coeff_prob = TRY(L(8));
