@@ -506,9 +506,6 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
 
 }
 
-static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
-static void short_idct4x4llm_c(i16* input, i16* output, int pitch);
-
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
 {
     auto bitmap_format = include_alpha_channel ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
@@ -757,7 +754,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         if (token >= dct_cat1 && token <= dct_cat6) {
                             int starts[] = { 5, 7, 11, 19, 35, 67 };
-                            //int sizes[] = { 2, 4, 8, 16, 32, 1982 };
                             int bits[] = { 1, 2, 3, 4, 5, 11 };
 
                             Prob const Pcat1[] = { 159 };
@@ -1267,103 +1263,6 @@ clear_flags:
     if (bitmap->physical_width() == (int)vp8_header.width && bitmap->physical_height() == (int)vp8_header.height)
         return bitmap;
     return bitmap->cropped({ 0, 0, (int)vp8_header.width, (int)vp8_header.height });
-}
-
-// https://datatracker.ietf.org/doc/html/rfc6386#section-14.3 "Implementation of the WHT Inversion"
-static void vp8_short_inv_walsh4x4_c(i16* input, i16* output)
-{
-    i16 *ip = input;
-    i16 *op = output;
-
-    for(int i = 0; i < 4; i++) {
-        int a1 = ip[0] + ip[12];
-        int b1 = ip[4] + ip[8];
-        int c1 = ip[4] - ip[8];
-        int d1 = ip[0] - ip[12];
-
-        op[0] = a1 + b1;
-        op[4] = c1 + d1;
-        op[8] = a1 - b1;
-        op[12]= d1 - c1;
-        ip++;
-        op++;
-    }
-
-    ip = output;
-    op = output;
-    for(int i = 0; i < 4; i++) {
-        int a1 = ip[0] + ip[3];
-        int b1 = ip[1] + ip[2];
-        int c1 = ip[1] - ip[2];
-        int d1 = ip[0] - ip[3];
-
-        int a2 = a1 + b1;
-        int b2 = c1 + d1;
-        int c2 = a1 - b1;
-        int d2 = d1 - c1;
-        op[0] = (a2 + 3) >> 3;
-        op[1] = (b2 + 3) >> 3;
-        op[2] = (c2 + 3) >> 3;
-        op[3] = (d2 + 3) >> 3;
-
-        ip += 4;
-        op += 4;
-    }
-}
-
-// https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
-static void short_idct4x4llm_c(i16* input, i16* output, int pitch)
-{
-    static constexpr int cospi8sqrt2minus1 = 20091;
-    static constexpr int sinpi8sqrt2       = 35468;
-
-    i16* ip = input;
-    i16* op = output;
-    int shortpitch = pitch >> 1;
-
-    for(int i = 0; i < 4; i++) {
-        int a1 = ip[0] + ip[8];
-        int b1 = ip[0] - ip[8];
-
-        int temp1 = (ip[4] * sinpi8sqrt2) >> 16;
-        int temp2 = ip[12] + ((ip[12] * cospi8sqrt2minus1) >> 16);
-        int c1 = temp1 - temp2;
-
-        temp1 = ip[4] + ((ip[4] * cospi8sqrt2minus1) >> 16);
-        temp2 = (ip[12] * sinpi8sqrt2) >> 16;
-        int d1 = temp1 + temp2;
-
-        op[shortpitch * 0] = a1 + d1;
-        op[shortpitch * 3] = a1 - d1;
-        op[shortpitch * 1] = b1 + c1;
-        op[shortpitch * 2] = b1 - c1;
-
-        ip++;
-        op++;
-    }
-
-    ip = output;
-    op = output;
-    for(int i = 0; i < 4; i++) {
-        int a1 = ip[0] + ip[2];
-        int b1 = ip[0] - ip[2];
-
-        int temp1 = (ip[1] * sinpi8sqrt2) >> 16;
-        int temp2 = ip[3] + ((ip[3] * cospi8sqrt2minus1) >> 16);
-        int c1 = temp1 - temp2;
-
-        temp1 = ip[1] + ((ip[1] * cospi8sqrt2minus1) >> 16);
-        temp2 = (ip[3] * sinpi8sqrt2) >> 16;
-        int d1 = temp1 + temp2;
-
-        op[0] = (a1 + d1 + 4) >> 3;
-        op[3] = (a1 - d1 + 4) >> 3;
-        op[1] = (b1 + c1 + 4) >> 3;
-        op[2] = (b1 - c1 + 4) >> 3;
-
-        ip += shortpitch;
-        op += shortpitch;
-    }
 }
 
 }
