@@ -449,8 +449,10 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
 
-    // "macroblock_header()" in 19.3
+    // Corresponds to "macroblock_header()" in section 19.3 of the spec.
     // Corresponds to vp8_dixie_modemv_process_row()? And ParseIntraMode().
+
+    Vector<MacroblockMetadata> macroblock_metadata;
 
     // Key frames must use intra prediction, that is new macroblocks are predicted from old macroblocks in the same frame.
     // (Inter prediction on the other hand predicts new macroblocks from the corresponding macroblock in the previous frame.)
@@ -470,13 +472,9 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
     //  right four subblock modes are copied into the left predictor."
     Vector<intra_bmode> above;
     TRY(above.try_resize(macroblock_width * 4)); // One per 4x4 subblock.
-    Vector<intra_bmode, 4> left; // One per 4x4 subblock.
-    TRY(left.try_resize(4)); // One per 4x4 subblock.
-
-    Vector<MacroblockMetadata> macroblock_metadata;
 
     for (int mb_y = 0; mb_y < macroblock_height; ++mb_y) {
-        for (int i = 0; i < 4; ++i) left[i] = B_DC_PRED;
+        intra_bmode left[4] {};
 
         for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
             MacroblockMetadata metadata;
@@ -488,12 +486,10 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
                 metadata.skip_coefficients = TRY(B(header.probability_skip_false));
 
             int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
-
             metadata.intra_y_mode = (intra_mbmode)intra_y_mode;
 
             // "If the Ymode is B_PRED, it is followed by a (tree-coded) mode for each of the 16 Y subblocks."
             if (intra_y_mode == B_PRED) {
-                //for (int i = 0; i < 16; ++i) {
                 for (int y = 0; y < 4; ++y) {
                     for (int x = 0; x < 4; ++x) {
                         // "The outer two dimensions of this array are indexed by the already-
@@ -519,8 +515,7 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
                 }
             }
 
-            int uv_mode = TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
-            metadata.uv_mode = (intra_mbmode)uv_mode;
+            metadata.uv_mode = (intra_mbmode)TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
 
             TRY(macroblock_metadata.try_append(metadata));
         }
