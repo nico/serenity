@@ -319,6 +319,31 @@ ErrorOr<LoopFilterAdjustment> decoded_VP8_frame_header_loop_filter_adjustment(Bo
     return adjustment;
 }
 
+using CoefficientProbabilities =  Prob[4][8][3][num_dct_tokens - 1];
+
+ErrorOr<void> decoded_VP8_frame_header_coefficient_probabilities(BooleanDecoder& decoder, CoefficientProbabilities coefficient_probabilities)
+{
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
+    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+    auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
+
+    // Corresponds "token_prob_update()" in 19.2.
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 8; j++) {
+            for (int k = 0; k < 3; k++) {
+                for (int l = 0; l < 11; l++) {
+                    // token_prob_update() says L(1) and L(8), but it's actually B(p) and L(8).
+                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates" describes it correctly.
+                    if (TRY(B(coeff_update_probs[i][j][k][l])))
+                        coefficient_probabilities[i][j][k][l] = TRY(L(8));
+                }
+            }
+        }
+    }
+
+    return {};
+}
+
 #if 0
 // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
 struct FrameHeader {
@@ -406,24 +431,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     Prob coeff_probs[4][8][3][num_dct_tokens - 1];
     memcpy(coeff_probs, default_coeff_probs, sizeof(coeff_probs));
-
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
-            for (int k = 0; k < 3; k++) {
-                for (int l = 0; l < 11; l++) {
-                    // "token_prob_update()" in 19.2
-                    // token_prob_update says L(1) and L(8), but it's actually B(p) and L(8).
-                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates"
-                    // describes it correctly.
-                    u8 coeff_prob_update_flag = TRY(B(coeff_update_probs[i][j][k][l]));
-                    if (coeff_prob_update_flag) {
-                        u8 coeff_prob = TRY(L(8));
-                        coeff_probs[i][j][k][l] = coeff_prob;
-                    }
-                }
-            }
-        }
-    }
+    TRY(decoded_VP8_frame_header_coefficient_probabilities(decoder, coeff_probs));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.11 "Remaining Frame Header Data (Key Frame)"
     u8 mb_no_skip_coeff = TRY(L(1));
