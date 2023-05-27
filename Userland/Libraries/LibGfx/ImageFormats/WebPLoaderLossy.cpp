@@ -194,7 +194,7 @@ struct Segmentation {
 
 ErrorOr<Segmentation> decode_VP8_frame_header_segmentation(BooleanDecoder &decoder)
 {
-    // Corresponds to "update_segmentation()" in 19.2
+    // Corresponds to "update_segmentation()" in section 19.2 of the spec.
     Segmentation segmentation;
 
     segmentation.update_metablock_segmentation_map = TRY(L(1));
@@ -257,7 +257,7 @@ struct QuantizationIndices {
 
 ErrorOr<QuantizationIndices> decode_VP8_frame_header_quantization_indices(BooleanDecoder &decoder)
 {
-    // Corresponds to "quant_indices()" in 19.2
+    // Corresponds to "quant_indices()" in section 19.2 of the spec.
     QuantizationIndices quantization_indices;
 
     // "The first 7-bit index gives the dequantization table index for
@@ -294,7 +294,7 @@ struct LoopFilterAdjustment {
 
 ErrorOr<LoopFilterAdjustment> decode_VP8_frame_header_loop_filter_adjustment(BooleanDecoder &decoder)
 {
-    // Corresponds to "mb_lf_adjustments()" in 19.2.
+    // Corresponds to "mb_lf_adjustments()" in section 19.2 of the spec.
     LoopFilterAdjustment adjustment;
 
     adjustment.enable_loop_filter_adjustment = TRY(L(1));
@@ -330,7 +330,7 @@ using CoefficientProbabilities =  Prob[4][8][3][num_dct_tokens - 1];
 
 ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& decoder, CoefficientProbabilities coefficient_probabilities)
 {
-    // Corresponds "token_prob_update()" in 19.2.
+    // Corresponds to "token_prob_update()" in section 19.2 of the spec.
     for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 8; j++) {
             for (int k = 0; k < 3; k++) {
