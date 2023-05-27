@@ -112,6 +112,7 @@ namespace {
 // Reads n bits followed by a sign bit (0: positive, 1: negative).
 ErrorOr<i8> read_signed_literal(BooleanDecoder& decoder, u8 n)
 {
+    VERIFY(n <= 7);
     i8 i = TRY(decoder.read_literal(n));
     if (TRY(decoder.read_literal(1)))
         i = -i;
@@ -122,47 +123,6 @@ ErrorOr<i8> read_signed_literal(BooleanDecoder& decoder, u8 n)
 #define L(n) decoder.read_literal(n)
 #define B(prob) decoder.read_bool(prob)
 #define L_signed(n) read_signed_literal(decoder, n)
-
-// https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
-class TreeDecoder {
-public:
-    using tree_index = i8;
-
-    TreeDecoder(ReadonlySpan<tree_index> tree)
-        : m_tree(tree)
-    {
-    }
-
-    ErrorOr<int> read(BooleanDecoder&, ReadonlyBytes probabilities, int initial_i = 0);
-
-private:
-   // "A tree may then be compactly represented as an array of (pairs of)
-   //  8-bit integers.  Each (even) array index corresponds to an interior
-   //  node of the tree; the 0th index of course corresponds to the root of
-   //  the tree.  The array entries come in pairs corresponding to the left
-   //  (0) and right (1) branches of the subtree below the interior node.
-   //  We use the convention that a positive (even) branch entry is the
-   //  index of a deeper interior node, while a nonpositive entry v
-   //  corresponds to a leaf whose value is -v."
-   ReadonlySpan<tree_index> m_tree;
-
-};
-
-ErrorOr<int> TreeDecoder::read(BooleanDecoder& decoder, ReadonlyBytes probabilities, int initial_i)
-{
-    tree_index i = initial_i;
-    while (true) {
-      u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
-      i = m_tree[i + b];
-      if (i <= 0)
-          return -i;
-    }
-}
-
-}
-
-static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
-static void short_idct4x4llm_c(i16* input, i16* output, int pitch);
 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-9.2 "Color Space and Pixel Type (Key Frames Only)"
 enum class ColorSpaceAndPixelType {
@@ -178,6 +138,7 @@ enum class ClampingSpecification {
 // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
 enum class SegmentFeatureMode {
     // Spec 19.2 says 0 is delta, 1 absolute; spec 9.3 has it the other way round. 19.2 is correct.
+    // https://www.rfc-editor.org/errata/eid7519
     DeltaValueMode = 0,
     AbsoluteValueMode = 1,
 
@@ -191,57 +152,7 @@ struct Segmentation {
 
     u8 metablock_segment_tree_probabilities[3] = { 255, 255, 255 };
 };
-
-ErrorOr<Segmentation> decode_VP8_frame_header_segmentation(BooleanDecoder &decoder)
-{
-    // Corresponds to "update_segmentation()" in section 19.2 of the spec.
-    Segmentation segmentation;
-
-    segmentation.update_metablock_segmentation_map = TRY(L(1));
-    u8 update_segment_feature_data = TRY(L(1));
-
-    dbgln_if(WEBP_DEBUG, "update_mb_segmentation_map {} update_segment_feature_data {}",
-        segmentation.update_metablock_segmentation_map, update_segment_feature_data);
-
-    if (update_segment_feature_data) {
-        segmentation.segment_feature_mode = static_cast<SegmentFeatureMode>(TRY(L(1)));
-        dbgln_if(WEBP_DEBUG, "segment_feature_mode {}", (int)segmentation.segment_feature_mode);
-
-        for (int i = 0; i < 4; ++i) {
-            u8 quantizer_update = TRY(L(1));
-            dbgln_if(WEBP_DEBUG, "quantizer_update {}", quantizer_update);
-            if (quantizer_update) {
-                i8 quantizer_update_value = TRY(L_signed(7));
-                dbgln_if(WEBP_DEBUG, "quantizer_update_value {}", quantizer_update_value);
-                segmentation.quantizer_update_value[i] = quantizer_update_value;
-            }
-        }
-        for (int i = 0; i < 4; ++i) {
-            u8 loop_filter_update = TRY(L(1));
-            dbgln_if(WEBP_DEBUG, "loop_filter_update {}", loop_filter_update);
-            if (loop_filter_update) {
-                i8 loop_filter_update_value = TRY(L_signed(6));
-                dbgln_if(WEBP_DEBUG, "loop_filter_update_value {}", loop_filter_update_value);
-                segmentation.loop_filter_update_value[i] = loop_filter_update_value;
-            }
-        }
-    }
-
-    if (segmentation.update_metablock_segmentation_map) {
-        // This reads mb_segment_tree_probs for https://datatracker.ietf.org/doc/html/rfc6386#section-10.
-        for (int i = 0; i < 3; ++i) {
-            u8 segment_prob_update = TRY(L(1));
-            dbgln_if(WEBP_DEBUG, "segment_prob_update {}", segment_prob_update);
-            if (segment_prob_update) {
-                u8 segment_prob = TRY(L(8));
-                dbgln_if(WEBP_DEBUG, "segment_prob {}", segment_prob);
-                segmentation.metablock_segment_tree_probabilities[i] = segment_prob;
-            }
-        }
-    }
-
-    return segmentation;
-}
+ErrorOr<Segmentation> decode_VP8_frame_header_segmentation(BooleanDecoder&);
 
 // Also https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
 struct QuantizationIndices {
@@ -254,98 +165,17 @@ struct QuantizationIndices {
     i8 uv_dc_delta { 0 };
     i8 uv_ac_delta { 0 };
 };
-
-ErrorOr<QuantizationIndices> decode_VP8_frame_header_quantization_indices(BooleanDecoder &decoder)
-{
-    // Corresponds to "quant_indices()" in section 19.2 of the spec.
-    QuantizationIndices quantization_indices;
-
-    // "The first 7-bit index gives the dequantization table index for
-    //  Y-plane AC coefficients, called yac_qi.  It is always coded and acts
-    //  as a baseline for the other 5 quantization indices, each of which is
-    //  represented by a delta from this baseline index."
-    quantization_indices.y_ac = TRY(L(7));
-    dbgln_if(WEBP_DEBUG, "y_ac_qi {}", quantization_indices.y_ac);
-
-    auto read_delta = [&decoder](StringView name, i8* destination) -> ErrorOr<void> {
-        u8 is_present = TRY(L(1));
-        dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
-        if (is_present) {
-            i8 delta = TRY(L_signed(4));
-            dbgln_if(WEBP_DEBUG, "{} {}", name, delta);
-            *destination = delta;
-        }
-        return {};
-    };
-    TRY(read_delta("y_dc_delta"sv, &quantization_indices.y_dc_delta));
-    TRY(read_delta("y2_dc_delta"sv, &quantization_indices.y2_dc_delta));
-    TRY(read_delta("y2_ac_delta"sv, &quantization_indices.y2_ac_delta));
-    TRY(read_delta("uv_dc_delta"sv, &quantization_indices.uv_dc_delta));
-    TRY(read_delta("uv_ac_delta"sv, &quantization_indices.uv_ac_delta));
-
-    return quantization_indices;
-}
+ErrorOr<QuantizationIndices> decode_VP8_frame_header_quantization_indices(BooleanDecoder&);
 
 struct LoopFilterAdjustment {
     bool enable_loop_filter_adjustment { false };
     i8 ref_frame_delta[4] {};
     i8 mb_mode_delta[4] {};
 };
+ErrorOr<LoopFilterAdjustment> decode_VP8_frame_header_loop_filter_adjustment(BooleanDecoder&);
 
-ErrorOr<LoopFilterAdjustment> decode_VP8_frame_header_loop_filter_adjustment(BooleanDecoder &decoder)
-{
-    // Corresponds to "mb_lf_adjustments()" in section 19.2 of the spec.
-    LoopFilterAdjustment adjustment;
-
-    adjustment.enable_loop_filter_adjustment = TRY(L(1));
-    if (adjustment.enable_loop_filter_adjustment) {
-        u8 mode_ref_lf_delta_update = TRY(L(1));
-        dbgln_if(WEBP_DEBUG, "mode_ref_lf_delta_update {}", mode_ref_lf_delta_update);
-        if (mode_ref_lf_delta_update) {
-            for (int i = 0; i < 4; ++i) {
-                u8 ref_frame_delta_update_flag = TRY(L(1));
-                dbgln_if(WEBP_DEBUG, "ref_frame_delta_update_flag {}", ref_frame_delta_update_flag);
-                if (ref_frame_delta_update_flag) {
-                    i8 delta = TRY(L_signed(6));
-                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
-                    adjustment.ref_frame_delta[i] = delta;
-                }
-            }
-            for (int i = 0; i < 4; ++i) {
-                u8 mb_mode_delta_update_flag = TRY(L(1));
-                dbgln_if(WEBP_DEBUG, "mb_mode_delta_update_flag {}", mb_mode_delta_update_flag);
-                if (mb_mode_delta_update_flag) {
-                    i8 delta = TRY(L_signed(6));
-                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
-                    adjustment.mb_mode_delta[i] = delta;
-                }
-            }
-        }
-    }
-
-    return adjustment;
-}
-
-using CoefficientProbabilities =  Prob[4][8][3][num_dct_tokens - 1];
-
-ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& decoder, CoefficientProbabilities coefficient_probabilities)
-{
-    // Corresponds to "token_prob_update()" in section 19.2 of the spec.
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 8; j++) {
-            for (int k = 0; k < 3; k++) {
-                for (int l = 0; l < 11; l++) {
-                    // token_prob_update() says L(1) and L(8), but it's actually B(p) and L(8).
-                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates" describes it correctly.
-                    if (TRY(B(coeff_update_probs[i][j][k][l])))
-                        coefficient_probabilities[i][j][k][l] = TRY(L(8));
-                }
-            }
-        }
-    }
-
-    return {};
-}
+using CoefficientProbabilities = Prob[4][8][3][num_dct_tokens - 1];
+ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder&, CoefficientProbabilities);
 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
 // "The first is a flag (filter_type) selecting the type of filter (normal or simple)"
@@ -426,6 +256,182 @@ ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
 
     return header;
 }
+
+ErrorOr<Segmentation> decode_VP8_frame_header_segmentation(BooleanDecoder& decoder)
+{
+    // Corresponds to "update_segmentation()" in section 19.2 of the spec.
+    Segmentation segmentation;
+
+    segmentation.update_metablock_segmentation_map = TRY(L(1));
+    u8 update_segment_feature_data = TRY(L(1));
+
+    dbgln_if(WEBP_DEBUG, "update_mb_segmentation_map {} update_segment_feature_data {}",
+        segmentation.update_metablock_segmentation_map, update_segment_feature_data);
+
+    if (update_segment_feature_data) {
+        segmentation.segment_feature_mode = static_cast<SegmentFeatureMode>(TRY(L(1)));
+        dbgln_if(WEBP_DEBUG, "segment_feature_mode {}", (int)segmentation.segment_feature_mode);
+
+        for (int i = 0; i < 4; ++i) {
+            u8 quantizer_update = TRY(L(1));
+            dbgln_if(WEBP_DEBUG, "quantizer_update {}", quantizer_update);
+            if (quantizer_update) {
+                i8 quantizer_update_value = TRY(L_signed(7));
+                dbgln_if(WEBP_DEBUG, "quantizer_update_value {}", quantizer_update_value);
+                segmentation.quantizer_update_value[i] = quantizer_update_value;
+            }
+        }
+        for (int i = 0; i < 4; ++i) {
+            u8 loop_filter_update = TRY(L(1));
+            dbgln_if(WEBP_DEBUG, "loop_filter_update {}", loop_filter_update);
+            if (loop_filter_update) {
+                i8 loop_filter_update_value = TRY(L_signed(6));
+                dbgln_if(WEBP_DEBUG, "loop_filter_update_value {}", loop_filter_update_value);
+                segmentation.loop_filter_update_value[i] = loop_filter_update_value;
+            }
+        }
+    }
+
+    if (segmentation.update_metablock_segmentation_map) {
+        // This reads mb_segment_tree_probs for https://datatracker.ietf.org/doc/html/rfc6386#section-10.
+        for (int i = 0; i < 3; ++i) {
+            u8 segment_prob_update = TRY(L(1));
+            dbgln_if(WEBP_DEBUG, "segment_prob_update {}", segment_prob_update);
+            if (segment_prob_update) {
+                u8 segment_prob = TRY(L(8));
+                dbgln_if(WEBP_DEBUG, "segment_prob {}", segment_prob);
+                segmentation.metablock_segment_tree_probabilities[i] = segment_prob;
+            }
+        }
+    }
+
+    return segmentation;
+}
+
+ErrorOr<QuantizationIndices> decode_VP8_frame_header_quantization_indices(BooleanDecoder& decoder)
+{
+    // Corresponds to "quant_indices()" in section 19.2 of the spec.
+    QuantizationIndices quantization_indices;
+
+    // "The first 7-bit index gives the dequantization table index for
+    //  Y-plane AC coefficients, called yac_qi.  It is always coded and acts
+    //  as a baseline for the other 5 quantization indices, each of which is
+    //  represented by a delta from this baseline index."
+    quantization_indices.y_ac = TRY(L(7));
+    dbgln_if(WEBP_DEBUG, "y_ac_qi {}", quantization_indices.y_ac);
+
+    auto read_delta = [&decoder](StringView name, i8* destination) -> ErrorOr<void> {
+        u8 is_present = TRY(L(1));
+        dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
+        if (is_present) {
+            i8 delta = TRY(L_signed(4));
+            dbgln_if(WEBP_DEBUG, "{} {}", name, delta);
+            *destination = delta;
+        }
+        return {};
+    };
+    TRY(read_delta("y_dc_delta"sv, &quantization_indices.y_dc_delta));
+    TRY(read_delta("y2_dc_delta"sv, &quantization_indices.y2_dc_delta));
+    TRY(read_delta("y2_ac_delta"sv, &quantization_indices.y2_ac_delta));
+    TRY(read_delta("uv_dc_delta"sv, &quantization_indices.uv_dc_delta));
+    TRY(read_delta("uv_ac_delta"sv, &quantization_indices.uv_ac_delta));
+
+    return quantization_indices;
+}
+
+ErrorOr<LoopFilterAdjustment> decode_VP8_frame_header_loop_filter_adjustment(BooleanDecoder& decoder)
+{
+    // Corresponds to "mb_lf_adjustments()" in section 19.2 of the spec.
+    LoopFilterAdjustment adjustment;
+
+    adjustment.enable_loop_filter_adjustment = TRY(L(1));
+    if (adjustment.enable_loop_filter_adjustment) {
+        u8 mode_ref_lf_delta_update = TRY(L(1));
+        dbgln_if(WEBP_DEBUG, "mode_ref_lf_delta_update {}", mode_ref_lf_delta_update);
+        if (mode_ref_lf_delta_update) {
+            for (int i = 0; i < 4; ++i) {
+                u8 ref_frame_delta_update_flag = TRY(L(1));
+                dbgln_if(WEBP_DEBUG, "ref_frame_delta_update_flag {}", ref_frame_delta_update_flag);
+                if (ref_frame_delta_update_flag) {
+                    i8 delta = TRY(L_signed(6));
+                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
+                    adjustment.ref_frame_delta[i] = delta;
+                }
+            }
+            for (int i = 0; i < 4; ++i) {
+                u8 mb_mode_delta_update_flag = TRY(L(1));
+                dbgln_if(WEBP_DEBUG, "mb_mode_delta_update_flag {}", mb_mode_delta_update_flag);
+                if (mb_mode_delta_update_flag) {
+                    i8 delta = TRY(L_signed(6));
+                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
+                    adjustment.mb_mode_delta[i] = delta;
+                }
+            }
+        }
+    }
+
+    return adjustment;
+}
+
+ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& decoder, CoefficientProbabilities coefficient_probabilities)
+{
+    // Corresponds to "token_prob_update()" in section 19.2 of the spec.
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 8; j++) {
+            for (int k = 0; k < 3; k++) {
+                for (int l = 0; l < 11; l++) {
+                    // token_prob_update() says L(1) and L(8), but it's actually B(p) and L(8).
+                    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates" describes it correctly.
+                    if (TRY(B(coeff_update_probs[i][j][k][l])))
+                        coefficient_probabilities[i][j][k][l] = TRY(L(8));
+                }
+            }
+        }
+    }
+
+    return {};
+}
+
+// https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
+class TreeDecoder {
+public:
+    using tree_index = i8;
+
+    TreeDecoder(ReadonlySpan<tree_index> tree)
+        : m_tree(tree)
+    {
+    }
+
+    ErrorOr<int> read(BooleanDecoder&, ReadonlyBytes probabilities, int initial_i = 0);
+
+private:
+   // "A tree may then be compactly represented as an array of (pairs of)
+   //  8-bit integers.  Each (even) array index corresponds to an interior
+   //  node of the tree; the 0th index of course corresponds to the root of
+   //  the tree.  The array entries come in pairs corresponding to the left
+   //  (0) and right (1) branches of the subtree below the interior node.
+   //  We use the convention that a positive (even) branch entry is the
+   //  index of a deeper interior node, while a nonpositive entry v
+   //  corresponds to a leaf whose value is -v."
+   ReadonlySpan<tree_index> m_tree;
+
+};
+
+ErrorOr<int> TreeDecoder::read(BooleanDecoder& decoder, ReadonlyBytes probabilities, int initial_i)
+{
+    tree_index i = initial_i;
+    while (true) {
+      u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
+      i = m_tree[i + b];
+      if (i <= 0)
+          return -i;
+    }
+}
+
+}
+
+static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
+static void short_idct4x4llm_c(i16* input, i16* output, int pitch);
 
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
 {
