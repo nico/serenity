@@ -268,6 +268,57 @@ ErrorOr<QuantizationIndices> decoded_VP8_frame_header_quantization_indices(Boole
     return quantization_indices;
 }
 
+struct LoopFilterAdjustment {
+    bool enable_loop_filter_adjustment { false };
+    i8 ref_frame_delta[4] {};
+    i8 mb_mode_delta[4] {};
+};
+
+ErrorOr<LoopFilterAdjustment> decoded_VP8_frame_header_loop_filter_adjustment(BooleanDecoder &decoder)
+{
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
+    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+
+    // Reads n bits followed by a sign bit (0: positive, 1: negative).
+    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
+        i32 i = TRY(decoder.read_literal(n));
+        if (TRY(decoder.read_literal(1)))
+            i = -i;
+        return i;
+    };
+
+    // Corresponds to "mb_lf_adjustments()" in 19.2.
+    LoopFilterAdjustment adjustment;
+
+    adjustment.enable_loop_filter_adjustment = TRY(L(1));
+    if (adjustment.enable_loop_filter_adjustment) {
+        u8 mode_ref_lf_delta_update = TRY(L(1));
+        dbgln_if(WEBP_DEBUG, "mode_ref_lf_delta_update {}", mode_ref_lf_delta_update);
+        if (mode_ref_lf_delta_update) {
+            for (int i = 0; i < 4; ++i) {
+                u8 ref_frame_delta_update_flag = TRY(L(1));
+                dbgln_if(WEBP_DEBUG, "ref_frame_delta_update_flag {}", ref_frame_delta_update_flag);
+                if (ref_frame_delta_update_flag) {
+                    i8 delta = TRY(L_signed(6));
+                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
+                    adjustment.ref_frame_delta[i] = delta;
+                }
+            }
+            for (int i = 0; i < 4; ++i) {
+                u8 mb_mode_delta_update_flag = TRY(L(1));
+                dbgln_if(WEBP_DEBUG, "mb_mode_delta_update_flag {}", mb_mode_delta_update_flag);
+                if (mb_mode_delta_update_flag) {
+                    i8 delta = TRY(L_signed(6));
+                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
+                    adjustment.mb_mode_delta[i] = delta;
+                }
+            }
+        }
+    }
+
+    return adjustment;
+}
+
 #if 0
 // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
 struct FrameHeader {
@@ -303,14 +354,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
     auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
-    // Reads n bits followed by a sign bit (0: positive, 1: negative).
-    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
-        i32 i = TRY(decoder.read_literal(n));
-        if (TRY(decoder.read_literal(1)))
-            i = -i;
-        return i;
-    };
-
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
     auto color_space = static_cast<ColorSpaceAndPixelType>(TRY(L(1)));
     auto clamping_type = static_cast<ClampingSpecification>(TRY(L(1)));
@@ -331,41 +374,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     u8 sharpness_level = TRY(L(3));
     dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", filter_type, loop_filter_level, sharpness_level);
 
-    // "mb_lf_adjustments()" in 19.2
-    struct LoopFilterUpdateDelta {
-        Optional<i8> ref_frame_delta[4];
-        Optional<i8> mb_mode_delta[4];
-    };
-    Optional<LoopFilterUpdateDelta> loop_filter_update_delta;
-
-    u8 loop_filter_adj_enable = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "loop_filter_adj_enable {}", loop_filter_adj_enable);
-    if (loop_filter_adj_enable) {
-        u8 mode_ref_lf_delta_update = TRY(L(1));
-        dbgln_if(WEBP_DEBUG, "mode_ref_lf_delta_update {}", mode_ref_lf_delta_update);
-        if (mode_ref_lf_delta_update) {
-            LoopFilterUpdateDelta update;
-            for (int i = 0; i < 4; ++i) {
-                u8 ref_frame_delta_update_flag = TRY(L(1));
-                dbgln_if(WEBP_DEBUG, "ref_frame_delta_update_flag {}", ref_frame_delta_update_flag);
-                if (ref_frame_delta_update_flag) {
-                    i8 delta = TRY(L_signed(6));
-                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
-                    update.ref_frame_delta[i] = delta;
-                }
-            }
-            for (int i = 0; i < 4; ++i) {
-                u8 mb_mode_delta_update_flag = TRY(L(1));
-                dbgln_if(WEBP_DEBUG, "mb_mode_delta_update_flag {}", mb_mode_delta_update_flag);
-                if (mb_mode_delta_update_flag) {
-                    i8 delta = TRY(L_signed(6));
-                    dbgln_if(WEBP_DEBUG, "delta {}", delta);
-                    update.mb_mode_delta[i] = delta;
-                }
-            }
-            loop_filter_update_delta = update;
-        }
-    }
+    LoopFilterAdjustment loop_filter_adjustment = TRY(decoded_VP8_frame_header_loop_filter_adjustment(decoder));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.5 "Token Partition and Partition Data Offsets"
     u8 log2_nbr_of_dct_partitions = TRY(L(2));
@@ -1284,19 +1293,15 @@ clear_flags:
                     mb_loop_filter_level = clamp(mb_loop_filter_level, 0, 63); // in calculate_filter_parameters (spec text doesn't mention this)
                 }
 
-                if (loop_filter_update_delta.has_value()) {
-                    if (loop_filter_update_delta->ref_frame_delta[0].has_value()) // key frames always use CURRENT_FRAME, probably (spec is silent on this (?))
-                        mb_loop_filter_level += loop_filter_update_delta->ref_frame_delta[0].value();
+                if (loop_filter_adjustment.enable_loop_filter_adjustment) {
+                    // key frames always use CURRENT_FRAME, probably (spec is silent on this (?))
+                    mb_loop_filter_level += loop_filter_adjustment.ref_frame_delta[0];
 
                     // spec doesn't say what to do with mb_mode_delta as far as I can tell, but calculate_filter_parameters() uses index 0 for CURRENT_FRAME / B_PRED,
-                    // index 1 and 3 for some interprediction modes which don't happen in keyframe-only webp files, and mode 2 else.
-                    if (metadata.intra_y_mode == B_PRED) {  // key frames always use CURRENT_FRAME, probably (spec is silent on this (?))
-                        if (loop_filter_update_delta->mb_mode_delta[0].has_value())
-                            mb_loop_filter_level += loop_filter_update_delta->mb_mode_delta[0].value();
-                    } else {
-                        if (loop_filter_update_delta->mb_mode_delta[2].has_value())
-                            mb_loop_filter_level += loop_filter_update_delta->mb_mode_delta[2].value();
-                    }
+                    // index 1 and 3 for some interprediction modes which don't happen in keyframe-only webp files, and mode 2 else (for != CURRENT_FRAME).
+                    if (metadata.intra_y_mode == B_PRED) // key frames always use CURRENT_FRAME, probably (spec is silent on this (?))
+                        mb_loop_filter_level += loop_filter_adjustment.mb_mode_delta[0];
+
                     mb_loop_filter_level = clamp(mb_loop_filter_level, 0, 63); // in calculate_filter_parameters (spec text doesn't talk about anything loop_filter_update_delta related)
                 }
 
