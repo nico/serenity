@@ -152,7 +152,7 @@ struct Segmentation {
     u8 metablock_segment_tree_probabilities[3] = { 255, 255, 255 };
 };
 
-ErrorOr<Segmentation> decoded_VP8_frame_header_segmentation(BooleanDecoder &decoder)
+ErrorOr<Segmentation> decode_VP8_frame_header_segmentation(BooleanDecoder &decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -226,7 +226,7 @@ struct QuantizationIndices {
     i8 uv_ac_delta { 0 };
 };
 
-ErrorOr<QuantizationIndices> decoded_VP8_frame_header_quantization_indices(BooleanDecoder &decoder)
+ErrorOr<QuantizationIndices> decode_VP8_frame_header_quantization_indices(BooleanDecoder &decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -274,7 +274,7 @@ struct LoopFilterAdjustment {
     i8 mb_mode_delta[4] {};
 };
 
-ErrorOr<LoopFilterAdjustment> decoded_VP8_frame_header_loop_filter_adjustment(BooleanDecoder &decoder)
+ErrorOr<LoopFilterAdjustment> decode_VP8_frame_header_loop_filter_adjustment(BooleanDecoder &decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -321,7 +321,7 @@ ErrorOr<LoopFilterAdjustment> decoded_VP8_frame_header_loop_filter_adjustment(Bo
 
 using CoefficientProbabilities =  Prob[4][8][3][num_dct_tokens - 1];
 
-ErrorOr<void> decoded_VP8_frame_header_coefficient_probabilities(BooleanDecoder& decoder, CoefficientProbabilities coefficient_probabilities)
+ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& decoder, CoefficientProbabilities coefficient_probabilities)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -351,7 +351,7 @@ struct FrameHeader {
     ClampingSpecification clamping_specification;
 };
 
-ErrorOr<FrameHeader> decoded_VP8_frame_header(BooleanDecoder& decoder)
+ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
@@ -391,7 +391,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     Segmentation segmentation;
     if (segmentation_enabled)
-        segmentation = TRY(decoded_VP8_frame_header_segmentation(decoder));
+        segmentation = TRY(decode_VP8_frame_header_segmentation(decoder));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.4 "Loop Filter Type and Levels"
     u8 filter_type = TRY(L(1));
@@ -399,7 +399,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     u8 sharpness_level = TRY(L(3));
     dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", filter_type, loop_filter_level, sharpness_level);
 
-    LoopFilterAdjustment loop_filter_adjustment = TRY(decoded_VP8_frame_header_loop_filter_adjustment(decoder));
+    LoopFilterAdjustment loop_filter_adjustment = TRY(decode_VP8_frame_header_loop_filter_adjustment(decoder));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.5 "Token Partition and Partition Data Offsets"
     u8 log2_nbr_of_dct_partitions = TRY(L(2));
@@ -423,7 +423,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         offset += size_of_partition;
     }
 
-    auto quantization_indices = TRY(decoded_VP8_frame_header_quantization_indices(decoder));
+    auto quantization_indices = TRY(decode_VP8_frame_header_quantization_indices(decoder));
 
     // Always key_frame in webp.
     u8 refresh_entropy_probs = TRY(L(1));
@@ -431,7 +431,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     Prob coeff_probs[4][8][3][num_dct_tokens - 1];
     memcpy(coeff_probs, default_coeff_probs, sizeof(coeff_probs));
-    TRY(decoded_VP8_frame_header_coefficient_probabilities(decoder, coeff_probs));
+    TRY(decode_VP8_frame_header_coefficient_probabilities(decoder, coeff_probs));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.11 "Remaining Frame Header Data (Key Frame)"
     u8 mb_no_skip_coeff = TRY(L(1));
