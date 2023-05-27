@@ -214,6 +214,60 @@ ErrorOr<Segmentation> decoded_VP8_frame_header_segmentation(BooleanDecoder &deco
     return segmentation;
 }
 
+// Also https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
+struct QuantizationIndices {
+    u8 y_ac { 0 };
+    i8 y_dc_delta { 0 };
+
+    i8 y2_dc_delta { 0 };
+    i8 y2_ac_delta { 0 };
+
+    i8 uv_dc_delta { 0 };
+    i8 uv_ac_delta { 0 };
+};
+
+ErrorOr<QuantizationIndices> decoded_VP8_frame_header_quantization_indices(BooleanDecoder &decoder)
+{
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
+    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+
+    // Reads n bits followed by a sign bit (0: positive, 1: negative).
+    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
+        i32 i = TRY(decoder.read_literal(n));
+        if (TRY(decoder.read_literal(1)))
+            i = -i;
+        return i;
+    };
+
+    // Corresponds to "quant_indices()" in 19.2
+    QuantizationIndices quantization_indices;
+
+    // "The first 7-bit index gives the dequantization table index for
+    //  Y-plane AC coefficients, called yac_qi.  It is always coded and acts
+    //  as a baseline for the other 5 quantization indices, each of which is
+    //  represented by a delta from this baseline index."
+    quantization_indices.y_ac = TRY(L(7));
+    dbgln_if(WEBP_DEBUG, "y_ac_qi {}", quantization_indices.y_ac);
+
+    auto read_delta = [&L, &L_signed](StringView name, i8* destination) -> ErrorOr<void> {
+        u8 is_present = TRY(L(1));
+        dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
+        if (is_present) {
+            i8 delta = TRY(L_signed(4));
+            dbgln_if(WEBP_DEBUG, "{} {}", name, delta);
+            *destination = delta;
+        }
+        return {};
+    };
+    TRY(read_delta("y_dc_delta"sv, &quantization_indices.y_dc_delta));
+    TRY(read_delta("y2_dc_delta"sv, &quantization_indices.y2_dc_delta));
+    TRY(read_delta("y2_ac_delta"sv, &quantization_indices.y2_ac_delta));
+    TRY(read_delta("uv_dc_delta"sv, &quantization_indices.uv_dc_delta));
+    TRY(read_delta("uv_ac_delta"sv, &quantization_indices.uv_ac_delta));
+
+    return quantization_indices;
+}
+
 #if 0
 // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
 struct FrameHeader {
@@ -335,44 +389,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         offset += size_of_partition;
     }
 
-    // "quant_indices()" in 19.2
-    // Also https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
-    struct QuantizationIndices {
-        u8 y_ac;
-        i8 y_dc_delta;
-
-        i8 y2_dc_delta;
-        i8 y2_ac_delta;
-
-        i8 uv_dc_delta;
-        i8 uv_ac_delta;
-    };
-
-    // "The first 7-bit index gives the dequantization table index for
-    //  Y-plane AC coefficients, called yac_qi.  It is always coded and acts
-    //  as a baseline for the other 5 quantization indices, each of which is
-    //  represented by a delta from this baseline index."
-    u8 y_ac_qi = TRY(L(7));
-    dbgln_if(WEBP_DEBUG, "y_ac_qi {}", y_ac_qi);
-
-    auto quantization_indices = QuantizationIndices { y_ac_qi, 0, 0, 0, 0, 0 };
-    auto read_delta = [&L, &L_signed, y_ac_qi](StringView name, i8* destination) -> ErrorOr<void> {
-        u8 is_present = TRY(L(1));
-        dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
-        if (is_present) {
-            i8 delta = TRY(L_signed(4));
-            dbgln_if(WEBP_DEBUG, "{} {}", name, delta);
-            if (y_ac_qi + delta < 0)
-                return Error::from_string_literal("WebPImageDecoderPlugin: got negative quantization index");
-            *destination = delta;
-        }
-        return {};
-    };
-    TRY(read_delta("y_dc_delta"sv, &quantization_indices.y_dc_delta));
-    TRY(read_delta("y2_dc_delta"sv, &quantization_indices.y2_dc_delta));
-    TRY(read_delta("y2_ac_delta"sv, &quantization_indices.y2_ac_delta));
-    TRY(read_delta("uv_dc_delta"sv, &quantization_indices.uv_dc_delta));
-    TRY(read_delta("uv_ac_delta"sv, &quantization_indices.uv_ac_delta));
+    auto quantization_indices = TRY(decoded_VP8_frame_header_quantization_indices(decoder));
 
     // Always key_frame in webp.
     u8 refresh_entropy_probs = TRY(L(1));
