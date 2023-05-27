@@ -395,6 +395,7 @@ ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
 
     header.quantization_indices = TRY(decode_VP8_frame_header_quantization_indices(decoder));
 
+    // In the VP8 spec, this is in an `if (key_frames)` followed by a lengthy `else`, but webp files only have key frames.
     u8 refresh_entropy_probs = TRY(L(1)); // Has no effect in webp files.
     dbgln_if(WEBP_DEBUG, "refresh_entropy_probs {}", refresh_entropy_probs);
 
@@ -408,6 +409,8 @@ ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
         header.probability_skip_false = TRY(L(8));
         dbgln_if(WEBP_DEBUG, "prob_skip_false {}", header.probability_skip_false);
     }
+
+    // In the VP8 spec, there is a length `if (!key_frames)` here, but webp files only have key frames.
 
     return header;
 }
