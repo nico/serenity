@@ -241,7 +241,7 @@ ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
     u8 refresh_entropy_probs = TRY(L(1)); // Has no effect in webp files.
     dbgln_if(WEBP_DEBUG, "refresh_entropy_probs {}", refresh_entropy_probs);
 
-    memcpy(header.coefficient_probabilities, default_coeff_probs, sizeof(header.coefficient_probabilities));
+    memcpy(header.coefficient_probabilities, DEFAULT_COEFFICIENT_PROBABILITIES, sizeof(header.coefficient_probabilities));
     TRY(decode_VP8_frame_header_coefficient_probabilities(decoder, header.coefficient_probabilities));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.11 "Remaining Frame Header Data (Key Frame)"
@@ -385,7 +385,7 @@ ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& 
                 for (int l = 0; l < 11; l++) {
                     // token_prob_update() says L(1) and L(8), but it's actually B(p) and L(8).
                     // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates" describes it correctly.
-                    if (TRY(B(coeff_update_probs[i][j][k][l])))
+                    if (TRY(B(COEFFICIENT_UPDATE_PROBABILITIES[i][j][k][l])))
                         coefficient_probabilities[i][j][k][l] = TRY(L(8));
                 }
             }
@@ -396,37 +396,14 @@ ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& 
 }
 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
-class TreeDecoder {
-public:
-
-    TreeDecoder(ReadonlySpan<tree_index> tree)
-        : m_tree(tree)
-    {
-    }
-
-    ErrorOr<int> read(BooleanDecoder&, ReadonlyBytes probabilities, int initial_i = 0);
-
-private:
-   // "A tree may then be compactly represented as an array of (pairs of)
-   //  8-bit integers.  Each (even) array index corresponds to an interior
-   //  node of the tree; the 0th index of course corresponds to the root of
-   //  the tree.  The array entries come in pairs corresponding to the left
-   //  (0) and right (1) branches of the subtree below the interior node.
-   //  We use the convention that a positive (even) branch entry is the
-   //  index of a deeper interior node, while a nonpositive entry v
-   //  corresponds to a leaf whose value is -v."
-   ReadonlySpan<tree_index> m_tree;
-
-};
-
-ErrorOr<int> TreeDecoder::read(BooleanDecoder& decoder, ReadonlyBytes probabilities, int initial_i)
+ErrorOr<u8> tree_decode(BooleanDecoder& decoder, ReadonlySpan<TreeIndex> tree, ReadonlyBytes probabilities, TreeIndex initial_i = 0)
 {
-    tree_index i = initial_i;
+    TreeIndex i = initial_i;
     while (true) {
-      u8 b = TRY(decoder.read_bool(probabilities[i >> 1]));
-      i = m_tree[i + b];
-      if (i <= 0)
-          return -i;
+        u8 b = TRY(B(probabilities[i >> 1]));
+        i = tree[i + b];
+        if (i <= 0)
+            return -i;
     }
 }
 
@@ -439,10 +416,10 @@ struct MacroblockMetadata {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-11.1 "mb_skip_coeff"
     bool skip_coefficients { false };
 
-    intra_mbmode intra_y_mode;
-    intra_mbmode uv_mode;
+    IntraMetablockMode intra_y_mode;
+    IntraMetablockMode uv_mode;
 
-    intra_bmode intra_b_modes[16];
+    IntraBlockMode intra_b_modes[16];
 };
 
 ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecoder& decoder, FrameHeader const& header, int macroblock_width, int macroblock_height)
@@ -450,7 +427,6 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
 
     // Corresponds to "macroblock_header()" in section 19.3 of the spec.
-    // Corresponds to vp8_dixie_modemv_process_row()? And ParseIntraMode().
 
     Vector<MacroblockMetadata> macroblock_metadata;
 
@@ -470,23 +446,23 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
     //  modes are copied into the row predictor (at the current position,
     //  which then advances to be above the next macroblock), and the
     //  right four subblock modes are copied into the left predictor."
-    Vector<intra_bmode> above;
+    Vector<IntraBlockMode> above;
     TRY(above.try_resize(macroblock_width * 4)); // One per 4x4 subblock.
 
     for (int mb_y = 0; mb_y < macroblock_height; ++mb_y) {
-        intra_bmode left[4] {};
+        IntraBlockMode left[4] {};
 
         for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
             MacroblockMetadata metadata;
 
             if (header.segmentation.update_metablock_segmentation_map)
-                metadata.segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, header.segmentation.metablock_segment_tree_probabilities));
+                metadata.segment_id = TRY(tree_decode(decoder, METABLOCK_SEGMENT_TREE, header.segmentation.metablock_segment_tree_probabilities));
 
             if (header.enable_skipping_of_metablocks_containing_only_zero_coefficients)
                 metadata.skip_coefficients = TRY(B(header.probability_skip_false));
 
-            int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
-            metadata.intra_y_mode = (intra_mbmode)intra_y_mode;
+            int intra_y_mode = TRY(tree_decode(decoder, KEYFRAME_YMODE_TREE, KEYFRAME_YMODE_PROBABILITIES));
+            metadata.intra_y_mode = (IntraMetablockMode)intra_y_mode;
 
             // "If the Ymode is B_PRED, it is followed by a (tree-coded) mode for each of the 16 Y subblocks."
             if (intra_y_mode == B_PRED) {
@@ -498,7 +474,7 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
                         int A = above[mb_x * 4 + x];
                         int L = left[y];
 
-                        auto intra_b_mode = static_cast<intra_bmode>(TRY(TreeDecoder(bmode_tree).read(decoder, kf_bmode_prob[A][L])));
+                        auto intra_b_mode = static_cast<IntraBlockMode>(TRY(tree_decode(decoder, BLOCK_MODE_TREE, KEYFRAME_BLOCK_MODE_PROBABILITIES[A][L])));
                         metadata.intra_b_modes[y * 4 + x] = intra_b_mode;
 
                         above[mb_x * 4 + x] = intra_b_mode;
@@ -507,15 +483,15 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
                 }
             } else {
                 VERIFY(intra_y_mode < B_PRED);
-                constexpr intra_bmode b_mode_from_y_mode[] = { B_DC_PRED, B_VE_PRED, B_HE_PRED, B_TM_PRED };
-                intra_bmode intra_b_mode = b_mode_from_y_mode[intra_y_mode];
+                constexpr IntraBlockMode b_mode_from_y_mode[] = { B_DC_PRED, B_VE_PRED, B_HE_PRED, B_TM_PRED };
+                IntraBlockMode intra_b_mode = b_mode_from_y_mode[intra_y_mode];
                 for (int i = 0; i < 4; ++i) {
                     above[mb_x * 4 + i] = intra_b_mode;
                     left[i] = intra_b_mode;
                 }
             }
 
-            metadata.uv_mode = (intra_mbmode)TRY(TreeDecoder(uv_mode_tree).read(decoder, kf_uv_mode_prob));
+            metadata.uv_mode = (IntraMetablockMode)TRY(tree_decode(decoder, UV_MODE_TREE, KEYFRAME_UV_MODE_PROBABILITIES));
 
             TRY(macroblock_metadata.try_append(metadata));
         }
@@ -548,8 +524,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     // "Internally, VP8 decomposes each output frame into an array of
     //  macroblocks.  A macroblock is a square array of pixels whose Y
     //  dimensions are 16x16 and whose U and V dimensions are 8x8."
-    int macroblock_width = (vp8_header.width + 15) / 16;
-    int macroblock_height = (vp8_header.height + 15) / 16;
+    int macroblock_width = ceil_div(vp8_header.width, 16);
+    int macroblock_height = ceil_div(vp8_header.height, 16);
 
     auto macroblock_metadata = TRY(decode_VP8_macroblock_metadata(decoder, header, macroblock_width, macroblock_height));
 
@@ -557,7 +533,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     if (header.number_of_dct_partitions > 1)
         return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps with more than one dct partition not yet implemented");
-
 
     // this can make the bitmap a bit too big; it's shrunk later if needed.
     auto bitmap = TRY(Bitmap::create(bitmap_format, { macroblock_width * 16, macroblock_height * 16 }));
@@ -569,7 +544,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream }, vp8_header.second_partition.size() * 8));
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
-        const tree_index coeff_tree[2 * (num_dct_tokens - 1)] = {
+        const TreeIndex coeff_tree[2 * (num_dct_tokens - 1)] = {
          -dct_eob, 2,               /* eob = "0"   */
           -DCT_0, 4,                /* 0   = "10"  */
            -DCT_1, 6,               /* 1   = "110" */
@@ -785,9 +760,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         int token;
                         if (last_decoded_value == DCT_0)
-                            token = TRY(TreeDecoder(coeff_tree).read(decoder, header.coefficient_probabilities[plane][band][tricky], 2));
+                            token = TRY(tree_decode(decoder, coeff_tree, header.coefficient_probabilities[plane][band][tricky], 2));
                         else
-                            token = TRY(TreeDecoder(coeff_tree).read(decoder, header.coefficient_probabilities[plane][band][tricky]));
+                            token = TRY(tree_decode(decoder, coeff_tree, header.coefficient_probabilities[plane][band][tricky]));
 
                         if (token == dct_eob)
                             break;
