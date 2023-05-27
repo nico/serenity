@@ -380,8 +380,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
-    auto color_space = static_cast<ColorSpaceAndPixelType>(TRY(L(1)));
-    auto clamping_type = static_cast<ClampingSpecification>(TRY(L(1)));
+    auto color_space = ColorSpaceAndPixelType { TRY(L(1)) };
+    auto clamping_type = ClampingSpecification { TRY(L(1)) };
 
     dbgln_if(WEBP_DEBUG, "color_space {} clamping_type {}", (int)color_space, (int)clamping_type);
 
