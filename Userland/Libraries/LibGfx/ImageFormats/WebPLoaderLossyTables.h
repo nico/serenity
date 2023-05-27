@@ -235,6 +235,25 @@ enum DCTToken {
     num_dct_tokens /* 12 */
 };
 
+// clang-format off
+const TreeIndex COEFFICIENT_TREE[2 * (num_dct_tokens - 1)] = {
+ -dct_eob, 2,               /* eob = "0"   */
+  -DCT_0, 4,                /* 0   = "10"  */
+   -DCT_1, 6,               /* 1   = "110" */
+    8, 12,
+     -DCT_2, 10,            /* 2   = "11100" */
+      -DCT_3, -DCT_4,       /* 3   = "111010", 4 = "111011" */
+     14, 16,
+      -dct_cat1, -dct_cat2, /* cat1 =  "111100",
+                               cat2 = "111101" */
+     18, 20,
+      -dct_cat3, -dct_cat4, /* cat3 = "1111100",
+                               cat4 = "1111101" */
+      -dct_cat5, -dct_cat6  /* cat4 = "1111110",
+                               cat4 = "1111111" */
+};
+// clang-format on
+
 // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates"
 // clang-format off
 static Prob constexpr COEFFICIENT_UPDATE_PROBABILITIES[4][8][3][num_dct_tokens - 1] = {

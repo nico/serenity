@@ -449,6 +449,10 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
     Vector<IntraBlockMode> above;
     TRY(above.try_resize(macroblock_width * 4)); // One per 4x4 subblock.
 
+    // It's possible to not decode all macroblock metadata at once. Instead, this could for example decode one row of metadata,
+    // then decode the coefficients for one row of macroblocks, convert that row to pixels, and then go on to the next row of macrblocks.
+    // That'd require slightly less memory. But MacroblockMetadata is fairly small, and this way we can keep the context
+    // (`above`, `left`) in stack variables instead of having to have a class for that. So keep it simple for now.
     for (int mb_y = 0; mb_y < macroblock_height; ++mb_y) {
         IntraBlockMode left[4] {};
 
@@ -542,24 +546,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         FixedMemoryStream memory_stream { vp8_header.second_partition };
         BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
         auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream }, vp8_header.second_partition.size() * 8));
-
-        // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
-        const TreeIndex coeff_tree[2 * (num_dct_tokens - 1)] = {
-         -dct_eob, 2,               /* eob = "0"   */
-          -DCT_0, 4,                /* 0   = "10"  */
-           -DCT_1, 6,               /* 1   = "110" */
-            8, 12,
-             -DCT_2, 10,            /* 2   = "11100" */
-              -DCT_3, -DCT_4,       /* 3   = "111010", 4 = "111011" */
-             14, 16,
-              -dct_cat1, -dct_cat2, /* cat1 =  "111100",
-                                       cat2 = "111101" */
-             18, 20,
-              -dct_cat3, -dct_cat4, /* cat3 = "1111100",
-                                       cat4 = "1111101" */
-              -dct_cat5, -dct_cat6  /* cat4 = "1111110",
-                                       cat4 = "1111111" */
-        };
 
         using Coefficients = i16[16];
 
@@ -760,9 +746,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         int token;
                         if (last_decoded_value == DCT_0)
-                            token = TRY(tree_decode(decoder, coeff_tree, header.coefficient_probabilities[plane][band][tricky], 2));
+                            token = TRY(tree_decode(decoder, COEFFICIENT_TREE, header.coefficient_probabilities[plane][band][tricky], 2));
                         else
-                            token = TRY(tree_decode(decoder, coeff_tree, header.coefficient_probabilities[plane][band][tricky]));
+                            token = TRY(tree_decode(decoder, COEFFICIENT_TREE, header.coefficient_probabilities[plane][band][tricky]));
 
                         if (token == dct_eob)
                             break;
