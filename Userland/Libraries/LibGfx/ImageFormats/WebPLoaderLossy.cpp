@@ -254,6 +254,9 @@ ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
 
     // In the VP8 spec, there is a length `if (!key_frames)` here, but webp files only have key frames.
 
+    // "This completes the layout of the frame header.  The remainder of the
+    //  first data partition consists of macroblock-level prediction data."
+
     return header;
 }
 
@@ -395,7 +398,6 @@ ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& 
 // https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
 class TreeDecoder {
 public:
-    using tree_index = i8;
 
     TreeDecoder(ReadonlySpan<tree_index> tree)
         : m_tree(tree)
@@ -428,29 +430,23 @@ ErrorOr<int> TreeDecoder::read(BooleanDecoder& decoder, ReadonlyBytes probabilit
     }
 }
 
-}
+// Similar to BlockContext in LibVideo/VP9/Context.h
+struct MacroblockMetadata {
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
+    // Read only if `update_mb_segmentation_map` is set.
+    int segment_id { 0 }; // 0, 1, 2, or 3. Fits in two bits.
 
-static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
-static void short_idct4x4llm_c(i16* input, i16* output, int pitch);
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-11.1 "mb_skip_coeff"
+    bool skip_coefficients { false };
 
-ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
+    intra_mbmode intra_y_mode;
+    intra_mbmode uv_mode;
+
+    intra_bmode intra_b_modes[16];
+};
+
+ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecoder& decoder, FrameHeader const& header, int macroblock_width, int macroblock_height)
 {
-    auto bitmap_format = include_alpha_channel ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
-
-    // The first partition stores header, per-segment state, and macroblock metadata.
-
-    FixedMemoryStream memory_stream { vp8_header.lossy_data };
-    BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
-    auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream} , vp8_header.lossy_data.size() * 8));
-
-    auto header = TRY(decode_VP8_frame_header(decoder));
-    auto const& segmentation = header.segmentation;
-    auto const& quantization_indices = header.quantization_indices;
-    auto const& loop_filter_adjustment = header.loop_filter_adjustment;
-
-    // "This completes the layout of the frame header.  The remainder of the
-    //  first data partition consists of macroblock-level prediction data."
-
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.3
 
     // "macroblock_header()" in 19.3
@@ -458,59 +454,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // Key frames must use intra prediction, that is new macroblocks are predicted from old macroblocks in the same frame.
     // (Inter prediction on the other hand predicts new macroblocks from the corresponding macroblock in the previous frame.)
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-2 "Format Overview"
-    // "Internally, VP8 decomposes each output frame into an array of
-    //  macroblocks.  A macroblock is a square array of pixels whose Y
-    //  dimensions are 16x16 and whose U and V dimensions are 8x8."
-    int macroblock_width = (vp8_header.width + 15) / 16;
-    int macroblock_height = (vp8_header.height + 15) / 16;
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-8.2 "Tree Coding Example"
-    // Repeated in https://datatracker.ietf.org/doc/html/rfc6386#section-11.2 "Luma Modes"
-    enum intra_mbmode {
-        DC_PRED, /* predict DC using row above and column to the left */
-        V_PRED,  /* predict rows using row above */
-        H_PRED,  /* predict columns using column to the left */
-        TM_PRED, /* propagate second differences a la "True Motion" */
-        B_PRED,  /* each Y subblock is independently predicted */
-
-        num_uv_modes = B_PRED,  /* first four modes apply to chroma */
-        num_ymodes   /* all modes apply to luma */
-    };
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-19.3 says "intra_y_mode selects the luminance intra-prediction mode (Section 16.1)",
-    // but for keyframes the correct reference is actually https://datatracker.ietf.org/doc/html/rfc6386#section-11.2 "Luma Modes".
-    // That is, we want "kf_ymode_tree", not "ymode_tree", and "kf_ymode_prob", not "ymode_prob".
-    // See "decode_kf_mb_mode" in the reference decoder in the spec.
-    const TreeDecoder::tree_index kf_ymode_tree[2 * (num_ymodes - 1) ] = {
-        -B_PRED, 2,        /* root: B_PRED = "0", "1" subtree */
-        4, 6,              /* "1" subtree has 2 descendant subtrees */
-        -DC_PRED, -V_PRED, /* "10" subtree: DC_PRED = "100", V_PRED = "101" */
-        -H_PRED, -TM_PRED  /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
-    };
-
-    const TreeDecoder::tree_index bmode_tree[2 * (num_intra_bmodes - 1)] = {
-     -B_DC_PRED, 2,                   /* B_DC_PRED = "0" */
-      -B_TM_PRED, 4,                  /* B_TM_PRED = "10" */
-       -B_VE_PRED, 6,                 /* B_VE_PRED = "110" */
-        8, 12,
-         -B_HE_PRED, 10,              /* B_HE_PRED = "11100" */
-          -B_RD_PRED, -B_VR_PRED,     /* B_RD_PRED = "111010",
-                                         B_VR_PRED = "111011" */
-         -B_LD_PRED, 14,              /* B_LD_PRED = "111110" */
-           -B_VL_PRED, 16,            /* B_VL_PRED = "1111110" */
-             -B_HD_PRED, -B_HU_PRED   /* HD = "11111110",
-                                         HU = "11111111" */
-    };
-
-
-    const TreeDecoder::tree_index uv_mode_tree[2 * (num_uv_modes - 1)] = {
-        -DC_PRED, 2,              /* root: DC_PRED = "0", "1" subtree */
-            -V_PRED, 4,           /* "1" subtree:  V_PRED = "10", "11" subtree */
-                -H_PRED, -TM_PRED /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
-    };
-    const Prob kf_uv_mode_prob [num_uv_modes - 1] = { 142, 114, 183 };
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-11.3 "Subblock Mode Contexts"
     // "For macroblocks on the top row or left edge of the image, some of
@@ -530,20 +473,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     Vector<intra_bmode, 4> left; // One per 4x4 subblock.
     TRY(left.try_resize(4)); // One per 4x4 subblock.
 
-    // Similar to BlockContext in LibVideo/VP9/Context.h
-    struct MacroblockMetadata {
-        // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
-        // Read only if `update_mb_segmentation_map` is set.
-        int segment_id { 0 }; // 0, 1, 2, or 3. Fits in two bits.
-
-        // https://datatracker.ietf.org/doc/html/rfc6386#section-11.1 "mb_skip_coeff"
-        bool skip_coefficients { false };
-
-        intra_mbmode intra_y_mode;
-        intra_mbmode uv_mode;
-
-        intra_bmode intra_b_modes[16];
-    };
     Vector<MacroblockMetadata> macroblock_metadata;
 
     for (int mb_y = 0; mb_y < macroblock_height; ++mb_y) {
@@ -552,19 +481,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
             MacroblockMetadata metadata;
 
-            if (segmentation.update_metablock_segmentation_map) {
-                // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
-                const TreeDecoder::tree_index mb_segment_tree [2 * (4 - 1)] = {
-                     2,  4, /* root: "0", "1" subtrees */
-                    -0, -1, /* "00" = 0th value, "01" = 1st value */
-                    -2, -3  /* "10" = 2nd value, "11" = 3rd value */
-                };
-                metadata.segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, segmentation.metablock_segment_tree_probabilities));
-            }
+            if (header.segmentation.update_metablock_segmentation_map)
+                metadata.segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, header.segmentation.metablock_segment_tree_probabilities));
+
             if (header.enable_skipping_of_metablocks_containing_only_zero_coefficients)
                 metadata.skip_coefficients = TRY(B(header.probability_skip_false));
 
-            const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
             int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
 
             metadata.intra_y_mode = (intra_mbmode)intra_y_mode;
@@ -604,6 +526,38 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         }
     }
 
+    return macroblock_metadata;
+}
+
+}
+
+static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
+static void short_idct4x4llm_c(i16* input, i16* output, int pitch);
+
+ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
+{
+    auto bitmap_format = include_alpha_channel ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
+
+    // The first partition stores header, per-segment state, and macroblock metadata.
+
+    FixedMemoryStream memory_stream { vp8_header.lossy_data };
+    BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
+    auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream} , vp8_header.lossy_data.size() * 8));
+
+    auto header = TRY(decode_VP8_frame_header(decoder));
+    auto const& segmentation = header.segmentation;
+    auto const& quantization_indices = header.quantization_indices;
+    auto const& loop_filter_adjustment = header.loop_filter_adjustment;
+
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-2 "Format Overview"
+    // "Internally, VP8 decomposes each output frame into an array of
+    //  macroblocks.  A macroblock is a square array of pixels whose Y
+    //  dimensions are 16x16 and whose U and V dimensions are 8x8."
+    int macroblock_width = (vp8_header.width + 15) / 16;
+    int macroblock_height = (vp8_header.height + 15) / 16;
+
+    auto macroblock_metadata = TRY(decode_VP8_macroblock_metadata(decoder, header, macroblock_width, macroblock_height));
+
     // Done with the first partition!
 
     if (header.number_of_dct_partitions > 1)
@@ -620,7 +574,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream }, vp8_header.second_partition.size() * 8));
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
-        const TreeDecoder::tree_index coeff_tree[2 * (num_dct_tokens - 1)] = {
+        const tree_index coeff_tree[2 * (num_dct_tokens - 1)] = {
          -dct_eob, 2,               /* eob = "0"   */
           -DCT_0, 4,                /* 0   = "10"  */
            -DCT_1, 6,               /* 1   = "110" */
