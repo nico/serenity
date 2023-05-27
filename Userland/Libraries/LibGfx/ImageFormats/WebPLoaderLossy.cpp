@@ -347,7 +347,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             for (int k = 0; k < 3; k++) {
                 for (int l = 0; l < 11; l++) {
                     // "token_prob_update()" in 19.2
-                    // token_prob_update says L(1) and L(8), but it's actually be B(p) and L(8).
+                    // token_prob_update says L(1) and L(8), but it's actually B(p) and L(8).
                     // https://datatracker.ietf.org/doc/html/rfc6386#section-13.4 "Token Probability Updates"
                     // describes it correctly.
                     u8 coeff_prob_update_flag = TRY(B(coeff_update_probs[i][j][k][l]));
@@ -1173,27 +1173,27 @@ clear_flags:
                 }
 
                 // Y, no subblocks
-if (metadata.intra_y_mode != B_PRED) {
-                // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
-                // Loop over the 4x4 subblocks
-                for (int y = 0, i = 0; y < 4; ++y) {
-                    for (int x = 0; x < 4; ++x, ++i) {
-                        Coefficients idct_output;
-                        short_idct4x4llm_c(y_coeffs[i], idct_output, 4 * sizeof(i16));
+                if (metadata.intra_y_mode != B_PRED) {
+                    // https://datatracker.ietf.org/doc/html/rfc6386#section-14.4 "Implementation of the DCT Inversion"
+                    // Loop over the 4x4 subblocks
+                    for (int y = 0, i = 0; y < 4; ++y) {
+                        for (int x = 0; x < 4; ++x, ++i) {
+                            Coefficients idct_output;
+                            short_idct4x4llm_c(y_coeffs[i], idct_output, 4 * sizeof(i16));
 
-                        // https://datatracker.ietf.org/doc/html/rfc6386#section-14.5 "Summation of Predictor and Residue"
-                        for (int py = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
-                            for (int px = 0; px < 4; ++px) {
-                                // sum with prediction
-                                i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
-                                p += idct_output[py * 4 + px];
-                                //p = clamp(p, 0, 255);
+                            // https://datatracker.ietf.org/doc/html/rfc6386#section-14.5 "Summation of Predictor and Residue"
+                            for (int py = 0; py < 4; ++py) { // Loop over 4x4 pixels in subblock
+                                for (int px = 0; px < 4; ++px) {
+                                    // sum with prediction
+                                    i16& p = y_prediction[(4 * y + py) * 16 + (4 * x + px)];
+                                    p += idct_output[py * 4 + px];
+                                    //p = clamp(p, 0, 255);
+                                }
                             }
                         }
                     }
                 }
 
-}
                 // UV
                 for (int y = 0, i = 0; y < 2; ++y) {
                     for (int x = 0; x < 2; ++x, ++i) {
