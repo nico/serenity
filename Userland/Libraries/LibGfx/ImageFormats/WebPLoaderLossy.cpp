@@ -124,6 +124,117 @@ ErrorOr<int> TreeDecoder::read(BooleanDecoder& decoder, ReadonlyBytes probabilit
 static void vp8_short_inv_walsh4x4_c(i16* input, i16* output);
 static void short_idct4x4llm_c(i16* input, i16* output, int pitch);
 
+// https://datatracker.ietf.org/doc/html/rfc6386#section-9.2 "Color Space and Pixel Type (Key Frames Only)"
+enum class ColorSpaceAndPixelType {
+    YUV = 0,
+    ReservedForFutureUse = 1,
+};
+enum class ClampingSpecification {
+    DecoderMustClampTo0To255 = 0,
+    NoClampingNecessary = 1,
+};
+
+// https://datatracker.ietf.org/doc/html/rfc6386#section-9.3 Segment-Based Adjustments"
+// https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
+enum class SegmentFeatureMode {
+    // Spec 19.2 says 0 is delta, 1 absolute; spec 9.3 has it the other way round. 19.2 is correct.
+    DeltaValueMode = 0,
+    AbsoluteValueMode = 1,
+
+};
+struct Segmentation {
+    bool update_metablock_segmentation_map;
+    SegmentFeatureMode segment_feature_mode { SegmentFeatureMode::DeltaValueMode };
+
+    i8 quantizer_update_value[4] {};
+    i8 loop_filter_update_value[4] {};
+
+    u8 metablock_segment_tree_probabilities[3] = { 255, 255, 255 };
+};
+
+ErrorOr<Segmentation> decoded_VP8_frame_header_segmentation(BooleanDecoder &decoder)
+{
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
+    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+
+    // Reads n bits followed by a sign bit (0: positive, 1: negative).
+    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
+        i32 i = TRY(decoder.read_literal(n));
+        if (TRY(decoder.read_literal(1)))
+            i = -i;
+        return i;
+    };
+
+    // Corresponds to "update_segmentation()" in 19.2
+    Segmentation segmentation;
+
+    segmentation.update_metablock_segmentation_map = TRY(L(1));
+    u8 update_segment_feature_data = TRY(L(1));
+
+    dbgln_if(WEBP_DEBUG, "update_mb_segmentation_map {} update_segment_feature_data {}",
+        segmentation.update_metablock_segmentation_map, update_segment_feature_data);
+
+    if (update_segment_feature_data) {
+        segmentation.segment_feature_mode = static_cast<SegmentFeatureMode>(TRY(L(1)));
+        dbgln_if(WEBP_DEBUG, "segment_feature_mode {}", (int)segmentation.segment_feature_mode);
+
+        for (int i = 0; i < 4; ++i) {
+            u8 quantizer_update = TRY(L(1));
+            dbgln_if(WEBP_DEBUG, "quantizer_update {}", quantizer_update);
+            if (quantizer_update) {
+                i8 quantizer_update_value = TRY(L_signed(7));
+                dbgln_if(WEBP_DEBUG, "quantizer_update_value {}", quantizer_update_value);
+                segmentation.quantizer_update_value[i] = quantizer_update_value;
+            }
+        }
+        for (int i = 0; i < 4; ++i) {
+            u8 loop_filter_update = TRY(L(1));
+            dbgln_if(WEBP_DEBUG, "loop_filter_update {}", loop_filter_update);
+            if (loop_filter_update) {
+                i8 loop_filter_update_value = TRY(L_signed(6));
+                dbgln_if(WEBP_DEBUG, "loop_filter_update_value {}", loop_filter_update_value);
+                segmentation.loop_filter_update_value[i] = loop_filter_update_value;
+            }
+        }
+    }
+
+    if (segmentation.update_metablock_segmentation_map) {
+        // This reads mb_segment_tree_probs for https://datatracker.ietf.org/doc/html/rfc6386#section-10.
+        for (int i = 0; i < 3; ++i) {
+            u8 segment_prob_update = TRY(L(1));
+            dbgln_if(WEBP_DEBUG, "segment_prob_update {}", segment_prob_update);
+            if (segment_prob_update) {
+                u8 segment_prob = TRY(L(8));
+                dbgln_if(WEBP_DEBUG, "segment_prob {}", segment_prob);
+                segmentation.metablock_segment_tree_probabilities[i] = segment_prob;
+            }
+        }
+    }
+
+    return segmentation;
+}
+
+#if 0
+// https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
+struct FrameHeader {
+    ColorSpaceAndPixelType color_space;
+    ClampingSpecification clamping_specification;
+};
+
+ErrorOr<FrameHeader> decoded_VP8_frame_header(BooleanDecoder& decoder)
+{
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
+    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+    auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
+
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
+    // In VP8 key_frames only, but webp files only have key frames.
+    auto color_space = static_cast<ColorSpaceAndPixelType>(TRY(L(1)));
+    auto clamping_type = static_cast<ClampingSpecification>(TRY(L(1)));
+    dbgln_if(WEBP_DEBUG, "color_space {} clamping_type {}", (int)color_space, (int)clamping_type);
+}
+#endif
+
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
 {
     auto bitmap_format = include_alpha_channel ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
@@ -147,90 +258,18 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     };
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.2 "Color Space and Pixel Type (Key Frames Only)"
-    enum class ColorSpaceAndPixelType {
-        YUV = 0,
-        ReservedForFutureUse = 1,
-    };
     auto color_space = static_cast<ColorSpaceAndPixelType>(TRY(L(1)));
-
-    enum class ClampingSpecification {
-        DecoderMustClampTo0To255 = 0,
-        NoClampingNecessary = 1,
-    };
     auto clamping_type = static_cast<ClampingSpecification>(TRY(L(1)));
 
     dbgln_if(WEBP_DEBUG, "color_space {} clamping_type {}", (int)color_space, (int)clamping_type);
 
-    u8 mb_segment_tree_probs[3] = { 255, 255, 255 };
-
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.3 "Segment-Based Adjustments"
-    u8 update_mb_segmentation_map = false;
-
     u8 segmentation_enabled = TRY(L(1));
     dbgln_if(WEBP_DEBUG, "segmentation_enabled {}", (int)segmentation_enabled);
 
-    u8 update_segment_feature_data = false;
-    enum class SegmentFeatureMode {
-        // Spec 19.2 says 0 is delta, 1 absolute; spec 9.3 has it the other way round. 19.2 is correct.
-        DeltaValueMode = 0,
-        AbsoluteValueMode = 1,
-    };
-    auto segment_feature_mode = SegmentFeatureMode::DeltaValueMode;
-
-    struct SegmentData {
-        Optional<i8> quantizer_update_value;
-        Optional<i8> loop_filter_update_value;
-    };
-    SegmentData segment_data[4] = {};
-
-    if (segmentation_enabled) {
-        // "update_segmentation()" in 19.2
-
-        update_mb_segmentation_map = TRY(L(1));
-        update_segment_feature_data = TRY(L(1));
-
-        dbgln_if(WEBP_DEBUG, "update_mb_segmentation_map {} update_segment_feature_data {}",
-            update_mb_segmentation_map, update_segment_feature_data);
-
-        if (update_segment_feature_data) {
-            segment_feature_mode = static_cast<SegmentFeatureMode>(TRY(L(1)));
-            dbgln_if(WEBP_DEBUG, "segment_feature_mode {}", (int)segment_feature_mode);
-
-            for (int i = 0; i < 4; ++i) {
-                u8 quantizer_update = TRY(L(1));
-                dbgln_if(WEBP_DEBUG, "quantizer_update {}", quantizer_update);
-                if (quantizer_update) {
-                    i8 quantizer_update_value = TRY(L_signed(7));
-                    dbgln_if(WEBP_DEBUG, "quantizer_update_value {}", quantizer_update_value);
-                    segment_data[i].quantizer_update_value = quantizer_update_value;
-                }
-            }
-            for (int i = 0; i < 4; ++i) {
-                u8 loop_filter_update = TRY(L(1));
-                dbgln_if(WEBP_DEBUG, "loop_filter_update {}", loop_filter_update);
-                if (loop_filter_update) {
-                    i8 loop_filter_update_value = TRY(L_signed(6));
-                    dbgln_if(WEBP_DEBUG, "loop_filter_update_value {}", loop_filter_update_value);
-                    segment_data[i].loop_filter_update_value = loop_filter_update_value;
-                }
-            }
-        }
-
-        if (update_mb_segmentation_map) {
-            // This reads mb_segment_tree_probs for https://datatracker.ietf.org/doc/html/rfc6386#section-10.
-            for (int i = 0; i < 3; ++i) {
-                u8 segment_prob_update = TRY(L(1));
-                dbgln_if(WEBP_DEBUG, "segment_prob_update {}", segment_prob_update);
-                if (segment_prob_update) {
-                    u8 segment_prob = TRY(L(8));
-                    dbgln_if(WEBP_DEBUG, "segment_prob {}", segment_prob);
-                    mb_segment_tree_probs[i] = segment_prob;
-                }
-            }
-        }
-    }
+    Segmentation segmentation;
+    if (segmentation_enabled)
+        segmentation = TRY(decoded_VP8_frame_header_segmentation(decoder));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.4 "Loop Filter Type and Levels"
     u8 filter_type = TRY(L(1));
@@ -322,7 +361,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
         if (is_present) {
             i8 delta = TRY(L_signed(4));
-            dbgln_if(WEBP_DEBUG, "{}_delta {}", name, delta);
+            dbgln_if(WEBP_DEBUG, "{} {}", name, delta);
             if (y_ac_qi + delta < 0)
                 return Error::from_string_literal("WebPImageDecoderPlugin: got negative quantization index");
             *destination = delta;
@@ -477,14 +516,14 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
             int segment_id = 0;
             bool skip_coefficients = false;
 
-            if (update_mb_segmentation_map) {
+            if (segmentation.update_metablock_segmentation_map) {
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
                 const TreeDecoder::tree_index mb_segment_tree [2 * (4 - 1)] = {
                      2,  4, /* root: "0", "1" subtrees */
                     -0, -1, /* "00" = 0th value, "01" = 1st value */
                     -2, -3  /* "10" = 2nd value, "11" = 3rd value */
                 };
-                segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, mb_segment_tree_probs));
+                segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, segmentation.metablock_segment_tree_probabilities));
             }
             if (mb_no_skip_coeff) {
                 u8 mb_skip_coeff = TRY(B(prob_skip_false));
@@ -827,14 +866,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //   (or, alternatively, the value is clamped to 132 at most)
 
                         u8 y_ac_base = quantization_indices.y_ac;
-                        if (update_mb_segmentation_map) {
-                            auto const& data = segment_data[metadata.segment_id];
-                            if (data.quantizer_update_value.has_value()) {
-                                if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
-                                    y_ac_base += data.quantizer_update_value.value();
-                                else
-                                    y_ac_base = data.quantizer_update_value.value();
-                            }
+                        if (segmentation.update_metablock_segmentation_map) {
+                            if (segmentation.segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
+                                y_ac_base += segmentation.quantizer_update_value[metadata.segment_id];
+                            else
+                                y_ac_base = segmentation.quantizer_update_value[metadata.segment_id];
                         }
 
                         u8 dequantization_index;
@@ -1223,14 +1259,11 @@ clear_flags:
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-15.4 "Calculation of Control Parameters"
                 (void)sharpness_level; // Constant per frame
                 u8 mb_loop_filter_level = loop_filter_level;
-                if (update_mb_segmentation_map) {
-                    auto const& data = segment_data[metadata.segment_id];
-                    if (data.loop_filter_update_value.has_value()) {
-                        if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
-                            mb_loop_filter_level += data.loop_filter_update_value.value();
-                        else
-                            mb_loop_filter_level = data.loop_filter_update_value.value();
-                    }
+                if (segmentation.update_metablock_segmentation_map) {
+                    if (segmentation.segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
+                        mb_loop_filter_level += segmentation.loop_filter_update_value[metadata.segment_id];
+                    else
+                        mb_loop_filter_level = segmentation.loop_filter_update_value[metadata.segment_id];
                     mb_loop_filter_level = clamp(mb_loop_filter_level, 0, 63); // in calculate_filter_parameters (spec text doesn't mention this)
                 }
 
