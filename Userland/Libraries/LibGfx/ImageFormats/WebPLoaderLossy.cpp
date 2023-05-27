@@ -83,6 +83,15 @@ ErrorOr<VP8Header> decode_webp_chunk_VP8_header(ReadonlyBytes vp8_data)
 
 namespace {
 
+// Reads n bits followed by a sign bit (0: positive, 1: negative).
+ErrorOr<i8> read_signed_literal(BooleanDecoder& decoder, u8 n)
+{
+    i8 i = TRY(decoder.read_literal(n));
+    if (TRY(decoder.read_literal(1)))
+        i = -i;
+    return i;
+}
+
 // https://datatracker.ietf.org/doc/html/rfc6386#section-8.1 "Tree Coding Implementation"
 class TreeDecoder {
 public:
@@ -155,15 +164,8 @@ struct Segmentation {
 ErrorOr<Segmentation> decode_VP8_frame_header_segmentation(BooleanDecoder &decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
-    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
-
-    // Reads n bits followed by a sign bit (0: positive, 1: negative).
-    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
-        i32 i = TRY(decoder.read_literal(n));
-        if (TRY(decoder.read_literal(1)))
-            i = -i;
-        return i;
-    };
+    auto L = [&decoder](u8 n) { return decoder.read_literal(n); };
+    auto L_signed = [&decoder](u8 n) { return read_signed_literal(decoder, n); };
 
     // Corresponds to "update_segmentation()" in 19.2
     Segmentation segmentation;
@@ -229,15 +231,8 @@ struct QuantizationIndices {
 ErrorOr<QuantizationIndices> decode_VP8_frame_header_quantization_indices(BooleanDecoder &decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
-    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
-
-    // Reads n bits followed by a sign bit (0: positive, 1: negative).
-    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
-        i32 i = TRY(decoder.read_literal(n));
-        if (TRY(decoder.read_literal(1)))
-            i = -i;
-        return i;
-    };
+    auto L = [&decoder](u8 n) { return decoder.read_literal(n); };
+    auto L_signed = [&decoder](u8 n) { return read_signed_literal(decoder, n); };
 
     // Corresponds to "quant_indices()" in 19.2
     QuantizationIndices quantization_indices;
@@ -277,15 +272,8 @@ struct LoopFilterAdjustment {
 ErrorOr<LoopFilterAdjustment> decode_VP8_frame_header_loop_filter_adjustment(BooleanDecoder &decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
-    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
-
-    // Reads n bits followed by a sign bit (0: positive, 1: negative).
-    auto L_signed = [&decoder](u32 n) -> ErrorOr<i32> {
-        i32 i = TRY(decoder.read_literal(n));
-        if (TRY(decoder.read_literal(1)))
-            i = -i;
-        return i;
-    };
+    auto L = [&decoder](u8 n) { return decoder.read_literal(n); };
+    auto L_signed = [&decoder](u8 n) { return read_signed_literal(decoder, n); };
 
     // Corresponds to "mb_lf_adjustments()" in 19.2.
     LoopFilterAdjustment adjustment;
@@ -324,7 +312,7 @@ using CoefficientProbabilities =  Prob[4][8][3][num_dct_tokens - 1];
 ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& decoder, CoefficientProbabilities coefficient_probabilities)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
-    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+    auto L = [&decoder](u8 n) { return decoder.read_literal(n); };
     auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
     // Corresponds "token_prob_update()" in 19.2.
@@ -377,7 +365,7 @@ struct FrameHeader {
 ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
-    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
+    auto L = [&decoder](u8 n) { return decoder.read_literal(n); };
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
     FrameHeader header;
