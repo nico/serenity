@@ -344,26 +344,85 @@ ErrorOr<void> decode_VP8_frame_header_coefficient_probabilities(BooleanDecoder& 
     return {};
 }
 
-#if 0
+// https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
+// "The first is a flag (filter_type) selecting the type of filter (normal or simple)"
+enum class FilterType {
+    Normal = 0,
+    Simple = 1,
+};
+
 // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
 struct FrameHeader {
-    ColorSpaceAndPixelType color_space;
-    ClampingSpecification clamping_specification;
+    ColorSpaceAndPixelType color_space {};
+    ClampingSpecification clamping_type {};
+
+    bool is_segmentation_enabled {};
+    Segmentation segmentation {};
+
+    FilterType filter_type {};
+    u8 loop_filter_level {};
+    u8 sharpness_level {};
+    LoopFilterAdjustment loop_filter_adjustment {};
+
+    u8 number_of_dct_partitions {};
+
+    QuantizationIndices quantization_indices {};
+
+    CoefficientProbabilities coefficient_probabilities;
+
+    bool enable_skipping_of_metablocks_containing_only_zero_coefficients {};
+    u8 probability_skip_false;
 };
 
 ErrorOr<FrameHeader> decode_VP8_frame_header(BooleanDecoder& decoder)
 {
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
     auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
-    auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
-    // In VP8 key_frames only, but webp files only have key frames.
-    auto color_space = static_cast<ColorSpaceAndPixelType>(TRY(L(1)));
-    auto clamping_type = static_cast<ClampingSpecification>(TRY(L(1)));
-    dbgln_if(WEBP_DEBUG, "color_space {} clamping_type {}", (int)color_space, (int)clamping_type);
+    FrameHeader header;
+
+    // In the VP8 spec, this is in an `if (key_frames)`, but webp files only have key frames.
+    header.color_space = ColorSpaceAndPixelType { TRY(L(1)) };
+    header.clamping_type = ClampingSpecification { TRY(L(1)) };
+    dbgln_if(WEBP_DEBUG, "color_space {} clamping_type {}", (int)header.color_space, (int)header.clamping_type);
+
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.3 "Segment-Based Adjustments"
+    header.is_segmentation_enabled = TRY(L(1));
+    dbgln_if(WEBP_DEBUG, "segmentation_enabled {}", header.is_segmentation_enabled);
+
+    if (header.is_segmentation_enabled)
+        header.segmentation = TRY(decode_VP8_frame_header_segmentation(decoder));
+
+    header.filter_type = FilterType { TRY(L(1)) };
+    header.loop_filter_level = TRY(L(6));
+    header.sharpness_level = TRY(L(3));
+    dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", (int)header.filter_type, header.loop_filter_level, header.sharpness_level);
+
+    header.loop_filter_adjustment = TRY(decode_VP8_frame_header_loop_filter_adjustment(decoder));
+
+    u8 log2_nbr_of_dct_partitions = TRY(L(2));
+    dbgln_if(WEBP_DEBUG, "log2_nbr_of_dct_partitions {}", log2_nbr_of_dct_partitions);
+    header.number_of_dct_partitions = 1 << log2_nbr_of_dct_partitions;
+
+    header.quantization_indices = TRY(decode_VP8_frame_header_quantization_indices(decoder));
+
+    u8 refresh_entropy_probs = TRY(L(1)); // Has no effect in webp files.
+    dbgln_if(WEBP_DEBUG, "refresh_entropy_probs {}", refresh_entropy_probs);
+
+    memcpy(header.coefficient_probabilities, default_coeff_probs, sizeof(header.coefficient_probabilities));
+    TRY(decode_VP8_frame_header_coefficient_probabilities(decoder, header.coefficient_probabilities));
+
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.11 "Remaining Frame Header Data (Key Frame)"
+    header.enable_skipping_of_metablocks_containing_only_zero_coefficients = TRY(L(1));
+    dbgln_if(WEBP_DEBUG, "mb_no_skip_coeff {}", header.enable_skipping_of_metablocks_containing_only_zero_coefficients);
+    if (header.enable_skipping_of_metablocks_containing_only_zero_coefficients) {
+        header.probability_skip_false = TRY(L(8));
+        dbgln_if(WEBP_DEBUG, "prob_skip_false {}", header.probability_skip_false);
+    }
+
+    return header;
 }
-#endif
 
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
 {
@@ -376,78 +435,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream} , vp8_header.lossy_data.size() * 8));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-19 "Annex A: Bitstream Syntax"
-    auto L = [&decoder](u32 n) { return decoder.read_literal(n); };
     auto B = [&decoder](u8 prob) { return decoder.read_bool(prob); };
 
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-19.2 "Frame Header"
-    auto color_space = ColorSpaceAndPixelType { TRY(L(1)) };
-    auto clamping_type = ClampingSpecification { TRY(L(1)) };
-
-    dbgln_if(WEBP_DEBUG, "color_space {} clamping_type {}", (int)color_space, (int)clamping_type);
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.3 "Segment-Based Adjustments"
-    u8 segmentation_enabled = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "segmentation_enabled {}", (int)segmentation_enabled);
-
-    Segmentation segmentation;
-    if (segmentation_enabled)
-        segmentation = TRY(decode_VP8_frame_header_segmentation(decoder));
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.4 "Loop Filter Type and Levels"
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
-    // "The first is a flag (filter_type) selecting the type of filter (normal or simple)"
-    enum class FilterType {
-        Normal = 0,
-        Simple = 1,
-    };
-    auto filter_type = FilterType(TRY(L(1)));
-    u8 loop_filter_level = TRY(L(6));
-    u8 sharpness_level = TRY(L(3));
-    dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", (int)filter_type, loop_filter_level, sharpness_level);
-
-    LoopFilterAdjustment loop_filter_adjustment = TRY(decode_VP8_frame_header_loop_filter_adjustment(decoder));
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.5 "Token Partition and Partition Data Offsets"
-    u8 log2_nbr_of_dct_partitions = TRY(L(2));
-    dbgln_if(WEBP_DEBUG, "log2_nbr_of_dct_partitions {}", log2_nbr_of_dct_partitions);
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-4 says:
-    // "If there is more than one partition
-    //  for these coefficients, the sizes of the partitions -- except the
-    //  last partition -- in bytes are also present in the bitstream right
-    //  after the above first partition."
-    // 19.2 completely omits them for that reason.
-    // Let's read them now.
-    u8 number_of_dct_partitions = 1 << log2_nbr_of_dct_partitions;
-
-    // XXX read partition offsets
-    auto data = vp8_header.second_partition;
-    u32 offset = vp8_header.size_of_first_partition;
-    for (size_t i = 0; i < number_of_dct_partitions - 1; ++i) {
-        u32 size_of_partition = data[3 * i + 0] | (data[3 * i + 1] << 8) | (data[3 * i + 2] << 16);
-        dbgln_if(WEBP_DEBUG, "offset {} size_of_partition {}", offset, size_of_partition);
-        offset += size_of_partition;
-    }
-
-    auto quantization_indices = TRY(decode_VP8_frame_header_quantization_indices(decoder));
-
-    // Always key_frame in webp.
-    u8 refresh_entropy_probs = TRY(L(1));
-    dbgln_if(WEBP_DEBUG, "refresh_entropy_probs {}", refresh_entropy_probs);
-
-    Prob coeff_probs[4][8][3][num_dct_tokens - 1];
-    memcpy(coeff_probs, default_coeff_probs, sizeof(coeff_probs));
-    TRY(decode_VP8_frame_header_coefficient_probabilities(decoder, coeff_probs));
-
-    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.11 "Remaining Frame Header Data (Key Frame)"
-    u8 mb_no_skip_coeff = TRY(L(1));
-    u8 prob_skip_false;
-    dbgln_if(WEBP_DEBUG, "mb_no_skip_coeff {}", mb_no_skip_coeff);
-    if (mb_no_skip_coeff) {
-        prob_skip_false = TRY(L(8));
-        dbgln_if(WEBP_DEBUG, "prob_skip_false {}", prob_skip_false);
-    }
-    // Non-keyframes read prob_intra etc here.
+    auto header = TRY(decode_VP8_frame_header(decoder));
+    auto const& segmentation = header.segmentation;
+    auto const& quantization_indices = header.quantization_indices;
+    auto const& loop_filter_adjustment = header.loop_filter_adjustment;
 
     // "This completes the layout of the frame header.  The remainder of the
     //  first data partition consists of macroblock-level prediction data."
@@ -562,8 +555,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                 };
                 metadata.segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, segmentation.metablock_segment_tree_probabilities));
             }
-            if (mb_no_skip_coeff)
-                metadata.skip_coefficients = TRY(B(prob_skip_false));
+            if (header.enable_skipping_of_metablocks_containing_only_zero_coefficients)
+                metadata.skip_coefficients = TRY(B(header.probability_skip_false));
 
             const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
             int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
@@ -607,7 +600,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
     // Done with the first partition!
 
-    if (number_of_dct_partitions > 1)
+    if (header.number_of_dct_partitions > 1)
         return Error::from_string_literal("WebPImageDecoderPlugin: decoding lossy webps with more than one dct partition not yet implemented");
 
 
@@ -837,9 +830,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         int token;
                         if (last_decoded_value == DCT_0)
-                            token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky], 2));
+                            token = TRY(TreeDecoder(coeff_tree).read(decoder, header.coefficient_probabilities[plane][band][tricky], 2));
                         else
-                            token = TRY(TreeDecoder(coeff_tree).read(decoder, coeff_probs[plane][band][tricky]));
+                            token = TRY(TreeDecoder(coeff_tree).read(decoder, header.coefficient_probabilities[plane][band][tricky]));
 
                         if (token == dct_eob)
                             break;
@@ -1289,8 +1282,8 @@ clear_flags:
                 // FIXME: insert loop filtering here
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-15.4 "Calculation of Control Parameters"
-                (void)sharpness_level; // Constant per frame
-                u8 mb_loop_filter_level = loop_filter_level;
+                (void)header.sharpness_level; // Constant per frame
+                u8 mb_loop_filter_level = header.loop_filter_level;
                 if (segmentation.update_metablock_segmentation_map) {
                     if (segmentation.segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
                         mb_loop_filter_level += segmentation.loop_filter_update_value[metadata.segment_id];
