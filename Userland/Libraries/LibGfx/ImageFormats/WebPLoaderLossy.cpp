@@ -143,7 +143,7 @@ enum class SegmentFeatureMode {
 
 };
 struct Segmentation {
-    bool update_metablock_segmentation_map;
+    bool update_metablock_segmentation_map { false };
     SegmentFeatureMode segment_feature_mode { SegmentFeatureMode::DeltaValueMode };
 
     i8 quantizer_update_value[4] {};
