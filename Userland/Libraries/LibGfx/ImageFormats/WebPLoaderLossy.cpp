@@ -394,10 +394,16 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         segmentation = TRY(decode_VP8_frame_header_segmentation(decoder));
 
     // https://datatracker.ietf.org/doc/html/rfc6386#section-9.4 "Loop Filter Type and Levels"
-    u8 filter_type = TRY(L(1));
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-15 "Loop Filter"
+    // "The first is a flag (filter_type) selecting the type of filter (normal or simple)"
+    enum class FilterType {
+        Normal = 0,
+        Simple = 1,
+    };
+    auto filter_type = FilterType(TRY(L(1)));
     u8 loop_filter_level = TRY(L(6));
     u8 sharpness_level = TRY(L(3));
-    dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", filter_type, loop_filter_level, sharpness_level);
+    dbgln_if(WEBP_DEBUG, "filter_type {} loop_filter_level {} sharpness_level {}", (int)filter_type, loop_filter_level, sharpness_level);
 
     LoopFilterAdjustment loop_filter_adjustment = TRY(decode_VP8_frame_header_loop_filter_adjustment(decoder));
 
