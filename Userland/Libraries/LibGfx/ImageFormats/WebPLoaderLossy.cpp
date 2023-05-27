@@ -521,10 +521,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     struct MacroblockMetadata {
         // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
         // Read only if `update_mb_segmentation_map` is set.
-        int segment_id; // 0, 1, 2, or 3. Fits in two bits.
+        int segment_id { 0 }; // 0, 1, 2, or 3. Fits in two bits.
 
         // https://datatracker.ietf.org/doc/html/rfc6386#section-11.1 "mb_skip_coeff"
-        bool skip_coefficients;
+        bool skip_coefficients { false };
 
         intra_mbmode intra_y_mode;
         intra_mbmode uv_mode;
@@ -539,9 +539,6 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
         for (int mb_x = 0; mb_x < macroblock_width; ++mb_x) {
             MacroblockMetadata metadata;
 
-            int segment_id = 0;
-            bool skip_coefficients = false;
-
             if (segmentation.update_metablock_segmentation_map) {
                 // https://datatracker.ietf.org/doc/html/rfc6386#section-10 "Segment-Based Feature Adjustments"
                 const TreeDecoder::tree_index mb_segment_tree [2 * (4 - 1)] = {
@@ -549,15 +546,10 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     -0, -1, /* "00" = 0th value, "01" = 1st value */
                     -2, -3  /* "10" = 2nd value, "11" = 3rd value */
                 };
-                segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, segmentation.metablock_segment_tree_probabilities));
+                metadata.segment_id = TRY(TreeDecoder(mb_segment_tree).read(decoder, segmentation.metablock_segment_tree_probabilities));
             }
-            if (mb_no_skip_coeff) {
-                u8 mb_skip_coeff = TRY(B(prob_skip_false));
-                skip_coefficients = mb_skip_coeff;
-            }
-
-            metadata.segment_id = segment_id;
-            metadata.skip_coefficients = skip_coefficients;
+            if (mb_no_skip_coeff)
+                metadata.skip_coefficients = TRY(B(prob_skip_false));
 
             const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
             int intra_y_mode = TRY(TreeDecoder(kf_ymode_tree).read(decoder, kf_ymode_prob));
