@@ -581,6 +581,37 @@ i16 dequantize_value(i16 value, bool is_dc, QuantizationIndices const& quantizat
     return dequantization_factor * value;
 }
 
+ErrorOr<i16> coefficient_value_for_token(BooleanDecoder& decoder, u8 token)
+{
+    i16 v = (i16)token; // For DCT_0 to DCT4
+
+    if (token >= dct_cat1 && token <= dct_cat6) {
+        static int constexpr starts[] = { 5, 7, 11, 19, 35, 67 };
+        static int constexpr bits[] = { 1, 2, 3, 4, 5, 11 };
+
+        static Prob constexpr Pcat1[] = { 159 };
+        static Prob constexpr Pcat2[] = { 165, 145 };
+        static Prob constexpr Pcat3[] = { 173, 148, 140 };
+        static Prob constexpr Pcat4[] = { 176, 155, 140, 135 };
+        static Prob constexpr Pcat5[] = { 180, 157, 141, 134, 130 };
+        static Prob constexpr Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129 };
+        static Prob const* const Pcats[] = { Pcat1, Pcat2, Pcat3, Pcat4, Pcat5, Pcat6 };
+
+        v = 0;
+        for (int i = 0; i < bits[token - dct_cat1]; ++i)
+            v = (v << 1) | TRY(decoder.read_bool(Pcats[token - dct_cat1][i]));
+
+        v += starts[token - dct_cat1];
+    }
+
+    if (v) {
+        if (TRY(decoder.read_bool(128)))
+            v = -v;
+    }
+
+    return v;
+}
+
 }
 
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
@@ -806,33 +837,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         if (token == dct_eob)
                             break;
 
-                        i16 v = (i16)token; // For DCT_0 to DCT4
-
-                        if (token >= dct_cat1 && token <= dct_cat6) {
-                            int starts[] = { 5, 7, 11, 19, 35, 67 };
-                            int bits[] = { 1, 2, 3, 4, 5, 11 };
-
-                            Prob const Pcat1[] = { 159 };
-                            Prob const Pcat2[] = { 165, 145 };
-                            Prob const Pcat3[] = { 173, 148, 140 };
-                            Prob const Pcat4[] = { 176, 155, 140, 135 };
-                            Prob const Pcat5[] = { 180, 157, 141, 134, 130 };
-                            Prob const Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129 };
-                            Prob const* const Pcats[] = { Pcat1, Pcat2, Pcat3, Pcat4, Pcat5, Pcat6 };
-
-                            v = 0;
-                            for (int i = 0; i < bits[token - dct_cat1]; ++i)
-                                v = (v << 1) | TRY(decoder.read_bool(Pcats[token - dct_cat1][i]));
-
-                            v += starts[token - dct_cat1];
-                        }
+                        i16 v = TRY(coefficient_value_for_token(decoder, token));
 
                         if (v) {
                             // Subblock has non-0 coefficients. Store that, so that `tricky` on the next subblock is initialized correctly.
                             subblock_has_nonzero_coefficients = true;
-
-                            if (TRY(decoder.read_bool(128)))
-                                v = -v;
                         }
 
                         // last_decoded_value is used for setting `tricky`. It needs to be set to the last decoded token, not to the last dequantized value.
