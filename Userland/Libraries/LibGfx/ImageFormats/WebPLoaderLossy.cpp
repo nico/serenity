@@ -847,7 +847,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         // last_decoded_value is used for setting `tricky`. It needs to be set to the last decoded token, not to the last dequantized value.
                         last_decoded_value = v;
 
-                        i16 dequantized_value = dequantize_value(v, j == 0,quantization_indices, segmentation, metadata.segment_id, is_y2, is_u || is_v);
+                        i16 dequantized_value = dequantize_value(v, j == 0, quantization_indices, segmentation, metadata.segment_id, is_y2, is_u || is_v);
 
                         static int constexpr Zigzag[] = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
                         if (is_y2)
