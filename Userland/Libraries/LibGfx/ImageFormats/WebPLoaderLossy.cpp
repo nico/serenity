@@ -504,6 +504,83 @@ ErrorOr<Vector<MacroblockMetadata>> decode_VP8_macroblock_metadata(BooleanDecode
     return macroblock_metadata;
 }
 
+int plane_index(bool is_y2, bool is_u, bool is_v, bool have_y2)
+{
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-13.3 "Token Probabilities"
+    // "o  0 - Y beginning at coefficient 1 (i.e., Y after Y2)
+    //  o  1 - Y2
+    //  o  2 - U or V
+    //  o  3 - Y beginning at coefficient 0 (i.e., Y in the absence of Y2)."
+    if (is_y2)
+        return 1;
+    if (is_u || is_v)
+        return 2;
+    if (have_y2)
+        return 0;
+    return 3;
+}
+
+i16 dequantize_value(i16 value, bool is_dc, QuantizationIndices const& quantization_indices, Segmentation const& segmentation, int segment_id, bool is_y2, bool is_u_or_v)
+{
+    // https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
+    // "before inverting the transform, each decoded coefficient
+    //  is multiplied by one of six dequantization factors, the choice of
+    //  which depends on the plane (Y, chroma = U or V, Y2) and coefficient
+    //  position (DC = coefficient 0, AC = coefficients 1-15).  The six
+    //  values are specified using 7-bit indices into six corresponding fixed
+    //  tables (the tables are given in Section 14)."
+    // Section 14 then lists two (!) fixed tables (which are in WebPLoaderLossyTables.h)
+
+    // "Lookup values from the above two tables are directly used in the DC
+    //  and AC coefficients in Y1, respectively.  For Y2 and chroma, values
+    //  from the above tables undergo either scaling or clamping before the
+    //  multiplies.  Details regarding these scaling and clamping processes
+    //  can be found in related lookup functions in dixie.c (Section 20.4)."
+    // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
+    // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
+    // * Also for y2, ac_qlookup is at least 8 for lower table entries (XXX!)
+    // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
+    //   (or, alternatively, the value is clamped to 132 at most)
+
+    u8 y_ac_base = quantization_indices.y_ac;
+    if (segmentation.update_metablock_segmentation_map) {
+        if (segmentation.segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
+            y_ac_base += segmentation.quantizer_update_value[segment_id];
+        else
+            y_ac_base = segmentation.quantizer_update_value[segment_id];
+    }
+
+    u8 dequantization_index;
+    if (is_y2)
+        dequantization_index = y_ac_base + (is_dc ? quantization_indices.y2_dc_delta : quantization_indices.y2_ac_delta);
+    else if (is_u_or_v)
+        dequantization_index = y_ac_base + (is_dc ? quantization_indices.uv_dc_delta : quantization_indices.uv_ac_delta);
+    else
+        dequantization_index = is_dc ? (y_ac_base + quantization_indices.y_dc_delta) : y_ac_base;
+
+    // clamp index
+    if ((is_u_or_v) && is_dc)
+        dequantization_index = min(dequantization_index, 117);
+    else
+        dequantization_index = min(dequantization_index, 127);
+
+    // "the multiplies are computed and stored using 16-bit signed integers."
+    i16 dequantization_factor;
+    if (is_dc)
+        dequantization_factor = (i16)dc_qlookup[dequantization_index];
+    else
+        dequantization_factor = (i16)ac_qlookup[dequantization_index];
+
+    if (is_y2) {
+        if (is_dc)
+            dequantization_factor *= 2;
+        else
+            dequantization_factor = (dequantization_factor * 155) / 100;
+    }
+
+    return dequantization_factor * value;
+}
+
 }
 
 ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& vp8_header, bool include_alpha_channel)
@@ -659,25 +736,8 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.3 "Token Probabilities"
 
                         // "Working from the outside in, the outermost dimension is indexed by
-                        //  the type of plane being decoded:
-                        //  o  0 - Y beginning at coefficient 1 (i.e., Y after Y2)
-                        //  o  1 - Y2
-                        //  o  2 - U or V
-                        //  o  3 - Y beginning at coefficient 0 (i.e., Y in the absence of Y2)."
-                        bool is_y_after_y2 = i >= 1 && i <= 16 && have_y2;
-                        bool is_u_or_v = i > 16;
-                        bool is_y_without_y2 = i >= 1 && i <= 16 && 1 && !have_y2;
-                        int plane;
-                        if (is_y_after_y2)
-                            plane = 0;
-                        else if (is_y2)
-                            plane = 1;
-                        else if (is_u_or_v)
-                            plane = 2;
-                        else {
-                            VERIFY(is_y_without_y2);
-                            plane = 3;
-                        }
+                        //  the type of plane being decoded"
+                        int plane = plane_index(is_y2, is_u, is_v, have_y2);
 
                         // "The next dimension is selected by the position of the coefficient
                         //  being decoded.  That position, c, steps by ones up to 15, starting
@@ -707,27 +767,28 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  predictors above and to the left of the image are simply taken to be
                         //  empty -- that is, taken to contain no non-zero coefficients."
                         if (j == firstCoeff) {
+                            bool was_left_nonzero, was_above_nonzero;
                             if (is_y2) {
-                                if (y2_left) ++tricky;
-                                if (y2_above[mb_x]) ++tricky;
+                                was_left_nonzero = y2_left;
+                                was_above_nonzero = y2_above[mb_x];
                             } else if (is_u) {
-                                if (u_left[sub_y]) ++tricky;
-                                if (u_above[mb_x * 2 + sub_x]) ++tricky;
+                                was_left_nonzero = u_left[sub_y];
+                                was_above_nonzero = u_above[mb_x * 2 + sub_x];
                             } else if (is_v) {
-                                if (v_left[sub_y]) ++tricky;
-                                if (v_above[mb_x * 2 + sub_x]) ++tricky;
+                                was_left_nonzero = v_left[sub_y];
+                                was_above_nonzero = v_above[mb_x * 2 + sub_x];
                             } else { // Y
-                                if (y_left[sub_y]) ++tricky;
-                                if (y_above[mb_x * 4 + sub_x]) ++tricky;
+                                was_left_nonzero = y_left[sub_y];
+                                was_above_nonzero = y_above[mb_x * 4 + sub_x];
                             }
+                            tricky = static_cast<int>(was_left_nonzero) + static_cast<int>(was_above_nonzero);
                         }
-
                         // "Beyond the first coefficient, the context index is determined by the
                         //  absolute value of the most recently decoded coefficient (necessarily
                         //  within the current block) and is 0 if the last coefficient was a
                         //  zero, 1 if it was plus or minus one, and 2 if its absolute value
                         //  exceeded one."
-                        if (j > firstCoeff) {
+                        else {
                             if (last_decoded_value == 0)
                                 tricky = 0;
                             else if (last_decoded_value == 1 || last_decoded_value == -1)
@@ -741,16 +802,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         //  the first branch, since it is not possible for dct_eob to follow a
                         //  DCT_0."
 
-                        int token;
-                        if (last_decoded_value == DCT_0)
-                            token = TRY(tree_decode(decoder, COEFFICIENT_TREE, header.coefficient_probabilities[plane][band][tricky], 2));
-                        else
-                            token = TRY(tree_decode(decoder, COEFFICIENT_TREE, header.coefficient_probabilities[plane][band][tricky]));
-
+                        u8 token = TRY(tree_decode(decoder, COEFFICIENT_TREE, header.coefficient_probabilities[plane][band][tricky], last_decoded_value == DCT_0 ? 2 : 0));
                         if (token == dct_eob)
                             break;
 
-                        int v = (int)token; // For DCT_0 to DCT4
+                        i16 v = (i16)token; // For DCT_0 to DCT4
 
                         if (token >= dct_cat1 && token <= dct_cat6) {
                             int starts[] = { 5, 7, 11, 19, 35, 67 };
@@ -782,63 +838,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                         // last_decoded_value is used for setting `tricky`. It needs to be set to the last decoded token, not to the last dequantized value.
                         last_decoded_value = v;
 
-                        // https://datatracker.ietf.org/doc/html/rfc6386#section-9.6 "Dequantization Indices"
-                        // "before inverting the transform, each decoded coefficient
-                        //  is multiplied by one of six dequantization factors, the choice of
-                        //  which depends on the plane (Y, chroma = U or V, Y2) and coefficient
-                        //  position (DC = coefficient 0, AC = coefficients 1-15).  The six
-                        //  values are specified using 7-bit indices into six corresponding fixed
-                        //  tables (the tables are given in Section 14)."
-                        // Section 14 then lists two fixed tables (which are in WebPLoaderLossyTables.h)
-
-                        // "Lookup values from the above two tables are directly used in the DC
-                        //  and AC coefficients in Y1, respectively.  For Y2 and chroma, values
-                        //  from the above tables undergo either scaling or clamping before the
-                        //  multiplies.  Details regarding these scaling and clamping processes
-                        //  can be found in related lookup functions in dixie.c (Section 20.4)."
-                        // Apparently spec writing became too much work at this point. In section 20.4, in dequant_init():
-                        // * For y2, the output (!) of dc_qlookup is multiplied by 2, the output of ac_qlookup is multiplied by 155 / 100
-                        // * Also for y2, ac_qlookup is at least 8 for lower table entries (XXX!)
-                        // * For uv, the dc_qlookup index is clamped to 117 (instead of 127 for everything else)
-                        //   (or, alternatively, the value is clamped to 132 at most)
-
-                        u8 y_ac_base = quantization_indices.y_ac;
-                        if (segmentation.update_metablock_segmentation_map) {
-                            if (segmentation.segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
-                                y_ac_base += segmentation.quantizer_update_value[metadata.segment_id];
-                            else
-                                y_ac_base = segmentation.quantizer_update_value[metadata.segment_id];
-                        }
-
-                        u8 dequantization_index;
-                        if (is_y2)
-                            dequantization_index = y_ac_base + (j == 0 ? quantization_indices.y2_dc_delta : quantization_indices.y2_ac_delta);
-                        else if (is_u_or_v)
-                            dequantization_index = y_ac_base + (j == 0 ? quantization_indices.uv_dc_delta : quantization_indices.uv_ac_delta);
-                        else
-                            dequantization_index = j == 0 ? (y_ac_base + quantization_indices.y_dc_delta) : y_ac_base;
-
-                        // clamp index
-                        if (is_u_or_v && j == 0)
-                            dequantization_index = min(dequantization_index, 117);
-                        else
-                            dequantization_index = min(dequantization_index, 127);
-
-                        // "the multiplies are computed and stored using 16-bit signed integers."
-                        i16 dequantization_factor;
-                        if (j == 0)
-                            dequantization_factor = (i16)dc_qlookup[dequantization_index];
-                        else
-                            dequantization_factor = (i16)ac_qlookup[dequantization_index];
-
-                        if (is_y2) {
-                            if (j == 0)
-                                dequantization_factor *= 2;
-                            else
-                                dequantization_factor = (dequantization_factor * 155) / 100;
-                        }
-
-                        i16 dequantized_value = dequantization_factor * (i16)v;
+                        i16 dequantized_value = dequantize_value(v, j == 0,quantization_indices, segmentation, metadata.segment_id, is_y2, is_u || is_v);
 
                         static int constexpr Zigzag[] = { 0, 1, 4, 8, 5, 2, 3, 6, 9, 12, 13, 10, 7, 11, 14, 15 };
                         if (is_y2)
