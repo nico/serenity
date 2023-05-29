@@ -916,8 +916,11 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                     int firstCoeff = have_y2 && (i >= 1 && i <= 16) ? 1 : 0;
                     i16 last_decoded_value = num_dct_tokens; // Start with an invalid value
 
-                    if (metadata.skip_coefficients)
+                    if (metadata.skip_coefficients) {
+                        //continue;
+                        return Error::from_string_literal("skip_coefficients");
                         goto clear_flags;
+                    }
 
                     for (int j = firstCoeff; j < 16; ++j) {
                         // https://datatracker.ietf.org/doc/html/rfc6386#section-13.2 "Coding of Individual Coefficient Values"
