@@ -1144,11 +1144,17 @@ void convert_yuv_to_rgb(Bitmap& bitmap, int mb_x, int mb_y, ReadonlySpan<i16> y_
     }
 }
 
-ErrorOr<void> decode_VP8_image_data(Gfx::Bitmap& bitmap, FrameHeader const& header, ReadonlyBytes data, int macroblock_width, int macroblock_height, Vector<MacroblockMetadata> const& macroblock_metadata, int start_mb_y)
+ErrorOr<void> decode_VP8_image_data(Gfx::Bitmap& bitmap, FrameHeader const& header, Vector<ReadonlyBytes> const& data_partitions, int macroblock_width, int macroblock_height, Vector<MacroblockMetadata> const& macroblock_metadata)
 {
-    FixedMemoryStream memory_stream { data };
-    BigEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
-    auto decoder = TRY(BooleanDecoder::initialize(MaybeOwned { bit_stream }, data.size() * 8));
+
+    Vector<BooleanDecoder> streams;
+
+    for (auto data : data_partitions) {
+        auto memory_stream = make<FixedMemoryStream>(data);
+        auto bit_stream = make<BigEndianInputBitStream>(move(memory_stream));
+        auto decoder = TRY(BooleanDecoder::initialize(move(bit_stream), data.size() * 8));
+        TRY(streams.try_append(move(decoder)));
+    }
 
     CoefficientReadingContext coefficient_reading_context;
     TRY(coefficient_reading_context.initialize(macroblock_width));
@@ -1168,7 +1174,9 @@ ErrorOr<void> decode_VP8_image_data(Gfx::Bitmap& bitmap, FrameHeader const& head
     for (size_t i = 0; i < predicted_v_above.size(); ++i)
         predicted_v_above[i] = 127;
 
-    for (int mb_y = start_mb_y, macroblock_index = 0; mb_y < macroblock_height; ++mb_y) {
+    for (int mb_y = 0, macroblock_index = 0; mb_y < macroblock_height; ++mb_y) {
+        BooleanDecoder& decoder = streams[mb_y % streams.size()];
+
         coefficient_reading_context.start_new_row();
 
         i16 predicted_y_left[16] { 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129, 129 };
@@ -1282,11 +1290,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     auto bitmap_format = include_alpha_channel ? BitmapFormat::BGRA8888 : BitmapFormat::BGRx8888;
     auto bitmap = TRY(Bitmap::create(bitmap_format, { macroblock_width * 16, macroblock_height * 16 }));
 
-    for (size_t i = 0; i < data_partitions.size(); ++i) {
-        int start_mb_y = (i * macroblock_height) / data_partitions.size();
-        dbgln_if(WEBP_DEBUG, "partition {} start {}", i, start_mb_y);
-        TRY(decode_VP8_image_data(*bitmap, header, data_partitions[i], macroblock_width, start_mb_y + macroblock_height / data_partitions.size(), macroblock_metadata, start_mb_y));
-    }
+    TRY(decode_VP8_image_data(*bitmap, header, data_partitions, macroblock_width, macroblock_height, macroblock_metadata));
 
     auto width = static_cast<int>(vp8_header.width);
     auto height = static_cast<int>(vp8_header.height);
