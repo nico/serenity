@@ -41,7 +41,7 @@
 
 #if !defined(AK_OS_SERENITY)
 #    include <Ladybird/HelperProcess.h>
-#    include <QCoreApplication>
+//#    include <QCoreApplication>
 #endif
 
 class HeadlessWebContentView final : public WebView::ViewImplementation {
@@ -54,7 +54,10 @@ public:
         view->m_client_state.client = TRY(WebView::WebContentClient::try_create(*view));
         (void)is_layout_test_mode;
 #else
-        auto candidate_web_content_paths = TRY(get_paths_for_helper_process("WebContent"sv));
+        //auto candidate_web_content_paths = TRY(get_paths_for_helper_process("WebContent"sv));
+        Vector<String> candidate_web_content_paths;
+        TRY(candidate_web_content_paths.try_append(TRY(String::formatted("WebContent"))));
+
         view->m_client_state.client = TRY(view->launch_web_content_process(candidate_web_content_paths, WebView::EnableCallgrindProfiling::No, is_layout_test_mode));
 #endif
 
@@ -381,9 +384,9 @@ static ErrorOr<int> run_tests(HeadlessWebContentView& view, StringView test_root
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
-#if !defined(AK_OS_SERENITY)
-    QCoreApplication app(arguments.argc, arguments.argv);
-#endif
+//#if !defined(AK_OS_SERENITY)
+    //QCoreApplication app(arguments.argc, arguments.argv);
+//#endif
     Core::EventLoop event_loop;
 
     int screenshot_timeout = 1;

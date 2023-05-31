@@ -432,6 +432,9 @@ if (BUILD_LAGOM)
             SOURCES ${LIBWEBVIEW_SOURCES} ${LIBWEBVIEW_GENERATED_SOURCES}
             LIBS LibGfx LibGUI LibIPC LibWeb)
         unset(GENERATED_SOURCES)
+
+        add_executable(headless-browser ../../Userland/Utilities/headless-browser.cpp)
+        target_link_libraries(headless-browser LibCore LibCrypto LibDiff LibFileSystem LibGemini LibGfx LibHTTP LibTLS LibWeb LibWebView LibWebSocket LibIPC LibJS LibMain)
     endif()
 
     if (NOT EMSCRIPTEN)
