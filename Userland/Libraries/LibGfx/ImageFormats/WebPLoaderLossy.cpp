@@ -511,14 +511,12 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
     dbgln_if(WEBP_DEBUG, "y_ac_qi {}", y_ac_qi);
 
     auto quantization_indices = QuantizationIndices { y_ac_qi, 0, 0, 0, 0, 0 };
-    auto read_delta = [&L, &L_signed, y_ac_qi](StringView name, i8* destination) -> ErrorOr<void> {
+    auto read_delta = [&L, &L_signed](StringView name, i8* destination) -> ErrorOr<void> {
         u8 is_present = TRY(L(1));
         dbgln_if(WEBP_DEBUG, "{}_present {}", name, is_present);
         if (is_present) {
             i8 delta = TRY(L_signed(4));
             dbgln_if(WEBP_DEBUG, "{}_delta {}", name, delta);
-            if (y_ac_qi + delta < 0)
-                return Error::from_string_literal("WebPImageDecoderPlugin: got negative quantization index");
             *destination = delta;
         }
         return {};
@@ -1083,6 +1081,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         u8 y_ac_base = quantization_indices.y_ac;
                         if (update_mb_segmentation_map) {
+dbgln("XXX surely not here");
                             auto const& data = segment_data[metadata.segment_id];
                             if (data.quantizer_update_value.has_value()) {
                                 if (segment_feature_mode == SegmentFeatureMode::DeltaValueMode)
@@ -1092,7 +1091,7 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
                             }
                         }
 
-                        u8 dequantization_index;
+                        i16 dequantization_index;
                         if (is_y2)
                             dequantization_index = y_ac_base + (j == 0 ? quantization_indices.y2_dc_delta : quantization_indices.y2_ac_delta);
                         else if (is_u_or_v)
@@ -1102,9 +1101,9 @@ ErrorOr<NonnullRefPtr<Bitmap>> decode_webp_chunk_VP8_contents(VP8Header const& v
 
                         // clamp index
                         if (is_u_or_v && j == 0)
-                            dequantization_index = min(dequantization_index, 117);
+                            dequantization_index = clamp(dequantization_index, 0, 117);
                         else
-                            dequantization_index = min(dequantization_index, 127);
+                            dequantization_index = clamp(dequantization_index, 0, 127);
 
                         // "the multiplies are computed and stored using 16-bit signed integers."
                         i16 dequantization_factor;
