@@ -1117,34 +1117,47 @@ void process_subblocks(Bytes y_output, MacroblockMetadata const& metadata, int m
 
 void convert_yuv_to_rgb(Bitmap& bitmap, int mb_x, int mb_y, ReadonlyBytes y_data, ReadonlyBytes u_data, ReadonlyBytes v_data)
 {
+    /*
+       Think of U and V samples ("x") as sitting in the middle of a 4x4 Y patch
+
+           Y   Y   Y   Y   Y   Y
+             x       x       x
+           Y   Y   Y   Y   Y   Y
+
+           Y   Y   Y   Y   Y   Y
+             x       x       x
+           Y   Y   Y   Y   Y   Y
+
+       If we want to upsample them to be on the same grid points as the Ys:
+       - The distance between two xs is 0.5 + 1 + 0.5 == 2
+       - The distance from the top-left x to the Y right to its bottom-right is (0.5,0.5). The other 3 Ys to its bottom-right are at (1.5,0.5), (0.5,1.5), (1.5,1.5).
+       - The value for the top-left Y in an Y square surrounded by four Xs by bilinear interpolation is
+         (x0,y0) is (0,0), (x1,y1) is (2,2), (x,y) is (0.5,0.5)
+         => w1 = 1.5 * 1.5 / (2 * 2) == 9/16
+            w2 = 1.5 * 0.5 / (2 * 2) == 3/16
+            w3 = 0.5 * 1.5 / (2 * 2) == 3/16
+            w4 = 0.5 * 0.5 / (2 * 2) == 1/16
+            So the top-left value is (9*x_tl + 3*x_tr + 3*bl + br) / 16. The value for the other 3 upsampled xs is the same in mirrored.
+
+       For the very top, left, bottom, and right of the image, we duplicate the border value.
+    */
+
     auto upsample = [](u8* __restrict dst, u8 const* __restrict src) {
-        for (int y = 0; y < 4; ++y) {
-            for (int x = 0; x < 4; ++x) {
-                // FIXME: Could do nicer upsampling than just nearest neighbor
-                u8 ul = src[8 * 2*y + 2*x];
-                u8 ur = src[8 * 2*y + 2*x + 1];
-                u8 bl = src[8 * (2*y + 1) + 2*x];
-                u8 br = src[8 * (2*y + 1) + 2*x + 1];
+        // XXX borders (from left / top prediction, unless very left/top, then dup)
+        for (int y = 0; y < 7; ++y) {
+            for (int x = 0; x < 7; ++x) {
+                u8 ul = src[8 * y + x];
+                u8 ur = src[8 * y + x + 1];
+                u8 bl = src[8 * (y + 1) + x];
+                u8 br = src[8 * (y + 1) + x + 1];
 
-                dst[16 *  4*y      + 4*x]     = ul;
-                dst[16 *  4*y      + 4*x + 1] = ul;
-                dst[16 * (4*y + 1) + 4*x]     = ul;
-                dst[16 * (4*y + 1) + 4*x + 1] = ul;
+                auto interp = [](u8 a, u8 , u8 , u8 ) -> u8 { return a; };
+                //auto interp = [](u8 a, u8 b, u8 c, u8 d) -> u8 { return (9*a + 3*b + 3*c + d + 8) / 16; };
 
-                dst[16 *  4*y      + 4*x + 2] = ur;
-                dst[16 *  4*y      + 4*x + 3] = ur;
-                dst[16 * (4*y + 1) + 4*x + 2] = ur;
-                dst[16 * (4*y + 1) + 4*x + 3] = ur;
-
-                dst[16 * (4*y + 2) + 4*x]     = bl;
-                dst[16 * (4*y + 2) + 4*x + 1] = bl;
-                dst[16 * (4*y + 3) + 4*x]     = bl;
-                dst[16 * (4*y + 3) + 4*x + 1] = bl;
-
-                dst[16 * (4*y + 2) + 4*x + 2] = br;
-                dst[16 * (4*y + 2) + 4*x + 3] = br;
-                dst[16 * (4*y + 3) + 4*x + 2] = br;
-                dst[16 * (4*y + 3) + 4*x + 3] = br;
+                dst[16 * (2*y + 1) + 2*x + 1] = interp(ul, ur, bl, br);
+                dst[16 * (2*y + 1) + 2*x + 2] = interp(ur, ul, br, bl);
+                dst[16 * (2*y + 2) + 2*x + 1] = interp(bl, br, ul, ur);
+                dst[16 * (2*y + 2) + 2*x + 2] = interp(br, bl, ur, ul);
             }
         }
     };
