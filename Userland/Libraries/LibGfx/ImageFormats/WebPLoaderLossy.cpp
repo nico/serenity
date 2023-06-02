@@ -1117,21 +1117,31 @@ void process_subblocks(Bytes y_output, MacroblockMetadata const& metadata, int m
 
 void convert_yuv_to_rgb(Bitmap& bitmap, int mb_x, int mb_y, ReadonlyBytes y_data, ReadonlyBytes u_data, ReadonlyBytes v_data)
 {
+    u8 const* yp = y_data.data();
+    u8 const* up = u_data.data();
+    u8 const* vp = v_data.data();
+    Gfx::ARGB32* out = bitmap.scanline(mb_y * 16) + mb_x * 16;
+
     for (int y = 0; y < 16; ++y) {
         for (int x = 0; x < 16; ++x) {
-            u8 Y = y_data[y * 16 + x];
+            u8 Y = *yp++;
 
             // FIXME: Could do nicer upsampling than just nearest neighbor
-            u8 U = u_data[(y / 2) * 8 + x / 2];
-            u8 V = v_data[(y / 2) * 8 + x / 2];
+            u8 U = *up;
+            u8 V = *vp;
+            if (x % 2) {
+                ++up;
+                ++vp;
+            }
 
             // XXX: These numbers are from the fixed-point values in libwebp's yuv.h. There's probably a better reference somewhere.
             int r = 1.1655 * Y + 1.596 * V - 222.4;
             int g = 1.1655 * Y - 0.3917 * U - 0.8129 * V + 136.0625;
             int b = 1.1655 * Y + 2.0172 * U - 276.33;
 
-            bitmap.scanline(mb_y * 16 + y)[mb_x * 16 + x] = Color(clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255)).value();
+            out[x] = Color(clamp(r, 0, 255), clamp(g, 0, 255), clamp(b, 0, 255)).value();
         }
+        out += bitmap.pitch() / sizeof(Gfx::ARGB32);
     }
 }
 
