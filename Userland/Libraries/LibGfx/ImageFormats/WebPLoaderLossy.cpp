@@ -1118,13 +1118,28 @@ void process_subblocks(Bytes y_output, MacroblockMetadata const& metadata, int m
 void convert_yuv_to_rgb(Bitmap& bitmap, int mb_x, int mb_y, ReadonlyBytes y_data, ReadonlyBytes u_data, ReadonlyBytes v_data)
 {
     auto upsample = [](u8* __restrict dst, u8 const* __restrict src) {
-        for (int y = 0; y < 8; ++y) {
-            for (int x = 0; x < 8; ++x) {
+        for (int y = 0; y < 4; ++y) {
+            for (int x = 0; x < 4; ++x) {
                 // FIXME: Could do nicer upsampling than just nearest neighbor
-                dst[16 *  2*y      + 2*x]     = src[8 * y + x];
-                dst[16 *  2*y      + 2*x + 1] = src[8 * y + x];
-                dst[16 * (2*y + 1) + 2*x]     = src[8 * y + x];
-                dst[16 * (2*y + 1) + 2*x + 1] = src[8 * y + x];
+                dst[16 *  4*y      + 4*x]     = src[8 * 2*y + 2*x];
+                dst[16 *  4*y      + 4*x + 1] = src[8 * 2*y + 2*x];
+                dst[16 * (4*y + 1) + 4*x]     = src[8 * 2*y + 2*x];
+                dst[16 * (4*y + 1) + 4*x + 1] = src[8 * 2*y + 2*x];
+
+                dst[16 *  4*y      + 4*x + 2] = src[8 * 2*y + 2*x + 1];
+                dst[16 *  4*y      + 4*x + 3] = src[8 * 2*y + 2*x + 1];
+                dst[16 * (4*y + 1) + 4*x + 2] = src[8 * 2*y + 2*x + 1];
+                dst[16 * (4*y + 1) + 4*x + 3] = src[8 * 2*y + 2*x + 1];
+
+                dst[16 * (4*y + 2) + 4*x]     = src[8 * (2*y + 1) + 2*x];
+                dst[16 * (4*y + 2) + 4*x + 1] = src[8 * (2*y + 1) + 2*x];
+                dst[16 * (4*y + 3) + 4*x]     = src[8 * (2*y + 1) + 2*x];
+                dst[16 * (4*y + 3) + 4*x + 1] = src[8 * (2*y + 1) + 2*x];
+
+                dst[16 * (4*y + 2) + 4*x + 2] = src[8 * (2*y + 1) + 2*x + 1];
+                dst[16 * (4*y + 2) + 4*x + 3] = src[8 * (2*y + 1) + 2*x + 1];
+                dst[16 * (4*y + 3) + 4*x + 2] = src[8 * (2*y + 1) + 2*x + 1];
+                dst[16 * (4*y + 3) + 4*x + 3] = src[8 * (2*y + 1) + 2*x + 1];
             }
         }
     };
