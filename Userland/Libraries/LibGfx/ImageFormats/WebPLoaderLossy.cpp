@@ -1121,25 +1121,30 @@ void convert_yuv_to_rgb(Bitmap& bitmap, int mb_x, int mb_y, ReadonlyBytes y_data
         for (int y = 0; y < 4; ++y) {
             for (int x = 0; x < 4; ++x) {
                 // FIXME: Could do nicer upsampling than just nearest neighbor
-                dst[16 *  4*y      + 4*x]     = src[8 * 2*y + 2*x];
-                dst[16 *  4*y      + 4*x + 1] = src[8 * 2*y + 2*x];
-                dst[16 * (4*y + 1) + 4*x]     = src[8 * 2*y + 2*x];
-                dst[16 * (4*y + 1) + 4*x + 1] = src[8 * 2*y + 2*x];
+                u8 ul = src[8 * 2*y + 2*x];
+                u8 ur = src[8 * 2*y + 2*x + 1];
+                u8 bl = src[8 * (2*y + 1) + 2*x];
+                u8 br = src[8 * (2*y + 1) + 2*x + 1];
 
-                dst[16 *  4*y      + 4*x + 2] = src[8 * 2*y + 2*x + 1];
-                dst[16 *  4*y      + 4*x + 3] = src[8 * 2*y + 2*x + 1];
-                dst[16 * (4*y + 1) + 4*x + 2] = src[8 * 2*y + 2*x + 1];
-                dst[16 * (4*y + 1) + 4*x + 3] = src[8 * 2*y + 2*x + 1];
+                dst[16 *  4*y      + 4*x]     = ul;
+                dst[16 *  4*y      + 4*x + 1] = ul;
+                dst[16 * (4*y + 1) + 4*x]     = ul;
+                dst[16 * (4*y + 1) + 4*x + 1] = ul;
 
-                dst[16 * (4*y + 2) + 4*x]     = src[8 * (2*y + 1) + 2*x];
-                dst[16 * (4*y + 2) + 4*x + 1] = src[8 * (2*y + 1) + 2*x];
-                dst[16 * (4*y + 3) + 4*x]     = src[8 * (2*y + 1) + 2*x];
-                dst[16 * (4*y + 3) + 4*x + 1] = src[8 * (2*y + 1) + 2*x];
+                dst[16 *  4*y      + 4*x + 2] = ur;
+                dst[16 *  4*y      + 4*x + 3] = ur;
+                dst[16 * (4*y + 1) + 4*x + 2] = ur;
+                dst[16 * (4*y + 1) + 4*x + 3] = ur;
 
-                dst[16 * (4*y + 2) + 4*x + 2] = src[8 * (2*y + 1) + 2*x + 1];
-                dst[16 * (4*y + 2) + 4*x + 3] = src[8 * (2*y + 1) + 2*x + 1];
-                dst[16 * (4*y + 3) + 4*x + 2] = src[8 * (2*y + 1) + 2*x + 1];
-                dst[16 * (4*y + 3) + 4*x + 3] = src[8 * (2*y + 1) + 2*x + 1];
+                dst[16 * (4*y + 2) + 4*x]     = bl;
+                dst[16 * (4*y + 2) + 4*x + 1] = bl;
+                dst[16 * (4*y + 3) + 4*x]     = bl;
+                dst[16 * (4*y + 3) + 4*x + 1] = bl;
+
+                dst[16 * (4*y + 2) + 4*x + 2] = br;
+                dst[16 * (4*y + 2) + 4*x + 3] = br;
+                dst[16 * (4*y + 3) + 4*x + 2] = br;
+                dst[16 * (4*y + 3) + 4*x + 3] = br;
             }
         }
     };
