@@ -13,6 +13,7 @@
 #include <LibGfx/ImageFormats/PNGWriter.h>
 #include <LibGfx/ImageFormats/PortableFormatWriter.h>
 #include <LibGfx/ImageFormats/QOIWriter.h>
+#include <LibGfx/Painter.h>
 
 ErrorOr<int> serenity_main(Main::Arguments arguments)
 {
@@ -35,6 +36,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     bool ppm_ascii = false;
     args_parser.add_option(ppm_ascii, "Convert to a PPM in ASCII", "ppm-ascii", {});
+
+    StringView replace_rgb_with;
+    args_parser.add_option(replace_rgb_with, "Path to image file used as RGB replacement", "replace-rgb-with", {}, "FILE");
 
     bool strip_alpha = false;
     args_parser.add_option(strip_alpha, "Remove alpha channel", "strip-alpha", {});
@@ -86,6 +90,44 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
                 u8 alpha = pixel >> 24;
                 pixel = 0xff000000 | (alpha << 16) | (alpha << 8) | alpha;
             }
+        }
+    }
+
+    if (!replace_rgb_with.is_empty()) {
+        auto rgb_source = TRY(Gfx::Bitmap::load_from_file(replace_rgb_with));
+
+        if (rgb_source->size() != frame->size()) {
+            auto scaled_rgb_source = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRx8888, frame->size()));
+
+            // Scale to fit, preserving aspect ratio.
+            Gfx::IntRect destination_rect { {}, scaled_rgb_source->size() };
+            Gfx::IntRect source_rect { {}, rgb_source->size() }; // FIXME: Actually preserve aspect ratio
+            Gfx::Painter painter(scaled_rgb_source);
+            painter.draw_scaled_bitmap(destination_rect, rgb_source, source_rect);
+
+            rgb_source = scaled_rgb_source;
+        }
+
+        switch (frame->format()) {
+        case Gfx::BitmapFormat::Invalid:
+        case Gfx::BitmapFormat::Indexed1:
+        case Gfx::BitmapFormat::Indexed2:
+        case Gfx::BitmapFormat::Indexed4:
+        case Gfx::BitmapFormat::Indexed8:
+            warnln("Can't --strip-alpha with indexed or invalid bitmaps");
+            return 1;
+        case Gfx::BitmapFormat::RGBA8888:
+            // No image decoder currently produces bitmaps with this format.
+            // If that ever changes, preferrably fix the image decoder to use BGRA8888 instead :)
+            // If there's a good reason for not doing that, implement support for this, I suppose.
+            warnln("Can't --strip-alpha not implemented for RGBA8888");
+            return 1;
+        case Gfx::BitmapFormat::BGRA8888:
+        case Gfx::BitmapFormat::BGRx8888: {
+            const Gfx::ARGB32* rgb = rgb_source->begin();
+            for (auto& pixel : *frame)
+                pixel = (pixel & 0xff000000) | (*rgb++ & 0xffffff);
+        }
         }
     }
 
