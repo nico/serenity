@@ -74,6 +74,7 @@
     A(FontFile)                   \
     A(FontFile2)                  \
     A(FontFile3)                  \
+    A(FontName)                   \
     A(Gamma)                      \
     A(H)                          \
     A(Height)                     \

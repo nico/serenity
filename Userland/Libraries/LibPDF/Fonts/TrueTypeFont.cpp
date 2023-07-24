@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibCore/File.h>
 #include <LibGfx/Font/OpenType/Font.h>
 #include <LibGfx/Font/ScaledFont.h>
 #include <LibGfx/Painter.h>
@@ -22,7 +23,20 @@ PDFErrorOr<void> TrueTypeFont::initialize(Document* document, NonnullRefPtr<Dict
         auto descriptor = MUST(dict->get_dict(document, CommonNames::FontDescriptor));
         if (descriptor->contains(CommonNames::FontFile2)) {
             auto font_file_stream = TRY(descriptor->get_stream(document, CommonNames::FontFile2));
+
+#if 0
+            StringBuilder out_path;
+            out_path.append("font-"sv);
+            if (descriptor->contains(CommonNames::FontName))
+                out_path.append(TRY(descriptor->get_name(document, CommonNames::FontName))->name());
+            out_path.append(".ttf"sv);
+            auto output_stream = TRY(Core::File::open(TRY(out_path.to_string()), Core::File::OpenMode::Write));
+            auto buffered_stream = TRY(Core::OutputBufferedFile::create(move(output_stream)));
+            TRY(buffered_stream->write_until_depleted(font_file_stream->bytes()));
+#endif
+
             auto ttf_font = TRY(OpenType::Font::try_load_from_externally_owned_memory(font_file_stream->bytes()));
+
             float point_size = (font_size * POINTS_PER_INCH) / DEFAULT_DPI;
             m_font = adopt_ref(*new Gfx::ScaledFont(*ttf_font, point_size, point_size));
         }
