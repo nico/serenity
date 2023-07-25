@@ -4,6 +4,9 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <LibCore/File.h>
+#include <LibGfx/Font/OpenType/Font.h>
+#include <LibGfx/Font/ScaledFont.h>
 #include <LibPDF/CommonNames.h>
 #include <LibPDF/Fonts/Type0Font.h>
 
@@ -36,8 +39,55 @@ PDFErrorOr<Gfx::FloatPoint> CIDFontType0::draw_string(Gfx::Painter&, Gfx::FloatP
 
 class CIDFontType2 : public CIDFontType {
 public:
+    static PDFErrorOr<NonnullOwnPtr<CIDFontType2>> create(Document*, NonnullRefPtr<DictObject> const& descendant, float font_size);
+
     PDFErrorOr<Gfx::FloatPoint> draw_string(Gfx::Painter&, Gfx::FloatPoint, DeprecatedString const&, Color const&, float, float, float, float) override;
+
+private:
+    CIDFontType2(RefPtr<Gfx::Font> font)
+        : m_font(move(font))
+    {
+    }
+
+    RefPtr<Gfx::Font> m_font;
 };
+
+
+PDFErrorOr<NonnullOwnPtr<CIDFontType2>> CIDFontType2::create(Document* document, NonnullRefPtr<DictObject> const& descendant, float font_size)
+{
+    auto descriptor = TRY(descendant->get_dict(document, CommonNames::FontDescriptor));
+
+    RefPtr<Gfx::Font> font;
+    if (descriptor->contains(CommonNames::FontFile2)) {
+        auto font_file_stream = TRY(descriptor->get_stream(document, CommonNames::FontFile2));
+
+#if 1
+        StringBuilder out_path;
+        out_path.append("font-"sv);
+        if (descriptor->contains(CommonNames::FontName))
+            out_path.append(TRY(descriptor->get_name(document, CommonNames::FontName))->name());
+        out_path.append(".ttf"sv);
+        auto output_stream = TRY(Core::File::open(TRY(out_path.to_string()), Core::File::OpenMode::Write));
+        auto buffered_stream = TRY(Core::OutputBufferedFile::create(move(output_stream)));
+        TRY(buffered_stream->write_until_depleted(font_file_stream->bytes()));
+#endif
+
+        auto ttf_font = TRY(OpenType::Font::try_load_from_externally_owned_memory(font_file_stream->bytes()));
+        float point_size = (font_size * POINTS_PER_INCH) / DEFAULT_DPI;
+        font = adopt_ref(*new Gfx::ScaledFont(*ttf_font, point_size, point_size));
+    }
+
+    if (descendant->contains(CommonNames::CIDToGIDMap)) {
+        auto value = TRY(descendant->get_object(document, CommonNames::CIDToGIDMap));
+        if (value->is<StreamObject>()) {
+            TODO();
+        } else if (value->cast<NameObject>()->name() != "Identity") {
+            TODO();
+        }
+    }
+
+    return TRY(adopt_nonnull_own_or_enomem(new (nothrow) CIDFontType2(move(font))));
+}
 
 PDFErrorOr<Gfx::FloatPoint> CIDFontType2::draw_string(Gfx::Painter&, Gfx::FloatPoint, DeprecatedString const&, Color const&, float, float, float, float)
 {
@@ -51,10 +101,15 @@ PDFErrorOr<Gfx::FloatPoint> CIDFontType2::draw_string(Gfx::Painter&, Gfx::FloatP
     //  depending on whether the font program is embedded in the PDF file:
     //  * If the TrueType font program is embedded, the Type 2 CIDFont dictionary shall contain a CIDToGIDMap entry
     //    that maps CIDs to the glyph indices for the appropriate glyph descriptions in that font program.
+    if (m_font) {
+        return Error::rendering_unsupported_error("Type0 font CIDFontType2 embedded not implemented yet");
+    }
     //  * If the TrueType font program is not embedded but is referenced by name, and the Type 2 CIDFont dictionary
     //    contains a CIDToGIDMap entry, the CIDToGIDMap entry shall be ignored, since it is not meaningful
     ///   to refer to glyph indices in an external font program."
-    return Error::rendering_unsupported_error("Type0 font CIDFontType2 not implemented yet");
+    else {
+        return Error::rendering_unsupported_error("Type0 font CIDFontType2 by-name not implemented yet");
+    }
 }
 
 Type0Font::Type0Font() noexcept = default;
@@ -84,12 +139,10 @@ PDFErrorOr<void> Type0Font::initialize(Document* document, NonnullRefPtr<DictObj
         m_cid_font_type = TRY(try_make<CIDFontType0>());
     } else if (subtype == CommonNames::CIDFontType2) {
         // TrueType-based
-        m_cid_font_type = TRY(try_make<CIDFontType2>());
+        m_cid_font_type = TRY(CIDFontType2::create(document, descendant_font, font_size));
     } else {
         return Error { Error::Type::MalformedPDF, "invalid /Subtype for Type 0 font" };
     }
-
-    auto font_descriptor = TRY(descendant_font->get_dict(document, CommonNames::FontDescriptor));
 
     u16 default_width = 1000;
     if (descendant_font->contains(CommonNames::DW))
@@ -122,15 +175,6 @@ PDFErrorOr<void> Type0Font::initialize(Document* document, NonnullRefPtr<DictObj
         }
     }
 
-    if (dict->contains(CommonNames::CIDToGIDMap)) {
-        auto value = TRY(dict->get_object(document, CommonNames::CIDToGIDMap));
-        if (value->is<StreamObject>()) {
-            TODO();
-        } else if (value->cast<NameObject>()->name() != "Identity") {
-            TODO();
-        }
-    }
-
     m_system_info = move(system_info);
     m_widths = move(widths);
     m_missing_width = default_width;
@@ -151,6 +195,7 @@ float Type0Font::get_char_width(u16 char_code) const
 
 void Type0Font::set_font_size(float)
 {
+    // XXX forward at least to truetype font
 }
 
 PDFErrorOr<Gfx::FloatPoint> Type0Font::draw_string(Gfx::Painter& painter, Gfx::FloatPoint glyph_position, DeprecatedString const& string, Color const& paint_color, float font_size, float character_spacing, float word_spacing, float horizontal_scaling)

@@ -20,19 +20,19 @@ ScaledFont::ScaledFont(NonnullRefPtr<VectorFont> font, float point_width, float 
     m_x_scale = (point_width * dpi_x) / (POINTS_PER_INCH * units_per_em);
     m_y_scale = (point_height * dpi_y) / (POINTS_PER_INCH * units_per_em);
 
-    auto metrics = m_font->metrics(m_x_scale, m_y_scale);
+    //auto metrics = m_font->metrics(m_x_scale, m_y_scale);
 
     m_pixel_size = m_point_height * (DEFAULT_DPI / POINTS_PER_INCH);
     m_pixel_size_rounded_up = static_cast<int>(ceilf(m_pixel_size));
 
     m_pixel_metrics = Gfx::FontPixelMetrics {
         .size = (float)pixel_size(),
-        .x_height = metrics.x_height,
-        .advance_of_ascii_zero = (float)glyph_width('0'),
+        //.x_height = metrics.x_height,
+        //.advance_of_ascii_zero = (float)glyph_width('0'),
         .glyph_spacing = (float)glyph_spacing(),
-        .ascent = metrics.ascender,
-        .descent = metrics.descender,
-        .line_gap = metrics.line_gap,
+        //.ascent = metrics.ascender,
+        //.descent = metrics.descender,
+        //.line_gap = metrics.line_gap,
     };
 }
 

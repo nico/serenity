@@ -78,7 +78,7 @@ private:
         Hhea&& hhea,
         Maxp&& maxp,
         Hmtx&& hmtx,
-        Cmap&& cmap,
+        Optional<Cmap>&& cmap,
         Optional<Loca>&& loca,
         Optional<Glyf>&& glyf,
         Optional<OS2> os2,
@@ -119,7 +119,7 @@ private:
     Hmtx m_hmtx;
     Optional<Loca> m_loca;
     Optional<Glyf> m_glyf;
-    Cmap m_cmap;
+    Optional<Cmap> m_cmap;
     Optional<OS2> m_os2;
     Optional<Kern> m_kern;
     Optional<Fpgm> m_fpgm;

@@ -382,6 +382,7 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_externally_owned_memory(Readonl
 }
 
 // FIXME: "loca" and "glyf" are not available for CFF fonts.
+// FIXME: "cmap" is not available for truetype fonts embedded in PDF files in Type0 fonts
 ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u32 offset)
 {
     if (Checked<u32>::addition_would_overflow(offset, (u32)Sizes::OffsetTable))
@@ -489,9 +490,8 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
         return Error::from_string_literal("Could not load Hmtx");
     auto hmtx = opt_hmtx.value();
 
-    if (!opt_cmap_slice.has_value() || !(opt_cmap = Cmap::from_slice(opt_cmap_slice.value())).has_value())
-        return Error::from_string_literal("Could not load Cmap");
-    auto cmap = opt_cmap.value();
+    if (opt_cmap_slice.has_value())
+        opt_cmap = Cmap::from_slice(opt_cmap_slice.value());
 
     Optional<Loca> loca;
     if (opt_loca_slice.has_value()) {
@@ -523,30 +523,33 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
 
     // Select cmap table. FIXME: Do this better. Right now, just looks for platform "Windows"
     // and corresponding encoding "Unicode full repertoire", or failing that, "Unicode BMP"
-    for (u32 i = 0; i < cmap.num_subtables(); i++) {
-        auto opt_subtable = cmap.subtable(i);
-        if (!opt_subtable.has_value()) {
-            continue;
-        }
-        auto subtable = opt_subtable.value();
-        auto platform = subtable.platform_id();
-        if (!platform.has_value())
-            return Error::from_string_literal("Invalid Platform ID");
+    if (opt_cmap.has_value()) {
+        auto& cmap = opt_cmap.value();
+        for (u32 i = 0; i < cmap.num_subtables(); i++) {
+            auto opt_subtable = cmap.subtable(i);
+            if (!opt_subtable.has_value()) {
+                continue;
+            }
+            auto subtable = opt_subtable.value();
+            auto platform = subtable.platform_id();
+            if (!platform.has_value())
+                return Error::from_string_literal("Invalid Platform ID");
 
-        /* NOTE: The encoding records are sorted first by platform ID, then by encoding ID.
-           This means that the Windows platform will take precedence over Macintosh, which is
-           usually what we want here. */
-        if (platform.value() == Cmap::Subtable::Platform::Windows) {
-            if (subtable.encoding_id() == (u16)Cmap::Subtable::WindowsEncoding::UnicodeFullRepertoire) {
+            /* NOTE: The encoding records are sorted first by platform ID, then by encoding ID.
+               This means that the Windows platform will take precedence over Macintosh, which is
+               usually what we want here. */
+            if (platform.value() == Cmap::Subtable::Platform::Windows) {
+                if (subtable.encoding_id() == (u16)Cmap::Subtable::WindowsEncoding::UnicodeFullRepertoire) {
+                    cmap.set_active_index(i);
+                    break;
+                }
+                if (subtable.encoding_id() == (u16)Cmap::Subtable::WindowsEncoding::UnicodeBMP) {
+                    cmap.set_active_index(i);
+                    break;
+                }
+            } else if (platform.value() == Cmap::Subtable::Platform::Macintosh) {
                 cmap.set_active_index(i);
-                break;
             }
-            if (subtable.encoding_id() == (u16)Cmap::Subtable::WindowsEncoding::UnicodeBMP) {
-                cmap.set_active_index(i);
-                break;
-            }
-        } else if (platform.value() == Cmap::Subtable::Platform::Macintosh) {
-            cmap.set_active_index(i);
         }
     }
 
@@ -557,7 +560,7 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
         move(hhea),
         move(maxp),
         move(hmtx),
-        move(cmap),
+        move(opt_cmap),
         move(loca),
         move(glyf),
         move(os2),
@@ -587,6 +590,7 @@ Gfx::ScaledFontMetrics Font::metrics([[maybe_unused]] float x_scale, float y_sca
         raw_line_gap = m_hhea.line_gap();
     }
 
+// XXX (heh) grr
     if (!x_height.has_value()) {
         x_height = glyph_metrics(glyph_id_for_code_point('x'), 1, 1, 1, 1).ascender;
     }
@@ -821,6 +825,7 @@ u8 Font::slope() const
 
 bool Font::is_fixed_width() const
 {
+// XXX grr
     // FIXME: Read this information from the font file itself.
     // FIXME: Although, it appears some application do similar hacks
     return glyph_metrics(glyph_id_for_code_point('.'), 1, 1, 1, 1).advance_width == glyph_metrics(glyph_id_for_code_point('X'), 1, 1, 1, 1).advance_width;
@@ -925,7 +930,7 @@ void Font::populate_glyph_page(GlyphPage& glyph_page, size_t page_index) const
     u32 first_code_point = page_index * GlyphPage::glyphs_per_page;
     for (size_t i = 0; i < GlyphPage::glyphs_per_page; ++i) {
         u32 code_point = first_code_point + i;
-        glyph_page.glyph_ids[i] = m_cmap.glyph_id_for_code_point(code_point);
+        glyph_page.glyph_ids[i] = m_cmap->glyph_id_for_code_point(code_point);
     }
 }
 
