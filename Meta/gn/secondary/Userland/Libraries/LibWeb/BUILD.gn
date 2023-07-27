@@ -213,7 +213,7 @@ embed_as_string_view("generate_quirks_mode_stylesheet_source") {
   namespace = "Web::CSS"
 }
 
-source_set("all_generated") {
+source_set("generated_sources") {
   generated_deps = [
     ":generate_aria_roles",
     ":generate_css_easing_functions",
@@ -232,7 +232,18 @@ source_set("all_generated") {
   foreach(dep, generated_deps) {
     sources += get_target_outputs(dep)
   }
-  deps = generated_deps + generate_idl_targets
+  deps = generated_deps
+}
+
+action("deps_hack") {
+  deps = [ ":generated_sources"] + generate_idl_targets
+  script = "//Meta/gn/build/stamp.py"
+  outputs = [ "$target_gen_dir/whatever.txt" ]
+  args = [ rebase_path(outputs[0], root_build_dir) ]
+}
+
+group("all_generated") {
+  deps = [ ":deps_hack" ]
 }
 
 config("configs") {
