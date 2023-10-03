@@ -7,15 +7,35 @@
 #import "MacPDFWindowController.h"
 
 #import "MacPDFDocument.h"
+#import "MacPDFOutlineViewDataSource.h"
 
 @interface MacPDFWindowController ()
 {
+    MacPDFOutlineViewDataSource* _outlineDataSource;
     MacPDFDocument* _pdfDocument;
     IBOutlet MacPDFView* _pdfView;
+
+    NSOutlineView* side_view;
 }
 @end
 
 @implementation MacPDFWindowController
+
+- (void)dumpConstraints:(NSView*)view
+{
+    for (NSLayoutConstraint* c in view.constraints)
+        NSLog(@"%@", c);
+
+}
+
+- (void)dumpView:(NSView*)view collect:(NSMutableArray*)a
+{
+    [self dumpConstraints:view];
+    [a addObjectsFromArray:view.constraints];
+
+    for (NSView* subview in view.subviews)
+        [self dumpView:subview collect:a];
+}
 
 - (instancetype)initWithDocument:(MacPDFDocument*)document
 {
@@ -30,8 +50,13 @@
 
     _pdfView = [[MacPDFView alloc] initWithFrame:NSZeroRect];
     [_pdfView setDelegate:self];
+    //_pdfView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin | NSViewMaxXMargin;
+    //_pdfView.translatesAutoresizingMaskIntoConstraints = NO;
+NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]));
 
     NSSplitViewController* split_view = [[NSSplitViewController alloc] initWithNibName:nil bundle:nil];
+    split_view.view.translatesAutoresizingMaskIntoConstraints=NO;
+
     [split_view addSplitViewItem:[self makeSidebarSplitItem]];
     [split_view addSplitViewItem:[NSSplitViewItem splitViewItemWithViewController:[self viewControllerForView:_pdfView]]];
 
@@ -50,6 +75,10 @@
     toolbar.displayMode = NSToolbarDisplayModeIconOnly;
     [window setToolbar:toolbar];
 
+    //NSMutableArray* a = [@[] mutableCopy];
+    //[self dumpView:self.contentViewController.view collect:a];
+    //[[self window] visualizeConstraints:a];
+
     _pdfDocument = document;
     return self;
 }
@@ -63,15 +92,43 @@
 
 - (NSSplitViewItem*)makeSidebarSplitItem
 {
-    // FIXME: Use an NSOutlineView with the document's outline.
-    NSView* side_view = [[NSView alloc] initWithFrame:NSZeroRect];
-    NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:side_view]];
+    side_view = [[NSOutlineView alloc] initWithFrame:NSZeroRect];
+    //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    //side_view.translatesAutoresizingMaskIntoConstraints = NO;
+    //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin | NSViewMaxXMargin;
+    //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMaxYMargin | NSViewMaxXMargin;
+    _outlineDataSource = [[MacPDFOutlineViewDataSource alloc] init];
+    side_view.dataSource = _outlineDataSource;
+    [side_view reloadData];
+NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContentSize]));
+    // XXX reloadData?
+
+    [side_view addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"col"]];
+
+NSLog(@"columns %@", [side_view tableColumns]);
+
+
+#if 0
+NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
+//scrollView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
+scrollView.documentView = side_view;
+//scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+#else
+NSView *scrollView = [[NSView alloc] initWithFrame:NSZeroRect];
+//scrollView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
+[scrollView addSubview:side_view];
+//scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+#endif
+
+    NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:scrollView]];
+    //NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:side_view]];
     item.collapseBehavior = NSSplitViewItemCollapseBehaviorPreferResizingSplitViewWithFixedSiblings;
 
     // This only has an effect on the very first run.
     // Later, the collapsed state is loaded from the sidebar's autosave data.
     item.collapsed = YES;
 
+    //item.holdingPriority = NSLayoutPriorityDefaultHigh;
     return item;
 }
 
