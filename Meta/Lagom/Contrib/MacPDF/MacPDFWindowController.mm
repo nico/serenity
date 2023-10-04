@@ -93,7 +93,6 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
 - (NSSplitViewItem*)makeSidebarSplitItem
 {
     // FIXME: janky cursor outline
-    // FIXME: actually do something on click
     // FIXME: janky vertical offset of highlight
 
     side_view = [[NSOutlineView alloc] initWithFrame:NSZeroRect];
@@ -143,6 +142,9 @@ scrollView.documentView = side_view;
     // XXX is there a way to only compute this if the sidebar is actually shown?
     _outlineDataSource = [[MacPDFOutlineViewDataSource alloc] initWithOutline:_pdfDocument.pdf->outline()];
     side_view.dataSource = _outlineDataSource;
+
+    side_view.delegate = self;
+
 NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContentSize]));
 }
 
@@ -201,6 +203,19 @@ NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContent
     // Not called for standard identifiers, but the implementation of the method must exist, or else:
     // ERROR: invalid delegate <MacPDFWindowController: 0x600003054c80> (does not implement all required methods)
     return nil;
+}
+
+#pragma mark - NSOutlineViewDelegate
+
+- (void)outlineViewSelectionDidChange:(NSNotification *)notification
+{
+    NSInteger row = side_view.selectedRow;
+    if (row == -1)
+        return;
+
+    OutlineItemWrapper *item = [side_view itemAtRow:row];
+    if (item->_item->dest.page.has_value())
+        [_pdfView goToPage:item->_item->dest.page.value() + 1];
 }
 
 @end
