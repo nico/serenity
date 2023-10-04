@@ -220,4 +220,10 @@ NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContent
         [_pdfView goToPage:item->_item->dest.page.value() + 1];
 }
 
+- (BOOL)outlineView:(NSOutlineView *)outlineView shouldEditTableColumn:(nullable NSTableColumn *)tableColumn item:(id)item
+{
+    // Disable editing the outline.
+    return NO;
+}
+
 @end
