@@ -110,11 +110,13 @@ NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
 //view.material = NSVisualEffectMaterialUnderWindowBackground;
 //view.material = NSVisualEffectMaterialHUDWindow;
 
-#if 0
+#if 1
 // FIXME: need a scroller, but this code here hides the outline
 NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
 scrollView.documentView = side_view;
-//view.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
+//scrollView.autoresizesSubviews = YES;
+scrollView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
+
 [view addSubview:scrollView];
 //view.translatesAutoresizingMaskIntoConstraints = NO;
 #else
