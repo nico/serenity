@@ -55,7 +55,7 @@
 NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]));
 
     NSSplitViewController* split_view = [[NSSplitViewController alloc] initWithNibName:nil bundle:nil];
-    split_view.view.translatesAutoresizingMaskIntoConstraints=NO;
+    //split_view.view.translatesAutoresizingMaskIntoConstraints=NO;
 
     [split_view addSplitViewItem:[self makeSidebarSplitItem]];
     [split_view addSplitViewItem:[NSSplitViewItem splitViewItemWithViewController:[self viewControllerForView:_pdfView]]];
@@ -92,6 +92,10 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
 
 - (NSSplitViewItem*)makeSidebarSplitItem
 {
+    // FIXME: janky cursor outline
+    // FIXME: actually do something on click
+    // FIXME: janky vertical offset of highlight
+
     side_view = [[NSOutlineView alloc] initWithFrame:NSZeroRect];
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     //side_view.translatesAutoresizingMaskIntoConstraints = NO;
@@ -100,28 +104,25 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
 
     [side_view addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"col"]];
 
-NSLog(@"columns %@", [side_view tableColumns]);
-
+NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
+//NSVisualEffectView* view = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+//view.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+//view.material = NSVisualEffectMaterialSidebar;
+//view.material = NSVisualEffectMaterialUnderWindowBackground;
+//view.material = NSVisualEffectMaterialHUDWindow;
 
 #if 0
+// FIXME: need a scroller, but this code here hides the outline
 NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
-//scrollView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
 scrollView.documentView = side_view;
-//scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+//view.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
+[view addSubview:scrollView];
+//view.translatesAutoresizingMaskIntoConstraints = NO;
 #else
-NSView *scrollView = [[NSView alloc] initWithFrame:NSZeroRect];
-//NSVisualEffectView* scrollView = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
-//scrollView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
-//scrollView.material = NSVisualEffectMaterialSidebar;
-//scrollView.material = NSVisualEffectMaterialUnderWindowBackground;
-//scrollView.material = NSVisualEffectMaterialHUDWindow;
-
-//scrollView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
-[scrollView addSubview:side_view];
-//scrollView.translatesAutoresizingMaskIntoConstraints = NO;
+[view addSubview:side_view];
 #endif
 
-    NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:scrollView]];
+    NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:view]];
     //NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:side_view]];
     item.collapseBehavior = NSSplitViewItemCollapseBehaviorPreferResizingSplitViewWithFixedSiblings;
 

@@ -40,7 +40,6 @@
     if (self = [super init]; !self)
         return nil;
     _outline = move(outline);
-dbgln("init {}", _outline);
     return self;
 }
 
@@ -56,7 +55,6 @@ dbgln("init {}", _outline);
     if (![self hasOutline])
         return nil;
 
-dbgln("child: {} ofItem:{}", index, item);
     if (!item)
         return [[OutlineItemWrapper alloc] initWithItem:_outline->children[index]];
 
@@ -74,15 +72,12 @@ dbgln("child: {} ofItem:{}", index, item);
     if (![self hasOutline])
         return 1;
 
-dbgln("hi? {} {}", item, _outline);
     // XXX do something if root has 0 children
     if (!item) {
-dbgln("numberOfChildrenOfItem root {}", _outline->children.size());
         return _outline->children.size();
     }
 
     auto const* outline_item = (OutlineItemWrapper*)item;
-dbgln("numberOfChildrenOfItem root {}", outline_item->_item->children.size());
     return outline_item->_item->children.size();
 }
 
