@@ -6,78 +6,93 @@
 
 #import "MacPDFOutlineViewDataSource.h"
 
+// Objective-C wrapper of PDF::OutlineItem, to launder it through the NSOutlineViewDataSource protocol.
+@interface OutlineItemWrapper : NSObject
+{
+    // NonnullRefPtr really, but Objective-C objects cannot be initialized with that.
+@public
+    RefPtr<PDF::OutlineItem> _item;
+}
+
+- (instancetype)initWithItem:(NonnullRefPtr<PDF::OutlineItem>)item;
+@end
+
+@implementation OutlineItemWrapper
+- (instancetype)initWithItem:(NonnullRefPtr<PDF::OutlineItem>)item
+{
+    if (self = [super init]; !self)
+        return nil;
+    _item = move(item);
+    return self;
+}
+@end
+
+@interface MacPDFOutlineViewDataSource ()
+{
+    RefPtr<PDF::OutlineDict> _outline;
+}
+@end
+
 @implementation MacPDFOutlineViewDataSource
 
-- (instancetype)init {
-    self = [super init];
-    if (self) {
-        // Initialize your hierarchical data structure, for example, an array of dictionaries
-        self.data = [NSMutableArray arrayWithArray:@[
-            @{@"name": @"Chapter 1", @"children": @[
-                    @{@"name": @"Section 1.1", @"children": @[]},
-                    @{@"name": @"Section 1.2", @"children": @[]}
-            ]},
-            @{@"name": @"Chapter 2", @"children": @[
-                    @{@"name": @"Section 2.1", @"children": @[]},
-                    @{@"name": @"Section 2.2", @"children": @[]}
-            ]}
-        ]];
-    }
+- (instancetype)initWithOutline:(RefPtr<PDF::OutlineDict>)outline
+{
+    if (self = [super init]; !self)
+        return nil;
+    _outline = move(outline);
+dbgln("init {}", _outline);
     return self;
+}
+
+- (BOOL)hasOutline
+{
+    return _outline && !_outline->children.is_empty();
 }
 
 #pragma mark - NSOutlineViewDataSource
 
-- (id)outlineView:(NSOutlineView *)outlineView child:(NSInteger)index ofItem:(nullable id)item {
-    // Return the child item at the specified index of the parent item
+- (id)outlineView:(NSOutlineView *)outlineView child:(NSInteger)index ofItem:(nullable id)item
+{
+    if (![self hasOutline])
+        return nil;
+
+dbgln("child: {} ofItem:{}", index, item);
+    if (!item)
+        return [[OutlineItemWrapper alloc] initWithItem:_outline->children[index]];
+
+    auto const* outline_item = (OutlineItemWrapper*)item;
+    return [[OutlineItemWrapper alloc] initWithItem:outline_item->_item->children[index]];
+}
+
+- (BOOL)outlineView:(NSOutlineView *)outlineView isItemExpandable:(id)item
+{
+    return [self outlineView:outlineView numberOfChildrenOfItem:item] > 0;
+}
+
+- (NSInteger)outlineView:(NSOutlineView *)outlineView numberOfChildrenOfItem:(nullable id)item
+{
+    if (![self hasOutline])
+        return 1;
+
+dbgln("hi? {} {}", item, _outline);
+    // XXX do something if root has 0 children
     if (!item) {
-        return self.data[index];
+dbgln("numberOfChildrenOfItem root {}", _outline->children.size());
+        return _outline->children.size();
     }
 
-    if ([item isKindOfClass:[NSDictionary class]]) {
-        NSArray *children = item[@"children"];
-        if (children && [children isKindOfClass:[NSArray class]] && index < (NSInteger)children.count) {
-            return children[index];
-        }
-    }
-
-    return nil;
+    auto const* outline_item = (OutlineItemWrapper*)item;
+dbgln("numberOfChildrenOfItem root {}", outline_item->_item->children.size());
+    return outline_item->_item->children.size();
 }
 
-- (BOOL)outlineView:(NSOutlineView *)outlineView isItemExpandable:(id)item {
-    // Check if an item has children that can be expanded
-    if ([item isKindOfClass:[NSDictionary class]]) {
-        NSArray *children = item[@"children"];
-        return children && [children isKindOfClass:[NSArray class]] && children.count > 0;
-    }
-    return NO;
-}
+- (id)outlineView:(NSOutlineView *)outlineView objectValueForTableColumn:(nullable NSTableColumn *)tableColumn byItem:(nullable id)item
+{
+    if (![self hasOutline])
+            return @"(no outline)";  // FIXME: Maybe put filename here instead?
 
-- (NSInteger)outlineView:(NSOutlineView *)outlineView numberOfChildrenOfItem:(nullable id)item {
-    // Return the number of children for a given item
-    if (!item) {
-        return self.data.count;
-    }
-
-    if ([item isKindOfClass:[NSDictionary class]]) {
-        NSArray *children = item[@"children"];
-        if (children && [children isKindOfClass:[NSArray class]]) {
-            return children.count;
-        }
-    }
-
-    return 0;
-}
-
-- (id)outlineView:(NSOutlineView *)outlineView objectValueForTableColumn:(nullable NSTableColumn *)tableColumn byItem:(nullable id)item {
-    // Return the data to be displayed in the outline view's cells
-    if ([item isKindOfClass:[NSDictionary class]]) {
-        NSString *name = item[@"name"];
-        if (name && [name isKindOfClass:[NSString class]]) {
-            return name;
-        }
-    }
-    return nil;
+    auto const* outline_item = (OutlineItemWrapper*)item;
+    return [NSString stringWithFormat:@"%s", outline_item->_item->title.characters()];  // XXX encoding?
 }
 
 @end

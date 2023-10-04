@@ -97,11 +97,6 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
     //side_view.translatesAutoresizingMaskIntoConstraints = NO;
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin | NSViewMaxXMargin;
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMaxYMargin | NSViewMaxXMargin;
-    _outlineDataSource = [[MacPDFOutlineViewDataSource alloc] init];
-    side_view.dataSource = _outlineDataSource;
-    [side_view reloadData];
-NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContentSize]));
-    // XXX reloadData?
 
     [side_view addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"col"]];
 
@@ -115,6 +110,12 @@ scrollView.documentView = side_view;
 //scrollView.translatesAutoresizingMaskIntoConstraints = NO;
 #else
 NSView *scrollView = [[NSView alloc] initWithFrame:NSZeroRect];
+//NSVisualEffectView* scrollView = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+//scrollView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+//scrollView.material = NSVisualEffectMaterialSidebar;
+//scrollView.material = NSVisualEffectMaterialUnderWindowBackground;
+//scrollView.material = NSVisualEffectMaterialHUDWindow;
+
 //scrollView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
 [scrollView addSubview:side_view];
 //scrollView.translatesAutoresizingMaskIntoConstraints = NO;
@@ -136,6 +137,12 @@ NSView *scrollView = [[NSView alloc] initWithFrame:NSZeroRect];
 {
     [_pdfView setDocument:_pdfDocument.pdf->make_weak_ptr()];
     [self pageChanged];
+
+    // XXX reloadData implied by setDataSource
+    // XXX is there a way to only compute this if the sidebar is actually shown?
+    _outlineDataSource = [[MacPDFOutlineViewDataSource alloc] initWithOutline:_pdfDocument.pdf->outline()];
+    side_view.dataSource = _outlineDataSource;
+NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContentSize]));
 }
 
 - (IBAction)showGoToPageDialog:(id)sender

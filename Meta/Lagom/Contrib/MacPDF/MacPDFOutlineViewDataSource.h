@@ -8,8 +8,10 @@
 
 #include "CocoaWrapper.h"
 
+#include <LibPDF/Document.h>
+
 @interface MacPDFOutlineViewDataSource : NSObject <NSOutlineViewDataSource>
 
-@property (nonatomic, strong) NSMutableArray<NSMutableDictionary *> *data;
+- (instancetype)initWithOutline:(RefPtr<PDF::OutlineDict>)outline;
 
 @end
