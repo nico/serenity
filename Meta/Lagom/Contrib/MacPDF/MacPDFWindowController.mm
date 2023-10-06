@@ -275,39 +275,30 @@ NSLog(@"making a view");
 #if 1
     NSTableCellView* v = [outlineView makeViewWithIdentifier:tableColumn.identifier owner:self];
 
-    if (v) {
-NSLog(@"early exit");
-    }
-
     // Needed if the cell view isn't loaded from a nib
     if (!v) {
 NSLog(@"not early exit");
+        // XXX comment on `v.identifier`
         v = [[NSTableCellView alloc] init];
         v.identifier = tableColumn.identifier;
 
-        //NSTextField* tf = [[NSTextField alloc] initWithFrame:NSMakeRect(21, 6, 200, 14)];
         NSTextField* tf = [NSTextField labelWithString:@"what"];
         tf.lineBreakMode = NSLineBreakByTruncatingTail;
 
-        //v.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-        //v.autoresizingMask = NSViewWidthSizable;
-        //v.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin | NSViewMinYMargin;
-        //tf.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin | NSViewMinYMargin;
-        //tf.autoresizingMask = NSViewWidthSizable;
+        //tf.controlSize = NSControlSizeMini;  // XXX no effect :/
 
-        tf.controlSize = NSControlSizeMini;  // XXX no effect :/
+        // https://stackoverflow.com/a/29725553/551986
+        // "If your cell view is an NSTableCellView, that class also responds to -setObjectValue:. [...]
+        //  However, an NSTableCellView does not inherently do anything with the object value. It just holds it.
+        //  What you can then do is have the subviews bind to it through the objectValue property."
+        [tf bind:@"objectValue" toObject:v withKeyPath:@"objectValue" options:nil];
 
         [v addSubview:tf];
         v.textField = tf;
-
-        //v = [NSTextField labelWithString:@""];
+    } else {
+NSLog(@"early exit");
     }
 
-    // XXX why do i need to do this, the NSTextField branch below doesn't need it (but in return it has busted alignment)
-    v.textField.stringValue = [_outlineDataSource outlineView:outlineView objectValueForTableColumn:tableColumn byItem:item];
-
-    //v.textField.stringValue = @"hi!";
-    //v.objectValue = [_outlineDataSource outlineView:outlineView objectValueForTableColumn:tableColumn byItem:item];
     return v;
 #else
     NSTextField* tf = [outlineView makeViewWithIdentifier:tableColumn.identifier owner:self];
