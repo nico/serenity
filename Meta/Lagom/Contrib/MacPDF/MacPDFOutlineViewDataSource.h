@@ -16,6 +16,7 @@
     // NonnullRefPtr really, but Objective-C objects cannot be initialized with that.
 @public
     RefPtr<PDF::OutlineItem> _item;
+    BOOL _isRoot;
 }
 - (instancetype)initWithItem:(NonnullRefPtr<PDF::OutlineItem>)item;
 @end

@@ -101,7 +101,10 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
 
     side_view.style = NSTableViewStyleSourceList;
     side_view.focusRingType = NSFocusRingTypeNone;
-    //side_view.headerView = nil; // breaks background (??)
+    side_view.headerView = nil; // breaks background (??) => fixed by setting scrollView.drawsBackground = NO :^)
+    //side_view.cornerView = nil; // do i want this?
+
+    //side_view.allowsColumnReordering = NO;
 
     side_view.floatsGroupRows = NO; // Prevent sticky header (XXX: needed?)
     //side_view.controlSize = NSControlSizeSmall; // XXX no effect
@@ -135,6 +138,7 @@ NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
 // FIXME: need a scroller, but this code here hides the outline
 NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
 scrollView.hasVerticalScroller = YES;
+scrollView.drawsBackground = NO;
 scrollView.documentView = side_view;
 
 [view addSubview:scrollView];
@@ -241,9 +245,22 @@ NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContent
         return;
 
     OutlineItemWrapper *item = [side_view itemAtRow:row];
+    if (item->_isRoot)
+        return;
+
     if (item->_item->dest.page.has_value())
         [_pdfView goToPage:item->_item->dest.page.value() + 1];
 }
+
+- (BOOL)outlineView:(NSOutlineView *)outlineView isGroupItem:(id)item
+{
+    if (!item)
+        return NO;
+
+    auto const* outline_item = (OutlineItemWrapper*)item;
+    return outline_item->_isRoot;
+}
+
 
 #if 1
 // "This method is required if you wish to turn on the use of NSViews instead of NSCells."
@@ -270,6 +287,7 @@ NSLog(@"not early exit");
 
         //NSTextField* tf = [[NSTextField alloc] initWithFrame:NSMakeRect(21, 6, 200, 14)];
         NSTextField* tf = [NSTextField labelWithString:@"what"];
+        tf.lineBreakMode = NSLineBreakByTruncatingTail;
 
         //v.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         //v.autoresizingMask = NSViewWidthSizable;
