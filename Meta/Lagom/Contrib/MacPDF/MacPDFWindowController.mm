@@ -98,6 +98,7 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
     side_view = [[NSOutlineView alloc] initWithFrame:NSZeroRect];
 
     side_view.style = NSTableViewStyleSourceList;
+    side_view.focusRingType = NSFocusRingTypeNone;
 
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     //side_view.translatesAutoresizingMaskIntoConstraints = NO;
