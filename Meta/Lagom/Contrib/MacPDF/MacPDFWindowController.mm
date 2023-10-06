@@ -117,6 +117,7 @@ NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
 #if 1
 // FIXME: need a scroller, but this code here hides the outline
 NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
+scrollView.hasVerticalScroller = YES;
 scrollView.documentView = side_view;
 
 [view addSubview:scrollView];
