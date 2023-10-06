@@ -114,11 +114,14 @@ NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
 // FIXME: need a scroller, but this code here hides the outline
 NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
 scrollView.documentView = side_view;
-//scrollView.autoresizesSubviews = YES;
-scrollView.autoresizingMask = NSViewWidthSizable|NSViewHeightSizable;
 
 [view addSubview:scrollView];
-//view.translatesAutoresizingMaskIntoConstraints = NO;
+
+[scrollView.topAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.topAnchor].active = YES;
+[scrollView.leftAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.leftAnchor].active = YES;
+[scrollView.rightAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.rightAnchor].active = YES;
+[scrollView.bottomAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.bottomAnchor].active = YES;
+scrollView.translatesAutoresizingMaskIntoConstraints = NO;
 #else
 [view addSubview:side_view];
 #endif
