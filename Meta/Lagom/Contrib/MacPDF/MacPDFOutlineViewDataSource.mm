@@ -72,6 +72,8 @@
 
 - (id)outlineView:(NSOutlineView *)outlineView objectValueForTableColumn:(nullable NSTableColumn *)tableColumn byItem:(nullable id)item
 {
+NSLog(@"getting object value");
+    // FIXME: instead of this, put it in the header
     if (![self hasOutline])
             return @"(no outline)";  // FIXME: Maybe put filename here instead?
 

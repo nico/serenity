@@ -68,6 +68,8 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
     split_view.splitView.autosaveName = @"MacPDFSplitView";
     split_view.splitView.identifier = @"MacPDFSplitViewId";
 
+    split_view.splitView.vertical = YES; // XXX needed per doc, but not in practice?
+
     window.contentViewController = split_view;
 
     NSToolbar* toolbar = [[NSToolbar alloc] initWithIdentifier:@"MacPDFToolbar"];
@@ -99,6 +101,19 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
 
     side_view.style = NSTableViewStyleSourceList;
     side_view.focusRingType = NSFocusRingTypeNone;
+    //side_view.headerView = nil; // breaks background (??)
+
+    side_view.floatsGroupRows = NO; // Prevent sticky header (XXX: needed?)
+    //side_view.controlSize = NSControlSizeSmall; // XXX no effect
+    //side_view.controlSize = NSControlSizeMini; // XXX no effect
+    //side_view.autosaveName = @"MacPDFOutlineView";
+    //side_view.autosaveExpandedItems = YES;// XXX requires outlineView:itemForPersistentObject: / outlineView:persistentObjectForItem:
+
+    // XXX important. with this set, vertical alignment is better.
+    // This defaults to NSTableViewRowSizeStyleCustom (!) which is wrong for source lists.
+    side_view.rowSizeStyle = NSTableViewRowSizeStyleDefault;
+    //side_view.rowSizeStyle = NSTableViewRowSizeStyleLarge; // makes row height larger, but doesn't affect text. this is the row height that preview uses.
+    //side_view.rowSizeStyle = NSTableViewRowSizeStyleSmall; // does make row height smaller, but not text
 
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     //side_view.translatesAutoresizingMaskIntoConstraints = NO;
@@ -229,5 +244,72 @@ NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContent
     if (item->_item->dest.page.has_value())
         [_pdfView goToPage:item->_item->dest.page.value() + 1];
 }
+
+#if 1
+// "This method is required if you wish to turn on the use of NSViews instead of NSCells."
+- (NSView *)outlineView:(NSOutlineView *)outlineView viewForTableColumn:(NSTableColumn *)tableColumn item:(id)item
+{
+NSLog(@"making a view");
+    // "'tableColumn' will be nil if the row is a group row."
+
+    // The implementation of this method will usually call -[tableView makeViewWithIdentifier:[tableColumn identifier] owner:self]
+    // in order to reuse a previous view, or automatically unarchive an associated prototype view for that identifier.
+
+#if 1
+    NSTableCellView* v = [outlineView makeViewWithIdentifier:tableColumn.identifier owner:self];
+
+    if (v) {
+NSLog(@"early exit");
+    }
+
+    // Needed if the cell view isn't loaded from a nib
+    if (!v) {
+NSLog(@"not early exit");
+        v = [[NSTableCellView alloc] init];
+        v.identifier = tableColumn.identifier;
+
+        //NSTextField* tf = [[NSTextField alloc] initWithFrame:NSMakeRect(21, 6, 200, 14)];
+        NSTextField* tf = [NSTextField labelWithString:@"what"];
+
+        //v.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        //v.autoresizingMask = NSViewWidthSizable;
+        //v.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin | NSViewMinYMargin;
+        //tf.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin | NSViewMinYMargin;
+        //tf.autoresizingMask = NSViewWidthSizable;
+
+        tf.controlSize = NSControlSizeMini;  // XXX no effect :/
+
+        [v addSubview:tf];
+        v.textField = tf;
+
+        //v = [NSTextField labelWithString:@""];
+    }
+
+    // XXX why do i need to do this, the NSTextField branch below doesn't need it (but in return it has busted alignment)
+    v.textField.stringValue = [_outlineDataSource outlineView:outlineView objectValueForTableColumn:tableColumn byItem:item];
+
+    //v.textField.stringValue = @"hi!";
+    //v.objectValue = [_outlineDataSource outlineView:outlineView objectValueForTableColumn:tableColumn byItem:item];
+    return v;
+#else
+    NSTextField* tf = [outlineView makeViewWithIdentifier:tableColumn.identifier owner:self];
+
+    if (!tf) {
+NSLog(@"not early exit");
+        tf = [NSTextField labelWithString:@"what"];
+        tf.identifier = tableColumn.identifier;
+
+        // XXX no effect again :/
+        //tf.controlSize = NSControlSizeSmall;
+        //tf.controlSize = NSControlSizeMini;
+    } else {
+        // This is apparently hit if the same row scrolls out-of-sight and then back in.
+NSLog(@"early exit");
+    }
+
+    return tf;
+#endif
+}
+#endif
 
 @end
