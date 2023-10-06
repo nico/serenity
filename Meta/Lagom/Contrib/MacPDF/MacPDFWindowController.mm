@@ -96,6 +96,9 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
     // FIXME: janky vertical offset of highlight
 
     side_view = [[NSOutlineView alloc] initWithFrame:NSZeroRect];
+
+    side_view.style = NSTableViewStyleSourceList;
+
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     //side_view.translatesAutoresizingMaskIntoConstraints = NO;
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin | NSViewMaxXMargin;
