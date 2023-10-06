@@ -21,22 +21,6 @@
 
 @implementation MacPDFWindowController
 
-- (void)dumpConstraints:(NSView*)view
-{
-    for (NSLayoutConstraint* c in view.constraints)
-        NSLog(@"%@", c);
-
-}
-
-- (void)dumpView:(NSView*)view collect:(NSMutableArray*)a
-{
-    [self dumpConstraints:view];
-    [a addObjectsFromArray:view.constraints];
-
-    for (NSView* subview in view.subviews)
-        [self dumpView:subview collect:a];
-}
-
 - (instancetype)initWithDocument:(MacPDFDocument*)document
 {
     auto const style_mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView;
@@ -50,13 +34,8 @@
 
     _pdfView = [[MacPDFView alloc] initWithFrame:NSZeroRect];
     [_pdfView setDelegate:self];
-    //_pdfView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin | NSViewMaxXMargin;
-    //_pdfView.translatesAutoresizingMaskIntoConstraints = NO;
-NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]));
 
     NSSplitViewController* split_view = [[NSSplitViewController alloc] initWithNibName:nil bundle:nil];
-    //split_view.view.translatesAutoresizingMaskIntoConstraints=NO;
-
     [split_view addSplitViewItem:[self makeSidebarSplitItem]];
     [split_view addSplitViewItem:[NSSplitViewItem splitViewItemWithViewController:[self viewControllerForView:_pdfView]]];
 
@@ -77,10 +56,6 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
     toolbar.displayMode = NSToolbarDisplayModeIconOnly;
     [window setToolbar:toolbar];
 
-    //NSMutableArray* a = [@[] mutableCopy];
-    //[self dumpView:self.contentViewController.view collect:a];
-    //[[self window] visualizeConstraints:a];
-
     _pdfDocument = document;
     return self;
 }
@@ -94,9 +69,6 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
 
 - (NSSplitViewItem*)makeSidebarSplitItem
 {
-    // FIXME: janky cursor outline
-    // FIXME: janky vertical offset of highlight
-
     side_view = [[NSOutlineView alloc] initWithFrame:NSZeroRect];
 
     side_view.style = NSTableViewStyleSourceList;
@@ -118,49 +90,33 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
     //side_view.rowSizeStyle = NSTableViewRowSizeStyleLarge; // makes row height larger, but doesn't affect text. this is the row height that preview uses.
     //side_view.rowSizeStyle = NSTableViewRowSizeStyleSmall; // does make row height smaller, but not text
 
-    //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    //side_view.translatesAutoresizingMaskIntoConstraints = NO;
-    //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin | NSViewMaxXMargin;
-    //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMaxYMargin | NSViewMaxXMargin;
-
     NSTableColumn* column = [[NSTableColumn alloc] initWithIdentifier:@"col"];
     column.editable = NO;
     [side_view addTableColumn:column];
 
-NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
-//NSVisualEffectView* view = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
-//view.blendingMode = NSVisualEffectBlendingModeBehindWindow;
-//view.material = NSVisualEffectMaterialSidebar;
-//view.material = NSVisualEffectMaterialUnderWindowBackground;
-//view.material = NSVisualEffectMaterialHUDWindow;
+    NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
 
-#if 1
-// FIXME: need a scroller, but this code here hides the outline
-NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
-scrollView.hasVerticalScroller = YES;
-scrollView.drawsBackground = NO;
-scrollView.documentView = side_view;
+    // FIXME: need a scroller, but this code here hides the outline
+    NSScrollView *scrollView = [[NSScrollView alloc] initWithFrame:NSZeroRect];
+    scrollView.hasVerticalScroller = YES;
+    scrollView.drawsBackground = NO;
+    scrollView.documentView = side_view;
 
-[view addSubview:scrollView];
+    [view addSubview:scrollView];
 
-[scrollView.topAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.topAnchor].active = YES;
-[scrollView.leftAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.leftAnchor].active = YES;
-[scrollView.rightAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.rightAnchor].active = YES;
-[scrollView.bottomAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.bottomAnchor].active = YES;
-scrollView.translatesAutoresizingMaskIntoConstraints = NO;
-#else
-[view addSubview:side_view];
-#endif
+    [scrollView.topAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.topAnchor].active = YES;
+    [scrollView.leftAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.leftAnchor].active = YES;
+    [scrollView.rightAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.rightAnchor].active = YES;
+    [scrollView.bottomAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.bottomAnchor].active = YES;
+    scrollView.translatesAutoresizingMaskIntoConstraints = NO;
 
     NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:view]];
-    //NSSplitViewItem* item = [NSSplitViewItem sidebarWithViewController:[self viewControllerForView:side_view]];
     item.collapseBehavior = NSSplitViewItemCollapseBehaviorPreferResizingSplitViewWithFixedSiblings;
 
     // This only has an effect on the very first run.
     // Later, the collapsed state is loaded from the sidebar's autosave data.
     item.collapsed = YES;
 
-    //item.holdingPriority = NSLayoutPriorityDefaultHigh;
     return item;
 }
 
@@ -169,14 +125,10 @@ scrollView.translatesAutoresizingMaskIntoConstraints = NO;
     [_pdfView setDocument:_pdfDocument.pdf->make_weak_ptr()];
     [self pageChanged];
 
-    // XXX reloadData implied by setDataSource
     // XXX is there a way to only compute this if the sidebar is actually shown?
     _outlineDataSource = [[MacPDFOutlineViewDataSource alloc] initWithOutline:_pdfDocument.pdf->outline()];
     side_view.dataSource = _outlineDataSource;
-
     side_view.delegate = self;
-
-NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContentSize]));
 }
 
 - (IBAction)showGoToPageDialog:(id)sender
@@ -261,28 +213,23 @@ NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContent
     return outline_item->_isRoot;
 }
 
-
-#if 1
 // "This method is required if you wish to turn on the use of NSViews instead of NSCells."
 - (NSView *)outlineView:(NSOutlineView *)outlineView viewForTableColumn:(NSTableColumn *)tableColumn item:(id)item
 {
-NSLog(@"making a view");
     // "'tableColumn' will be nil if the row is a group row."
 
     // The implementation of this method will usually call -[tableView makeViewWithIdentifier:[tableColumn identifier] owner:self]
     // in order to reuse a previous view, or automatically unarchive an associated prototype view for that identifier.
 
-#if 1
     NSTableCellView* v = [outlineView makeViewWithIdentifier:tableColumn.identifier owner:self];
 
     // Needed if the cell view isn't loaded from a nib
     if (!v) {
-NSLog(@"not early exit");
         // XXX comment on `v.identifier`
         v = [[NSTableCellView alloc] init];
         v.identifier = tableColumn.identifier;
 
-        NSTextField* tf = [NSTextField labelWithString:@"what"];
+        NSTextField* tf = [NSTextField labelWithString:@""];
         tf.lineBreakMode = NSLineBreakByTruncatingTail;
 
         //tf.controlSize = NSControlSizeMini;  // XXX no effect :/
@@ -295,30 +242,9 @@ NSLog(@"not early exit");
 
         [v addSubview:tf];
         v.textField = tf;
-    } else {
-NSLog(@"early exit");
     }
 
     return v;
-#else
-    NSTextField* tf = [outlineView makeViewWithIdentifier:tableColumn.identifier owner:self];
-
-    if (!tf) {
-NSLog(@"not early exit");
-        tf = [NSTextField labelWithString:@"what"];
-        tf.identifier = tableColumn.identifier;
-
-        // XXX no effect again :/
-        //tf.controlSize = NSControlSizeSmall;
-        //tf.controlSize = NSControlSizeMini;
-    } else {
-        // This is apparently hit if the same row scrolls out-of-sight and then back in.
-NSLog(@"early exit");
-    }
-
-    return tf;
-#endif
 }
-#endif
 
 @end
