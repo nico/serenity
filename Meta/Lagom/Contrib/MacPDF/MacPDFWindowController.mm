@@ -105,7 +105,9 @@ NSLog(@"pdf intrinsic size %@", NSStringFromSize([_pdfView intrinsicContentSize]
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinYMargin | NSViewMaxXMargin;
     //side_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMaxYMargin | NSViewMaxXMargin;
 
-    [side_view addTableColumn:[[NSTableColumn alloc] initWithIdentifier:@"col"]];
+    NSTableColumn* column = [[NSTableColumn alloc] initWithIdentifier:@"col"];
+    column.editable = NO;
+    [side_view addTableColumn:column];
 
 NSView *view = [[NSView alloc] initWithFrame:NSZeroRect];
 //NSVisualEffectView* view = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
@@ -226,12 +228,6 @@ NSLog(@"outline intrinsic size %@", NSStringFromSize([side_view intrinsicContent
     OutlineItemWrapper *item = [side_view itemAtRow:row];
     if (item->_item->dest.page.has_value())
         [_pdfView goToPage:item->_item->dest.page.value() + 1];
-}
-
-- (BOOL)outlineView:(NSOutlineView *)outlineView shouldEditTableColumn:(nullable NSTableColumn *)tableColumn item:(id)item
-{
-    // Disable editing the outline.
-    return NO;
 }
 
 @end
