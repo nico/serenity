@@ -190,6 +190,11 @@
 
 #pragma mark - NSOutlineViewDelegate
 
+- (BOOL)outlineView:(NSOutlineView *)outlineView shouldSelectItem:(id)item
+{
+    return ![self outlineView:outlineView isGroupItem:item];
+}
+
 - (void)outlineViewSelectionDidChange:(NSNotification *)notification
 {
     NSInteger row = side_view.selectedRow;
@@ -197,20 +202,13 @@
         return;
 
     OutlineItemWrapper *item = [side_view itemAtRow:row];
-    if (item->_isRoot)
-        return;
-
-    if (item->_item->dest.page.has_value())
-        [_pdfView goToPage:item->_item->dest.page.value() + 1];
+    if (auto page = [item page]; page.has_value())
+        [_pdfView goToPage:page.value()];
 }
 
 - (BOOL)outlineView:(NSOutlineView *)outlineView isGroupItem:(id)item
 {
-    if (!item)
-        return NO;
-
-    auto const* outline_item = (OutlineItemWrapper*)item;
-    return outline_item->_isRoot;
+    return [item isGroupItem];
 }
 
 // "This method is required if you wish to turn on the use of NSViews instead of NSCells."

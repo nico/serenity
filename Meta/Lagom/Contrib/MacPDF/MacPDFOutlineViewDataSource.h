@@ -10,15 +10,14 @@
 
 #include <LibPDF/Document.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 // Objective-C wrapper of PDF::OutlineItem, to launder it through the NSOutlineViewDataSource protocol.
 @interface OutlineItemWrapper : NSObject
-{
-    // NonnullRefPtr really, but Objective-C objects cannot be initialized with that.
-@public
-    RefPtr<PDF::OutlineItem> _item;
-    BOOL _isRoot;
-}
-- (instancetype)initWithItem:(NonnullRefPtr<PDF::OutlineItem>)item;
+
+- (BOOL)isGroupItem;
+- (Optional<u32>)page;
+
 @end
 
 @interface MacPDFOutlineViewDataSource : NSObject <NSOutlineViewDataSource>
@@ -26,3 +25,5 @@
 - (instancetype)initWithOutline:(RefPtr<PDF::OutlineDict>)outline;
 
 @end
+
+NS_ASSUME_NONNULL_END

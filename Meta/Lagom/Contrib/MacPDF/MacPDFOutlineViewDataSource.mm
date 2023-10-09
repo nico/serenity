@@ -6,22 +6,64 @@
 
 #import "MacPDFOutlineViewDataSource.h"
 
+@interface OutlineItemWrapper ()
+{
+    // Only one of those two is set.
+    RefPtr<PDF::OutlineItem> _item;
+    NSString *_groupName;
+}
+
+- (instancetype)initWithItem:(NonnullRefPtr<PDF::OutlineItem>)item;
+@end
+
 @implementation OutlineItemWrapper
 - (instancetype)initWithItem:(NonnullRefPtr<PDF::OutlineItem>)item
 {
     if (self = [super init]; !self)
         return nil;
     _item = move(item);
-    _isRoot = NO;
+    _groupName = nil;
     return self;
 }
 
-- (instancetype)initWithRoot
+- (instancetype)initWithGroupName:(nonnull NSString*)groupName
 {
     if (self = [super init]; !self)
         return nil;
-    _isRoot = YES;
+    _groupName = groupName;
     return self;
+}
+
+- (BOOL)isGroupItem
+{
+    return _groupName != nil;
+}
+
+- (Optional<u32>)page
+{
+    if ([self isGroupItem])
+        return {};
+    return _item->dest.page.map([](u32 page_index) { return page_index + 1; });
+}
+
+- (OutlineItemWrapper*)child:(NSInteger)index
+{
+    return [[OutlineItemWrapper alloc] initWithItem:_item->children[index]];
+}
+
+- (NSInteger)numberOfChildren
+{
+    if ([self isGroupItem])
+        return 0;
+    return _item->children.size();
+}
+
+- (NSString*)objectValue
+{
+    if (_groupName)
+        return _groupName;
+
+    return [NSString stringWithFormat:@"%s", _item->title.characters()];  // XXX encoding?
 }
 @end
 
@@ -41,65 +83,37 @@
     return self;
 }
 
-- (BOOL)hasOutline
-{
-    return _outline && !_outline->children.is_empty();
-}
-
 #pragma mark - NSOutlineViewDataSource
 
 - (id)outlineView:(NSOutlineView *)outlineView child:(NSInteger)index ofItem:(nullable id)item
 {
-    if (![self hasOutline])
-        return [[OutlineItemWrapper alloc] initWithRoot];
+    if (item)
+        return [(OutlineItemWrapper*)item child:index];
 
-    if (!item) {
-        if (index == 0)
-            return [[OutlineItemWrapper alloc] initWithRoot];
-        return [[OutlineItemWrapper alloc] initWithItem:_outline->children[index - 1]];
+    if (index == 0) {
+        bool has_outline = _outline && !_outline->children.is_empty();
+        // FIXME: Maybe put filename here instead?
+        return [[OutlineItemWrapper alloc] initWithGroupName:has_outline ? @"Outline" : @"(No outline)"];
     }
-
-    auto const* outline_item = (OutlineItemWrapper*)item;
-    return [[OutlineItemWrapper alloc] initWithItem:outline_item->_item->children[index]];
+    return [[OutlineItemWrapper alloc] initWithItem:_outline->children[index - 1]];
 }
 
 - (BOOL)outlineView:(NSOutlineView *)outlineView isItemExpandable:(id)item
 {
-    if (![self hasOutline])
-        return NO;
-
     return [self outlineView:outlineView numberOfChildrenOfItem:item] > 0;
 }
 
 - (NSInteger)outlineView:(NSOutlineView *)outlineView numberOfChildrenOfItem:(nullable id)item
 {
-    if (![self hasOutline])
-        return 1;
+    if (item)
+        return [(OutlineItemWrapper*)item numberOfChildren];
 
-    if (!item) {
-        return 1 + _outline->children.size();
-    }
-
-    auto const* outline_item = (OutlineItemWrapper*)item;
-    if (outline_item->_isRoot)
-        return 0;
-
-    return outline_item->_item->children.size();
+    return 1 + (_outline ? _outline->children.size() : 0);
 }
 
 - (id)outlineView:(NSOutlineView *)outlineView objectValueForTableColumn:(nullable NSTableColumn *)tableColumn byItem:(nullable id)item
 {
-NSLog(@"getting object value");
-    // FIXME: instead of this, put it in the header
-    if (![self hasOutline])
-            return @"(No outline)";  // FIXME: Maybe put filename here instead?
-
-    auto const* outline_item = (OutlineItemWrapper*)item;
-
-    if (outline_item->_isRoot)
-        return @"Outline";  // FIXME: Maybe put filename here instead?
-
-    return [NSString stringWithFormat:@"%s", outline_item->_item->title.characters()];  // XXX encoding?
+    return [(OutlineItemWrapper*)item objectValue];
 }
 
 @end
