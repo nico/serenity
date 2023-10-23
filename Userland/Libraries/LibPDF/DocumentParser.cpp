@@ -482,6 +482,10 @@ PDFErrorOr<NonnullRefPtr<XRefTable>> DocumentParser::parse_xref_table()
     }
 
     m_reader.move_by(4);
+
+    if (m_reader.matches(' '))
+        m_reader.consume();
+
     if (!m_reader.consume_eol())
         return error("Expected newline after \"xref\"");
 
@@ -742,6 +746,10 @@ bool DocumentParser::navigate_to_after_startxref()
         auto offset = m_reader.offset() + 1;
 
         m_reader.consume_eol();
+
+        if (m_reader.matches(' '))
+            m_reader.consume();
+
         if (!m_reader.matches("startxref"))
             continue;
 
