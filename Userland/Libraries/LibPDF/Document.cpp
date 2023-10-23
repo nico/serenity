@@ -76,6 +76,8 @@ PDFErrorOr<Optional<DeprecatedString>> InfoDict::modification_date() const
 
 PDFErrorOr<NonnullRefPtr<Document>> Document::create(ReadonlyBytes bytes)
 {
+    bytes = TRY(DocumentParser::scan_for_header_start(bytes));
+
     auto parser = adopt_ref(*new DocumentParser({}, bytes));
     auto document = adopt_ref(*new Document(parser));
 

@@ -72,6 +72,20 @@ PDFErrorOr<Value> DocumentParser::parse_object_with_index(u32 index)
     return indirect_value->value();
 }
 
+PDFErrorOr<ReadonlyBytes> DocumentParser::scan_for_header_start(ReadonlyBytes bytes)
+{
+    // PDF 1.7 spec, APPENDIX H, 3.4.1 "File Header":
+    // "13. Acrobat viewers require only that the header appear somewhere within the first 1024 bytes of the file."
+    // ...which of course means files depend on it.
+    // All offsets in the file are relative to the header start, not to the start of the file.
+
+    Optional<size_t> start_offset = StringView { bytes.data(), min(bytes.size(), 1024) }.find("%PDF-"sv);
+    if (!start_offset.has_value())
+        return Error { Error::Type::Parse, "Failed to find PDF start" };
+
+    return bytes.slice(start_offset.value());
+}
+
 PDFErrorOr<Version> DocumentParser::parse_header()
 {
     m_reader.move_to(0);
