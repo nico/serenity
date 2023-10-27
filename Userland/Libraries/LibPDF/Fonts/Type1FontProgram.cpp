@@ -147,10 +147,14 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
     };
 
     auto pop = [&]() -> PDFErrorOr<float> {
+        if (state.sp == 0)
+            return error("Operand stack underflow");
         return state.stack[--state.sp];
     };
 
     auto pop_front = [&]() -> PDFErrorOr<float> {
+        if (state.sp == 0)
+            return error("Operand stack underflow, front");
         auto value = state.stack[0];
         --state.sp;
         for (size_t i = 0; i < state.sp; i++)
