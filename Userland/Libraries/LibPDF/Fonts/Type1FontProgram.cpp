@@ -146,11 +146,11 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
         return {};
     };
 
-    auto pop = [&]() -> float {
+    auto pop = [&]() -> PDFErrorOr<float> {
         return state.stack[--state.sp];
     };
 
-    auto pop_front = [&]() {
+    auto pop_front = [&]() -> PDFErrorOr<float> {
         auto value = state.stack[0];
         --state.sp;
         for (size_t i = 0; i < state.sp; i++)
@@ -200,39 +200,42 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
     };
 
     // Shared operator logic
-    auto rline_to = [&]() {
-        auto dx = pop_front();
-        auto dy = pop_front();
+    auto rline_to = [&]() -> PDFErrorOr<void> {
+        auto dx = TRY(pop_front());
+        auto dy = TRY(pop_front());
         line_to(dx, dy);
+        return {};
     };
 
-    auto hvline_to = [&](bool horizontal) {
+    auto hvline_to = [&](bool horizontal) -> PDFErrorOr<void> {
         while (state.sp > 0) {
-            auto d = pop_front();
+            auto d = TRY(pop_front());
             float dx = horizontal ? d : 0;
             float dy = horizontal ? 0 : d;
             line_to(dx, dy);
             horizontal = !horizontal;
         }
+        return {};
     };
 
-    auto rrcurve_to = [&]() {
-        auto dx1 = pop_front();
-        auto dy1 = pop_front();
-        auto dx2 = pop_front();
-        auto dy2 = pop_front();
-        auto dx3 = pop_front();
-        auto dy3 = pop_front();
+    auto rrcurve_to = [&]() -> PDFErrorOr<void> {
+        auto dx1 = TRY(pop_front());
+        auto dy1 = TRY(pop_front());
+        auto dx2 = TRY(pop_front());
+        auto dy2 = TRY(pop_front());
+        auto dx3 = TRY(pop_front());
+        auto dy3 = TRY(pop_front());
         cube_bezier_curve_to(dx1, dy1, dx2, dy2, dx3, dy3);
+        return {};
     };
 
-    auto hvcurve_to = [&](bool first_tangent_horizontal) {
+    auto hvcurve_to = [&](bool first_tangent_horizontal) -> PDFErrorOr<void> {
         while (state.sp > 0) {
-            auto d1 = pop_front();
-            auto dx2 = pop_front();
-            auto dy2 = pop_front();
-            auto d3 = pop_front();
-            float d4 = state.sp == 1 ? pop_front() : 0;
+            auto d1 = TRY(pop_front());
+            auto dx2 = TRY(pop_front());
+            auto dy2 = TRY(pop_front());
+            auto d3 = TRY(pop_front());
+            float d4 = state.sp == 1 ? TRY(pop_front()) : 0;
 
             auto dx1 = first_tangent_horizontal ? d1 : 0;
             auto dy1 = first_tangent_horizontal ? 0 : d1;
@@ -241,6 +244,7 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
             cube_bezier_curve_to(dx1, dy1, dx2, dy2, dx3, dy3);
             first_tangent_horizontal = !first_tangent_horizontal;
         }
+        return {};
     };
 
     // Potential font width parsing for some commands (type2 only)
@@ -249,10 +253,11 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
         Even,
         Odd
     };
-    auto maybe_read_width = [&](EvenOrOdd required_argument_count) {
+    auto maybe_read_width = [&](EvenOrOdd required_argument_count) -> PDFErrorOr<void> {
         if (!is_type2 || !is_first_command || state.sp % 2 != required_argument_count)
-            return;
-        state.glyph.set_width(pop_front());
+            return {};
+        state.glyph.set_width(TRY(pop_front()));
+        return {};
     };
 
     // Parse the stream of parameters and commands that make up a glyph outline.
@@ -307,7 +312,7 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                 state.n_hints += state.sp / 2;
                 [[fallthrough]];
             case HStem:
-                maybe_read_width(Odd);
+                TRY(maybe_read_width(Odd));
                 state.sp = 0;
                 break;
 
@@ -315,13 +320,13 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                 state.n_hints += state.sp / 2;
                 [[fallthrough]];
             case VStem:
-                maybe_read_width(Odd);
+                TRY(maybe_read_width(Odd));
                 state.sp = 0;
                 break;
 
             case Hintmask:
             case Cntrmask: {
-                maybe_read_width(Odd);
+                TRY(maybe_read_width(Odd));
                 state.n_hints += state.sp / 2;
                 auto hint_bytes = (state.n_hints + 8 - 1) / 8;
                 TRY(require(hint_bytes));
@@ -332,23 +337,23 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
 
             // move-to operators
             case RMoveTo: {
-                maybe_read_width(Odd);
-                auto dy = pop();
-                auto dx = pop();
+                TRY(maybe_read_width(Odd));
+                auto dy = TRY(pop());
+                auto dx = TRY(pop());
                 move_to(dx, dy);
                 state.sp = 0;
                 break;
             }
             case HMoveTo: {
-                maybe_read_width(Even);
-                auto dx = pop();
+                TRY(maybe_read_width(Even));
+                auto dx = TRY(pop());
                 move_to(dx, 0);
                 state.sp = 0;
                 break;
             }
             case VMoveTo: {
-                maybe_read_width(Even);
-                auto dy = pop();
+                TRY(maybe_read_width(Even));
+                auto dy = TRY(pop());
                 move_to(0, dy);
                 state.sp = 0;
                 break;
@@ -357,24 +362,24 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
             // line-to operators
             case RLineTo: {
                 while (state.sp >= 2)
-                    rline_to();
+                    TRY(rline_to());
                 state.sp = 0;
                 break;
             }
             case HLineTo: {
-                hvline_to(true);
+                TRY(hvline_to(true));
                 state.sp = 0;
                 break;
             }
             case VLineTo: {
-                hvline_to(false);
+                TRY(hvline_to(false));
                 state.sp = 0;
                 break;
             }
 
             case RRCurveTo: {
                 while (state.sp >= 6)
-                    rrcurve_to();
+                    TRY(rrcurve_to());
                 VERIFY(state.sp == 0);
                 break;
             }
@@ -390,7 +395,7 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                 [[fallthrough]];
             case CallSubr: {
                 Vector<ByteBuffer> const& subroutines = v == CallSubr ? local_subroutines : global_subroutines;
-                auto subr_number = pop();
+                auto subr_number = TRY(pop());
 
                 if (is_type2) {
                     // Type 2 spec:
@@ -431,19 +436,19 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                     break;
 
                 case Seac: {
-                    auto achar = pop();
-                    auto bchar = pop();
-                    auto ady = pop();
-                    auto adx = pop();
-                    // auto asb = pop();
+                    auto achar = TRY(pop());
+                    auto bchar = TRY(pop());
+                    auto ady = TRY(pop());
+                    auto adx = TRY(pop());
+                    // auto asb = TRY(pop());
                     state.glyph.set_accented_character(AccentedCharacter { (u8)bchar, (u8)achar, adx, ady });
                     state.sp = 0;
                     break;
                 }
 
                 case Div: {
-                    auto num2 = pop();
-                    auto num1 = pop();
+                    auto num2 = TRY(pop());
+                    auto num1 = TRY(pop());
 
                     TRY(push(num2 ? num1 / num2 : 0.0f));
                     break;
@@ -473,18 +478,18 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                         StartFlex = 1,
                         AddFlexPoint = 2,
                     };
-                    auto othersubr_number = (OtherSubrCommand)pop();
+                    auto othersubr_number = (OtherSubrCommand)TRY(pop());
 
-                    auto n = static_cast<int>(pop());
+                    auto n = static_cast<int>(TRY(pop()));
 
                     switch ((OtherSubrCommand)othersubr_number) {
                     case EndFlex: {
                         if (n != 3)
                             return error("Unexpected argument code for othersubr 0");
 
-                        auto y = pop();
-                        auto x = pop();
-                        [[maybe_unused]] auto flex_height = pop();
+                        auto y = TRY(pop());
+                        auto x = TRY(pop());
+                        [[maybe_unused]] auto flex_height = TRY(pop());
 
                         state.postscript_stack[state.postscript_sp++] = y;
                         state.postscript_stack[state.postscript_sp++] = x;
@@ -522,10 +527,9 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                         break;
                     default:
                         for (int i = 0; i < n; ++i)
-                            state.postscript_stack[state.postscript_sp++] = pop();
+                            state.postscript_stack[state.postscript_sp++] = TRY(pop());
                         break;
                     }
-
                     break;
                 }
 
@@ -534,8 +538,8 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                     break;
 
                 case SetCurrentPoint: {
-                    auto y = pop();
-                    auto x = pop();
+                    auto y = TRY(pop());
+                    auto x = TRY(pop());
 
                     // FIXME: Gfx::Path behaves weirdly if a cubic_bezier_curve_to(a, b, c)
                     //        is followed by move(c). Figure out why, fix in Gfx::Path, then
@@ -553,64 +557,64 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                 }
 
                 case Flex: {
-                    auto flex_depth = pop();
-                    auto dy6 = pop();
-                    auto dx6 = pop();
-                    auto dy5 = pop();
-                    auto dx5 = pop();
-                    auto dy4 = pop();
-                    auto dx4 = pop();
-                    auto dy3 = pop();
-                    auto dx3 = pop();
-                    auto dy2 = pop();
-                    auto dx2 = pop();
-                    auto dy1 = pop();
-                    auto dx1 = pop();
+                    auto flex_depth = TRY(pop());
+                    auto dy6 = TRY(pop());
+                    auto dx6 = TRY(pop());
+                    auto dy5 = TRY(pop());
+                    auto dx5 = TRY(pop());
+                    auto dy4 = TRY(pop());
+                    auto dx4 = TRY(pop());
+                    auto dy3 = TRY(pop());
+                    auto dx3 = TRY(pop());
+                    auto dy2 = TRY(pop());
+                    auto dx2 = TRY(pop());
+                    auto dy1 = TRY(pop());
+                    auto dx1 = TRY(pop());
                     flex(dx1, dy1, dx2, dy2, dx3, dy3, dx4, dy4, dx5, dy5, dx6, dy6, flex_depth);
                     state.sp = 0;
                     break;
                 }
                 case Hflex: {
                     auto flex_depth = 50;
-                    auto dx6 = pop();
-                    auto dx5 = pop();
-                    auto dx4 = pop();
-                    auto dx3 = pop();
-                    auto dy2 = pop();
-                    auto dx2 = pop();
-                    auto dx1 = pop();
+                    auto dx6 = TRY(pop());
+                    auto dx5 = TRY(pop());
+                    auto dx4 = TRY(pop());
+                    auto dx3 = TRY(pop());
+                    auto dy2 = TRY(pop());
+                    auto dx2 = TRY(pop());
+                    auto dx1 = TRY(pop());
                     flex(dx1, 0, dx2, dy2, dx3, 0, dx4, 0, dx5, -dy2, dx6, 0, flex_depth);
                     state.sp = 0;
                     break;
                 }
                 case Hflex1: {
                     auto flex_depth = 50;
-                    auto dx6 = pop();
-                    auto dy5 = pop();
-                    auto dx5 = pop();
-                    auto dx4 = pop();
-                    auto dx3 = pop();
-                    auto dy2 = pop();
-                    auto dx2 = pop();
-                    auto dy1 = pop();
-                    auto dx1 = pop();
+                    auto dx6 = TRY(pop());
+                    auto dy5 = TRY(pop());
+                    auto dx5 = TRY(pop());
+                    auto dx4 = TRY(pop());
+                    auto dx3 = TRY(pop());
+                    auto dy2 = TRY(pop());
+                    auto dx2 = TRY(pop());
+                    auto dy1 = TRY(pop());
+                    auto dx1 = TRY(pop());
                     flex(dx1, dy1, dx2, dy2, dx3, 0, dx4, 0, dx5, dy5, dx6, -(dy1 + dy2 + dy5), flex_depth);
                     state.sp = 0;
                     break;
                 }
                 case Flex1: {
                     auto flex_depth = 50;
-                    auto d6 = pop();
-                    auto dy5 = pop();
-                    auto dx5 = pop();
-                    auto dy4 = pop();
-                    auto dx4 = pop();
-                    auto dy3 = pop();
-                    auto dx3 = pop();
-                    auto dy2 = pop();
-                    auto dx2 = pop();
-                    auto dy1 = pop();
-                    auto dx1 = pop();
+                    auto d6 = TRY(pop());
+                    auto dy5 = TRY(pop());
+                    auto dx5 = TRY(pop());
+                    auto dy4 = TRY(pop());
+                    auto dx4 = TRY(pop());
+                    auto dy3 = TRY(pop());
+                    auto dx3 = TRY(pop());
+                    auto dy2 = TRY(pop());
+                    auto dx2 = TRY(pop());
+                    auto dy1 = TRY(pop());
+                    auto dx1 = TRY(pop());
 
                     float dx6, dy6;
                     auto dx = dx1 + dx2 + dx3 + dx4 + dx5;
@@ -636,8 +640,8 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
             }
 
             case HSbW: {
-                auto wx = pop();
-                auto sbx = pop();
+                auto wx = TRY(pop());
+                auto sbx = TRY(pop());
 
                 state.glyph.set_width(wx);
                 state.point = { sbx, 0.0f };
@@ -646,20 +650,20 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
             }
 
             case EndChar: {
-                maybe_read_width(Odd);
+                TRY(maybe_read_width(Odd));
                 if (is_type2)
                     path.close();
                 break;
             }
 
             case VHCurveTo: {
-                hvcurve_to(false);
+                TRY(hvcurve_to(false));
                 state.sp = 0;
                 break;
             }
 
             case HVCurveTo: {
-                hvcurve_to(true);
+                TRY(hvcurve_to(true));
                 state.sp = 0;
                 break;
             }
@@ -667,12 +671,12 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
             case VVCurveTo: {
                 float dx1 = 0;
                 if (state.sp % 2 == 1)
-                    dx1 = pop_front();
+                    dx1 = TRY(pop_front());
                 do {
-                    auto dy1 = pop_front();
-                    auto dx2 = pop_front();
-                    auto dy2 = pop_front();
-                    auto dy3 = pop_front();
+                    auto dy1 = TRY(pop_front());
+                    auto dx2 = TRY(pop_front());
+                    auto dy2 = TRY(pop_front());
+                    auto dy3 = TRY(pop_front());
                     cube_bezier_curve_to(dx1, dy1, dx2, dy2, 0, dy3);
                     dx1 = 0;
                 } while (state.sp >= 4);
@@ -683,12 +687,12 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
             case HHCurveTo: {
                 float dy1 = 0;
                 if (state.sp % 2 == 1)
-                    dy1 = pop_front();
+                    dy1 = TRY(pop_front());
                 do {
-                    auto dx1 = pop_front();
-                    auto dx2 = pop_front();
-                    auto dy2 = pop_front();
-                    auto dx3 = pop_front();
+                    auto dx1 = TRY(pop_front());
+                    auto dx2 = TRY(pop_front());
+                    auto dy2 = TRY(pop_front());
+                    auto dx3 = TRY(pop_front());
                     cube_bezier_curve_to(dx1, dy1, dx2, dy2, dx3, 0);
                     dy1 = 0;
                 } while (state.sp >= 4);
@@ -698,18 +702,18 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
 
             case RCurveLine: {
                 while (state.sp >= 8) {
-                    rrcurve_to();
+                    TRY(rrcurve_to());
                 }
-                rline_to();
+                TRY(rline_to());
                 state.sp = 0;
                 break;
             }
 
             case RLineCurve: {
                 while (state.sp >= 8) {
-                    rline_to();
+                    TRY(rline_to());
                 }
-                rrcurve_to();
+                TRY(rrcurve_to());
                 break;
             }
 
