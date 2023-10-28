@@ -286,16 +286,20 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
             } else {
                 TRY(push(a));
             }
+            dbg_if(PDF_DEBUG, "{} ", state.stack[state.sp - 1]);
         } else if (v >= 251) {
             TRY(require(1));
             auto w = data[++i];
             TRY(push(-((v - 251) * 256) - w - 108));
+            dbg_if(PDF_DEBUG, "{} ", state.stack[state.sp - 1]);
         } else if (v >= 247) {
             TRY(require(1));
             auto w = data[++i];
             TRY(push(((v - 247) * 256) + w + 108));
+            dbg_if(PDF_DEBUG, "{} ", state.stack[state.sp - 1]);
         } else if (v >= 32) {
             TRY(push(v - 139));
+            dbg_if(PDF_DEBUG, "{} ", state.stack[state.sp - 1]);
         } else if (v == 28) {
             if (is_type2) {
                 // Type 2 spec: "In addition to the 32 to 255 range of values, a ShortInt value is specified by using the operator (28)
@@ -304,10 +308,158 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                 i16 a = static_cast<i16>((data[i + 1] << 8) | data[i + 2]);
                 i += 2;
                 TRY(push(a));
+                dbg_if(PDF_DEBUG, "{} ", state.stack[state.sp - 1]);
             } else {
                 return error("CFF Subr command 28 only valid in type2 data");
             }
         } else {
+            if constexpr (PDF_DEBUG) {
+                switch (v) {
+                case HStemHM:
+                    dbgln_if(PDF_DEBUG, "hstemhm");
+                    break;
+                case HStem:
+                    dbgln_if(PDF_DEBUG, "hstem");
+                    break;
+                case VStemHM:
+                    dbgln_if(PDF_DEBUG, "vstemhm");
+                    break;
+                case VStem:
+                    dbgln_if(PDF_DEBUG, "vstem");
+                    break;
+                case Hintmask:
+                    dbgln_if(PDF_DEBUG, "hintmask");
+                    break;
+                case Cntrmask:
+                    dbgln_if(PDF_DEBUG, "cntrmask");
+                    break;
+                case RMoveTo:
+                    dbgln_if(PDF_DEBUG, "rmoveto");
+                    break;
+                case HMoveTo:
+                    dbgln_if(PDF_DEBUG, "hmoveto");
+                    break;
+                case VMoveTo:
+                    dbgln_if(PDF_DEBUG, "vmoveto");
+                    break;
+
+                // line-to operators
+                case RLineTo:
+                    dbgln_if(PDF_DEBUG, "rlineto");
+                    break;
+                case HLineTo:
+                    dbgln_if(PDF_DEBUG, "hlineto");
+                    break;
+                case VLineTo:
+                    dbgln_if(PDF_DEBUG, "vlineto");
+                    break;
+
+                case RRCurveTo:
+                    dbgln_if(PDF_DEBUG, "rcurveto");
+                    break;
+
+                case ClosePath:
+                    dbgln_if(PDF_DEBUG, "closepath");
+                    break;
+
+                case CallGsubr:
+                    dbgln_if(PDF_DEBUG, "callgsubr");
+                    break;
+                case CallSubr:
+                    dbgln_if(PDF_DEBUG, "callsubr");
+                    break;
+
+                case Return:
+                    dbgln_if(PDF_DEBUG, "return");
+                    break;
+
+                case Extended: {
+                    TRY(require(1));
+                    switch (data[i + 1]) {
+                    case DotSection:
+                        dbgln_if(PDF_DEBUG, "dotsection");
+                        break;
+                    case VStem3:
+                        dbgln_if(PDF_DEBUG, "vstem3");
+                        break;
+                    case HStem3:
+                        dbgln_if(PDF_DEBUG, "hstem3");
+                        break;
+
+                    case Seac:
+                        dbgln_if(PDF_DEBUG, "seac");
+                        break;
+
+                    case Div:
+                        dbgln_if(PDF_DEBUG, "div");
+                        break;
+
+                    case CallOtherSubr:
+                        dbgln_if(PDF_DEBUG, "callothersubr");
+                        break;
+
+                    case Pop:
+                        dbgln_if(PDF_DEBUG, "pop");
+                        break;
+
+                    case SetCurrentPoint:
+                        dbgln_if(PDF_DEBUG, "setcurrentpoint");
+                        break;
+
+                    case Hflex:
+                        dbgln_if(PDF_DEBUG, "hflex");
+                        break;
+                    case Flex:
+                        dbgln_if(PDF_DEBUG, "flex");
+                        break;
+                    case Hflex1:
+                        dbgln_if(PDF_DEBUG, "hflex1");
+                        break;
+                    case Flex1:
+                        dbgln_if(PDF_DEBUG, "flex1");
+                        break;
+
+                    default:
+                        dbgln_if(PDF_DEBUG, "extunknown({})", data[i + 1]);
+                        break;
+                    }
+                    break;
+                }
+
+                case HSbW:
+                    dbgln_if(PDF_DEBUG, "hsbw");
+                    break;
+
+                case EndChar:
+                    dbgln_if(PDF_DEBUG, "endchar");
+                    break;
+
+                case VHCurveTo:
+                    dbgln_if(PDF_DEBUG, "vhcurveto");
+                    break;
+                case HVCurveTo:
+                    dbgln_if(PDF_DEBUG, "hvcurveto");
+                    break;
+                case VVCurveTo:
+                    dbgln_if(PDF_DEBUG, "vvcurveto");
+                    break;
+                case HHCurveTo:
+                    dbgln_if(PDF_DEBUG, "hhcurveto");
+                    break;
+
+                case RCurveLine:
+                    dbgln_if(PDF_DEBUG, "rcurveline");
+                    break;
+                case RLineCurve:
+                    dbgln_if(PDF_DEBUG, "rlinecurve");
+                    break;
+
+                default:
+                    dbgln_if(PDF_DEBUG, "unknown({})", v);
+                    break;
+                }
+            }
+
             // Not a parameter but a command byte.
             switch (v) {
 
