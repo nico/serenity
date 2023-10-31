@@ -111,11 +111,13 @@ public:
 
     void move_to(FloatPoint point)
     {
+        verify_finite(point);
         append_segment<MoveSegment>(point);
     }
 
     void line_to(FloatPoint point)
     {
+        verify_finite(point);
         append_segment<LineSegment>(point);
         invalidate_split_lines();
     }
@@ -138,12 +140,17 @@ public:
 
     void quadratic_bezier_curve_to(FloatPoint through, FloatPoint point)
     {
+        verify_finite(through);
+        verify_finite(point);
         append_segment<QuadraticBezierCurveSegment>(point, through);
         invalidate_split_lines();
     }
 
     void cubic_bezier_curve_to(FloatPoint c1, FloatPoint c2, FloatPoint p2)
     {
+        verify_finite(c1);
+        verify_finite(c2);
+        verify_finite(p2);
         append_segment<CubicBezierCurveSegment>(p2, c1, c2);
         invalidate_split_lines();
     }
@@ -203,6 +210,16 @@ public:
     Path stroke_to_fill(float thickness) const;
 
 private:
+    static void verify_finite(FloatPoint const& p)
+    {
+        VERIFY(isfinite(p.x()));
+        VERIFY(isfinite(p.y()));
+    }
+    static void verify_finite(float f)
+    {
+        VERIFY(isfinite(f));
+    }
+
     void approximate_elliptical_arc_with_cubic_beziers(FloatPoint center, FloatSize radii, float x_axis_rotation, float theta, float theta_delta);
 
     void invalidate_split_lines()

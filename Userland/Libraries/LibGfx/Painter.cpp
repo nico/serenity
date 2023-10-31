@@ -2177,6 +2177,7 @@ static bool can_approximate_cubic_bezier_curve(FloatPoint p1, FloatPoint p2, Flo
 {
     constexpr float tolerance = 0.015f;
 
+dbgln("p1 {} p2 {} c0 {} c1 {}", p1, p2, control_0, control_1);
     auto ax = 3 * control_0.x() - 2 * p1.x() - p2.x();
     auto ay = 3 * control_0.y() - 2 * p1.y() - p2.y();
     auto bx = 3 * control_1.x() - p1.x() - 2 * p2.x();

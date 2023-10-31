@@ -67,6 +67,11 @@ void Path::approximate_elliptical_arc_with_cubic_beziers(FloatPoint center, Floa
 
 void Path::elliptical_arc_to(FloatPoint point, FloatSize radii, float x_axis_rotation, bool large_arc, bool sweep)
 {
+    verify_finite(point);
+    verify_finite(radii.width());
+    verify_finite(radii.height());
+    verify_finite(x_axis_rotation);
+
     auto next_point = point;
 
     double rx = radii.width();

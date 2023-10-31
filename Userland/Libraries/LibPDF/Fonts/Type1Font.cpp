@@ -77,6 +77,9 @@ void Type1Font::draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint point, float w
     if (!effective_encoding)
         effective_encoding = Encoding::standard_encoding();
     auto char_name = effective_encoding->get_name(char_code);
+
+dbgln("drag {} -> {}", (char)char_code, char_name);
+
     auto translation = m_font_program->glyph_translation(char_name, width);
     point = point.translated(translation);
 

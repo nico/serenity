@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#define PDF_DEBUG 1
+
 #include <LibGfx/AntiAliasingPainter.h>
 #include <LibGfx/Painter.h>
 #include <LibPDF/Fonts/Type1FontProgram.h>
@@ -57,6 +59,7 @@ enum ExtendedCommand {
 RefPtr<Gfx::Bitmap> Type1FontProgram::rasterize_glyph(DeprecatedFlyString const& char_name, float width, Gfx::GlyphSubpixelOffset subpixel_offset)
 {
     constexpr auto base_color = Color::White;
+dbgln("rasterize {}", char_name);
     auto path = build_char(char_name, width, subpixel_offset);
     auto bounding_box = path.bounding_box().size();
 
@@ -78,9 +81,11 @@ Gfx::Path Type1FontProgram::build_char(DeprecatedFlyString const& char_name, flo
         return {};
 
     auto const& glyph = maybe_glyph.value();
+dbgln("offset {}", subpixel_offset.to_float_point());
     auto transform = Gfx::AffineTransform()
                          .translate(subpixel_offset.to_float_point())
                          .multiply(glyph_transform_to_device_space(glyph, width));
+dbgln("transform {}", transform);
 
     // Translate such that the top-left point is at [0, 0].
     auto bounding_box = glyph.path().bounding_box();
@@ -107,11 +112,18 @@ Gfx::FloatPoint Type1FontProgram::glyph_translation(DeprecatedFlyString const& c
 
 Gfx::AffineTransform Type1FontProgram::glyph_transform_to_device_space(Glyph const& glyph, float width) const
 {
-    auto scale = width / (m_font_matrix.a() * glyph.width() + m_font_matrix.e());
+dbgln("width {} a {} glyph.width {} e {}", width, m_font_matrix.a(), glyph.width(), m_font_matrix.e());
     auto transform = m_font_matrix;
+    transform.scale(1, -1);
+
+    //if (!width)
+        //return transform;
+
+    //auto scale = width / (m_font_matrix.a() * glyph.width() + m_font_matrix.e());
+    auto scale = 1.0 / (m_font_matrix.a() + m_font_matrix.e());
 
     // Convert character space to device space.
-    transform.scale(scale, -scale);
+    transform.scale(scale, scale);
 
     return transform;
 }
@@ -799,6 +811,7 @@ PDFErrorOr<Type1FontProgram::Glyph> Type1FontProgram::parse_glyph(ReadonlyBytes 
                 auto wx = TRY(pop());
                 auto sbx = TRY(pop());
 
+dbgln("hsbw width {}", wx);
                 state.glyph.set_width(wx);
                 state.point = { sbx, 0.0f };
                 state.sp = 0;

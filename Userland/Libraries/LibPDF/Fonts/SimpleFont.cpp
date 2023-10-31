@@ -48,17 +48,23 @@ PDFErrorOr<void> SimpleFont::initialize(Document* document, NonnullRefPtr<DictOb
 PDFErrorOr<Gfx::FloatPoint> SimpleFont::draw_string(Gfx::Painter& painter, Gfx::FloatPoint glyph_position, DeprecatedString const& string, Color const& paint_color, float font_size, float character_spacing, float word_spacing, float horizontal_scaling)
 {
     for (auto char_code : string.bytes()) {
+dbgln("draw {}", (char)char_code);
         // Use the width specified in the font's dictionary if available,
         // and use the default width for the given font otherwise.
+
+// aha! this here pre-transforms things.
+// the code in the other place just wants to scale by font_size / 1000 then i suppose?
+
         float glyph_width;
         if (auto width = m_widths.get(char_code); width.has_value())
             glyph_width = font_size * width.value() / 1000.0f;
         else if (auto width = get_glyph_width(char_code); width.has_value())
             glyph_width = width.value();
         else
-            glyph_width = m_missing_width;
+            glyph_width = font_size * m_missing_width / 1000.f;
 
-        draw_glyph(painter, glyph_position, glyph_width, char_code, paint_color);
+        //if (glyph_width > 0)
+            draw_glyph(painter, glyph_position, glyph_width, char_code, paint_color);
 
         auto tx = glyph_width;
         tx += character_spacing;
