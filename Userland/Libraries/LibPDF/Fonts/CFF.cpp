@@ -217,6 +217,13 @@ PDFErrorOr<NonnullRefPtr<CFF>> CFF::create(ReadonlyBytes const& cff_bytes, RefPt
 
     auto strings = TRY(parse_strings(reader));
 
+    Reader tmp_reader(cff_bytes.slice(charstrings_offset));
+    size_t num_glyphs = 0;
+    TRY(parse_index(tmp_reader, [&](ReadonlyBytes const&) -> PDFErrorOr<void> {
+        ++num_glyphs;
+        return {};
+    }));
+
     // CFF spec "16 Local/Global Subrs INDEXes"
     // "Global subrs are stored in an INDEX structure which follows the String INDEX."
     Vector<ByteBuffer> global_subroutines;
@@ -224,29 +231,6 @@ PDFErrorOr<NonnullRefPtr<CFF>> CFF::create(ReadonlyBytes const& cff_bytes, RefPt
         return TRY(global_subroutines.try_append(TRY(ByteBuffer::copy(subroutine_bytes))));
     }));
     dbgln_if(CFF_DEBUG, "CFF has {} gsubr entries", global_subroutines.size());
-
-    // Create glyphs (now that we have the subroutines) and associate missing information to store them and their encoding
-    auto glyphs = TRY(parse_charstrings(Reader(cff_bytes.slice(charstrings_offset)), local_subroutines, global_subroutines));
-
-    // CFF spec, "Table 16 Encoding ID"
-    // FIXME: Only read this if the built-in encoding is actually needed? (ie. `if (!encoding)`)
-    Vector<u8> encoding_codes;                 // Maps GID to its codepoint.
-    HashMap<Card8, SID> encoding_supplemental; // Maps codepoint to SID.
-    switch (encoding_offset) {
-    case 0:
-        dbgln_if(CFF_DEBUG, "CFF predefined encoding Standard");
-        for (size_t i = 1; i < s_predefined_encoding_standard.size(); ++i)
-            TRY(encoding_supplemental.try_set(i, s_predefined_encoding_standard[i]));
-        break;
-    case 1:
-        dbgln_if(CFF_DEBUG, "CFF predefined encoding Expert");
-        for (size_t i = 1; i < s_predefined_encoding_expert.size(); ++i)
-            TRY(encoding_supplemental.try_set(i, s_predefined_encoding_expert[i]));
-        break;
-    default:
-        encoding_codes = TRY(parse_encoding(Reader(cff_bytes.slice(encoding_offset)), encoding_supplemental));
-        break;
-    }
 
     // CFF spec, "Table 22 Charset ID"
     Vector<DeprecatedFlyString> charset;
@@ -268,7 +252,30 @@ PDFErrorOr<NonnullRefPtr<CFF>> CFF::create(ReadonlyBytes const& cff_bytes, RefPt
             TRY(charset.try_append(resolve_sid(sid, strings)));
         break;
     default:
-        charset = TRY(parse_charset(Reader { cff_bytes.slice(charset_offset) }, glyphs.size(), strings));
+        charset = TRY(parse_charset(Reader { cff_bytes.slice(charset_offset) }, num_glyphs, strings));
+        break;
+    }
+
+    // Create glyphs (now that we have the subroutines) and associate missing information to store them and their encoding
+    auto glyphs = TRY(parse_charstrings(Reader(cff_bytes.slice(charstrings_offset)), local_subroutines, global_subroutines, charset));
+
+    // CFF spec, "Table 16 Encoding ID"
+    // FIXME: Only read this if the built-in encoding is actually needed? (ie. `if (!encoding)`)
+    Vector<u8> encoding_codes;                 // Maps GID to its codepoint.
+    HashMap<Card8, SID> encoding_supplemental; // Maps codepoint to SID.
+    switch (encoding_offset) {
+    case 0:
+        dbgln_if(CFF_DEBUG, "CFF predefined encoding Standard");
+        for (size_t i = 1; i < s_predefined_encoding_standard.size(); ++i)
+            TRY(encoding_supplemental.try_set(i, s_predefined_encoding_standard[i]));
+        break;
+    case 1:
+        dbgln_if(CFF_DEBUG, "CFF predefined encoding Expert");
+        for (size_t i = 1; i < s_predefined_encoding_expert.size(); ++i)
+            TRY(encoding_supplemental.try_set(i, s_predefined_encoding_expert[i]));
+        break;
+    default:
+        encoding_codes = TRY(parse_encoding(Reader(cff_bytes.slice(encoding_offset)), encoding_supplemental));
         break;
     }
 
@@ -773,11 +780,13 @@ PDFErrorOr<Vector<DeprecatedFlyString>> CFF::parse_charset(Reader&& reader, size
     return names;
 }
 
-PDFErrorOr<Vector<CFF::Glyph>> CFF::parse_charstrings(Reader&& reader, Vector<ByteBuffer> const& local_subroutines, Vector<ByteBuffer> const& global_subroutines)
+PDFErrorOr<Vector<CFF::Glyph>> CFF::parse_charstrings(Reader&& reader, Vector<ByteBuffer> const& local_subroutines, Vector<ByteBuffer> const& global_subroutines, Vector<DeprecatedFlyString> const& charset)
 {
     // CFF spec, "14 CharStrings INDEX"
     Vector<Glyph> glyphs;
     TRY(parse_index(reader, [&](ReadonlyBytes const& charstring_data) -> PDFErrorOr<void> {
+        dbgln();
+        dbgln("CFF: Parsing charstring {} {}", glyphs.size(), glyphs.size() > 0 ? charset[glyphs.size() - 1] : DeprecatedFlyString(".notdef"sv));
         GlyphParserState state;
         auto glyph = TRY(parse_glyph(charstring_data, local_subroutines, global_subroutines, state, true));
         return TRY(glyphs.try_append(glyph));
