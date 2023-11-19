@@ -44,6 +44,7 @@ public:
     virtual u8 slope() const override { return m_font->slope(); }
     virtual u16 width() const override { return m_font->width(); }
     virtual u16 weight() const override { return m_font->weight(); }
+    virtual Optional<u32> code_point_for_name(StringView name) const override {  return m_font->code_point_for_name(name); }
     virtual Gfx::Glyph glyph(u32 code_point) const override;
     virtual float glyph_left_bearing(u32 code_point) const override;
     virtual Glyph glyph(u32 code_point, GlyphSubpixelOffset) const override;

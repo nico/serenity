@@ -60,6 +60,8 @@ public:
     virtual u8 slope() const override { return m_slope; }
     void set_slope(u8 slope) { m_slope = slope; }
 
+    virtual Optional<u32> code_point_for_name(StringView) const override {  return {}; }
+
     Glyph glyph(u32 code_point) const override;
     Glyph glyph(u32 code_point, GlyphSubpixelOffset) const override { return glyph(code_point); }
 
