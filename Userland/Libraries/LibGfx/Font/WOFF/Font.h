@@ -32,6 +32,7 @@ public:
 
     virtual u32 glyph_count() const override { return m_input_font->glyph_count(); }
     virtual u16 units_per_em() const override { return m_input_font->units_per_em(); }
+    virtual Optional<u32> code_point_for_name(StringView name) const override { return m_input_font->code_point_for_name(name); }
     virtual u32 glyph_id_for_code_point(u32 code_point) const override { return m_input_font->glyph_id_for_code_point(code_point); }
     virtual String family() const override { return m_input_font->family(); }
     virtual String variant() const override { return m_input_font->variant(); }

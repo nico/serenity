@@ -44,6 +44,7 @@ public:
 
     virtual u32 glyph_count() const = 0;
     virtual u16 units_per_em() const = 0;
+    virtual Optional<u32> code_point_for_name(StringView) const = 0;
     virtual u32 glyph_id_for_code_point(u32 code_point) const = 0;
     virtual String family() const = 0;
     virtual String variant() const = 0;

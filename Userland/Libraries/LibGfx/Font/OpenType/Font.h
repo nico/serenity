@@ -34,6 +34,7 @@ public:
     virtual bool append_glyph_path_to(Gfx::Path&, u32 glyph_id, float x_scale, float y_scale) const override;
     virtual u32 glyph_count() const override;
     virtual u16 units_per_em() const override;
+    virtual Optional<u32> code_point_for_name(StringView) const override;
     virtual u32 glyph_id_for_code_point(u32 code_point) const override;
     virtual String family() const override;
     virtual String variant() const override;

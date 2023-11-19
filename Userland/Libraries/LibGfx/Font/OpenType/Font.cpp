@@ -587,6 +587,12 @@ Optional<ReadonlyBytes> Font::glyph_program(u32 glyph_id) const
     return glyph->program();
 }
 
+Optional<u32> Font::code_point_for_name(StringView) const
+{
+    // FIXME: Look at 'post' or 'CFF ' data if present.
+    return {};
+}
+
 u32 Font::glyph_id_for_code_point(u32 code_point) const
 {
     return glyph_page(code_point / GlyphPage::glyphs_per_page).glyph_ids[code_point % GlyphPage::glyphs_per_page];
