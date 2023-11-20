@@ -195,7 +195,7 @@ struct GlyphHorizontalMetrics {
 
 // https://learn.microsoft.com/en-us/typography/opentype/spec/fpgm
 // fpgm: Font Program
-struct Fpgm {
+class Fpgm {
 public:
     explicit Fpgm(ReadonlyBytes slice)
         : m_slice(slice)
@@ -245,7 +245,7 @@ private:
 
 // https://learn.microsoft.com/en-us/typography/opentype/spec/prep
 // prep: Control Value Program
-struct Prep {
+class Prep {
 public:
     explicit Prep(ReadonlyBytes slice)
         : m_slice(slice)
