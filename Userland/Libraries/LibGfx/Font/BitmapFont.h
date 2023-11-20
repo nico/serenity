@@ -64,8 +64,10 @@ public:
 
     Glyph glyph(u32 code_point) const override;
     Glyph glyph(u32 code_point, GlyphSubpixelOffset) const override { return glyph(code_point); }
+    Optional<Glyph> glyph_for_postscript_name(StringView, GlyphSubpixelOffset) const override { return {}; }
 
     float glyph_left_bearing(u32) const override { return 0; }
+    Optional<float> glyph_left_bearing_for_postscript_name(StringView) const override { return {}; }
 
     Glyph raw_glyph(u32 code_point) const;
     bool contains_glyph(u32 code_point) const override;

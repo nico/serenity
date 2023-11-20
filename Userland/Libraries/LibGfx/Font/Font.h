@@ -178,9 +178,11 @@ public:
 
     virtual Glyph glyph(u32 code_point) const = 0;
     virtual Glyph glyph(u32 code_point, GlyphSubpixelOffset) const = 0;
+    virtual Optional<Glyph> glyph_for_postscript_name(StringView, GlyphSubpixelOffset) const = 0;
     virtual bool contains_glyph(u32 code_point) const = 0;
 
     virtual float glyph_left_bearing(u32 code_point) const = 0;
+    virtual Optional<float> glyph_left_bearing_for_postscript_name(StringView) const = 0;
     virtual float glyph_width(u32 code_point) const = 0;
     virtual float glyph_or_emoji_width(Utf8CodePointIterator&) const = 0;
     virtual float glyph_or_emoji_width(Utf32CodePointIterator&) const = 0;

@@ -93,18 +93,40 @@ Gfx::Glyph ScaledFont::glyph(u32 code_point) const
     return glyph(code_point, GlyphSubpixelOffset { 0, 0 });
 }
 
-Gfx::Glyph ScaledFont::glyph(u32 code_point, GlyphSubpixelOffset subpixel_offset) const
+Glyph ScaledFont::glyph_for_id(u32 id, GlyphSubpixelOffset subpixel_offset) const
 {
-    auto id = glyph_id_for_code_point(code_point);
     auto bitmap = rasterize_glyph(id, subpixel_offset);
     auto metrics = glyph_metrics(id);
     return Gfx::Glyph(bitmap, metrics.left_side_bearing, metrics.advance_width, metrics.ascender, m_font->has_color_bitmaps());
+}
+
+Gfx::Glyph ScaledFont::glyph(u32 code_point, GlyphSubpixelOffset subpixel_offset) const
+{
+    auto id = glyph_id_for_code_point(code_point);
+    return glyph_for_id(id, subpixel_offset);
+}
+
+Optional<Glyph> ScaledFont::glyph_for_postscript_name(StringView name, GlyphSubpixelOffset subpixel_offset) const
+{
+    auto id = glyph_id_for_postscript_name(name);
+    if (!id.has_value())
+        return {};
+    return glyph_for_id(id, subpixel_offset);
 }
 
 float ScaledFont::glyph_left_bearing(u32 code_point) const
 {
     auto id = glyph_id_for_code_point(code_point);
     return glyph_metrics(id).left_side_bearing;
+}
+
+Optional<float> ScaledFont::glyph_left_bearing_for_postscript_name(StringView name) const
+{
+    auto id = glyph_id_for_postscript_name(name);
+    if (!id.has_value())
+        return {};
+    return glyph_metrics(id.value()).left_side_bearing;
+
 }
 
 float ScaledFont::glyph_width(u32 code_point) const
