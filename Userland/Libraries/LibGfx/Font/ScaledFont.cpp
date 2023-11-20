@@ -111,7 +111,7 @@ Optional<Glyph> ScaledFont::glyph_for_postscript_name(StringView name, GlyphSubp
     auto id = glyph_id_for_postscript_name(name);
     if (!id.has_value())
         return {};
-    return glyph_for_id(id, subpixel_offset);
+    return glyph_for_id(id.value(), subpixel_offset);
 }
 
 float ScaledFont::glyph_left_bearing(u32 code_point) const

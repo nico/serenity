@@ -69,19 +69,20 @@ PDFErrorOr<void> Type1Font::draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint po
 {
     auto color = renderer.state().paint_color;
 
-    if (!m_font_program) {
-        // Account for the reversed font baseline
-        auto position = point.translated(0, -m_font->baseline());
-        painter.draw_glyph(position, char_code, *m_font, color);
-        return {};
-    }
-
     auto effective_encoding = encoding();
-    if (!effective_encoding)
+    if (!effective_encoding && m_font_program)
         effective_encoding = m_font_program->encoding();
     if (!effective_encoding)
         effective_encoding = Encoding::standard_encoding();
     auto char_name = effective_encoding->get_name(char_code);
+
+    if (!m_font_program) {
+        // Account for the reversed font baseline
+        auto position = point.translated(0, -m_font->baseline());
+        painter.draw_glyph_with_postscript_name(position, char_name, *m_font, color);
+        return {};
+    }
+
     auto translation = m_font_program->glyph_translation(char_name, width);
     point = point.translated(translation);
 
