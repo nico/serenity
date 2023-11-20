@@ -82,6 +82,7 @@ public:
     virtual float preferred_line_height() const override { return glyph_height() + m_line_gap; }
 
     virtual float glyph_width(u32 code_point) const override;
+    virtual Optional<float> glyph_width_for_postscript_name(StringView) const override { return {}; }
     u8 raw_glyph_width(u32 code_point) const { return m_glyph_widths[code_point]; }
 
     u8 min_glyph_width() const override { return m_min_glyph_width; }

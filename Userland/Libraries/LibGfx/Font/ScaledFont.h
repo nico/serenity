@@ -53,6 +53,7 @@ public:
     Optional<Glyph> glyph_for_postscript_name(StringView, GlyphSubpixelOffset) const override;
     virtual bool contains_glyph(u32 code_point) const override { return m_font->glyph_id_for_code_point(code_point) > 0; }
     virtual float glyph_width(u32 code_point) const override;
+    virtual Optional<float> glyph_width_for_postscript_name(StringView) const override;
     virtual float glyph_or_emoji_width(Utf8CodePointIterator&) const override;
     virtual float glyph_or_emoji_width(Utf32CodePointIterator&) const override;
     virtual float glyphs_horizontal_kerning(u32 left_code_point, u32 right_code_point) const override;

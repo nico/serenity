@@ -54,8 +54,10 @@ PDFErrorOr<void> Type1Font::initialize(Document* document, NonnullRefPtr<DictObj
 
 Optional<float> Type1Font::get_glyph_width(u8 char_code) const
 {
-    if (m_font)
-        return m_font->glyph_width(char_code);
+    if (m_font) {
+        auto name = postscript_name_for_code(char_code);
+        return m_font->glyph_width_for_postscript_name(name);
+    }
     return OptionalNone {};
 }
 

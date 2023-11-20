@@ -184,6 +184,7 @@ public:
     virtual float glyph_left_bearing(u32 code_point) const = 0;
     virtual Optional<float> glyph_left_bearing_for_postscript_name(StringView) const = 0;
     virtual float glyph_width(u32 code_point) const = 0;
+    virtual Optional<float> glyph_width_for_postscript_name(StringView) const = 0;
     virtual float glyph_or_emoji_width(Utf8CodePointIterator&) const = 0;
     virtual float glyph_or_emoji_width(Utf32CodePointIterator&) const = 0;
     virtual float glyphs_horizontal_kerning(u32 left_code_point, u32 right_code_point) const = 0;

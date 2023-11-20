@@ -132,8 +132,15 @@ Optional<float> ScaledFont::glyph_left_bearing_for_postscript_name(StringView na
 float ScaledFont::glyph_width(u32 code_point) const
 {
     auto id = glyph_id_for_code_point(code_point);
-    auto metrics = glyph_metrics(id);
-    return metrics.advance_width;
+    return glyph_metrics(id).advance_width;
+}
+
+Optional<float> ScaledFont::glyph_width_for_postscript_name(StringView name) const
+{
+    auto id = glyph_id_for_postscript_name(name);
+    if (!id.has_value())
+        return {};
+    return glyph_metrics(id.value()).advance_width;
 }
 
 template<typename CodePointIterator>
