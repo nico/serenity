@@ -127,6 +127,7 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
     Optional<ReadonlyBytes> opt_os2_slice = {};
     Optional<ReadonlyBytes> opt_kern_slice = {};
     Optional<ReadonlyBytes> opt_fpgm_slice = {};
+    Optional<ReadonlyBytes> opt_post_slice = {};
     Optional<ReadonlyBytes> opt_prep_slice = {};
 
     Optional<CBLC> cblc;
@@ -167,6 +168,8 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
             opt_kern_slice = buffer_here;
         } else if (table_record.table_tag == tag_from_str("fpgm")) {
             opt_fpgm_slice = buffer_here;
+        } else if (table_record.table_tag == tag_from_str("post")) {
+            opt_post_slice = buffer_here;
         } else if (table_record.table_tag == tag_from_str("prep")) {
             opt_prep_slice = buffer_here;
         } else if (table_record.table_tag == tag_from_str("CBLC")) {
@@ -223,6 +226,10 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
     if (opt_fpgm_slice.has_value())
         fpgm = Fpgm(opt_fpgm_slice.value());
 
+    Optional<Post> post;
+    if (opt_post_slice.has_value())
+        post = TRY(Post::from_slice(opt_post_slice.value()));
+
     Optional<Prep> prep;
     if (opt_prep_slice.has_value())
         prep = Prep(opt_prep_slice.value());
@@ -268,6 +275,7 @@ ErrorOr<NonnullRefPtr<Font>> Font::try_load_from_offset(ReadonlyBytes buffer, u3
         move(os2),
         move(kern),
         move(fpgm),
+        move(post),
         move(prep),
         move(cblc),
         move(cbdt),
@@ -598,9 +606,12 @@ u32 Font::glyph_id_for_code_point(u32 code_point) const
     return glyph_page(code_point / GlyphPage::glyphs_per_page).glyph_ids[code_point % GlyphPage::glyphs_per_page];
 }
 
-Optional<u32> Font::glyph_id_for_postscript_name(StringView) const
+Optional<u32> Font::glyph_id_for_postscript_name(StringView name) const
 {
-    // FIXME: Look at 'post' or 'CFF ' data if present.
+    if (m_post.has_value())
+        return m_post->glyph_id_for_postscript_name(name);
+
+    // FIXME: Look at 'CFF ' data if present.
     return {};
 }
 
