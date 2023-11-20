@@ -65,25 +65,29 @@ void Type1Font::set_font_size(float font_size)
         m_font = m_font->with_size((font_size * POINTS_PER_INCH) / DEFAULT_DPI);
 }
 
-PDFErrorOr<void> Type1Font::draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint point, float width, u8 char_code, Renderer const& renderer)
+DeprecatedString Type1Font::postscript_name_for_code(u8 char_code) const
 {
-    auto color = renderer.state().paint_color;
-
     auto effective_encoding = encoding();
     if (!effective_encoding && m_font_program)
         effective_encoding = m_font_program->encoding();
     if (!effective_encoding)
         effective_encoding = Encoding::standard_encoding();
-    auto char_name = effective_encoding->get_name(char_code);
+    return effective_encoding->get_name(char_code);
+}
+
+PDFErrorOr<void> Type1Font::draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint point, float width, u8 char_code, Renderer const& renderer)
+{
+    auto color = renderer.state().paint_color;
+    auto name = postscript_name_for_code(char_code);
 
     if (!m_font_program) {
         // Account for the reversed font baseline
         auto position = point.translated(0, -m_font->baseline());
-        painter.draw_glyph_with_postscript_name(position, char_name, *m_font, color);
+        painter.draw_glyph_with_postscript_name(position, name, *m_font, color);
         return {};
     }
 
-    auto translation = m_font_program->glyph_translation(char_name, width);
+    auto translation = m_font_program->glyph_translation(name, width);
     point = point.translated(translation);
 
     auto glyph_position = Gfx::GlyphRasterPosition::get_nearest_fit_for(point);
@@ -94,7 +98,7 @@ PDFErrorOr<void> Type1Font::draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint po
     if (maybe_bitmap.has_value()) {
         bitmap = maybe_bitmap.value();
     } else {
-        bitmap = m_font_program->rasterize_glyph(char_name, width, glyph_position.subpixel_offset);
+        bitmap = m_font_program->rasterize_glyph(name, width, glyph_position.subpixel_offset);
         m_glyph_cache.set(index, bitmap);
     }
 
