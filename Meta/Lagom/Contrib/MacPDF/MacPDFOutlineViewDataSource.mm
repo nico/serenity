@@ -68,6 +68,8 @@
     if ([s containsString:weird])
         dbgln("found that weird thing");
 
+    s = [[s componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] componentsJoinedByString:@" "];
+
     return s;
 }
 @end

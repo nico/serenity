@@ -253,6 +253,8 @@ textField.autoresizesSubviews = YES;
         textField.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
 //        textField.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin | NSViewMaxYMargin;
 
+        textField.usesSingleLineMode = YES;
+
 #if 0
         textField.editable = NO;
         textField.selectable = NO;
