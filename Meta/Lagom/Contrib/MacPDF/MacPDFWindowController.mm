@@ -74,10 +74,22 @@
     _outlineView.focusRingType = NSFocusRingTypeNone;
     _outlineView.headerView = nil;
 
+    NSSize intercellSpacing = _outlineView.intercellSpacing;
+    intercellSpacing.height = 25;
+    _outlineView.intercellSpacing = intercellSpacing;
+
+//    _outlineView.usesAutomaticRowHeights = YES;
+    _outlineView.usesAutomaticRowHeights = NO;
+
+//    _outlineView.selectionHighlightStyle = NSTableViewSelectionHighlightStyleSourceList;
+    _outlineView.style = NSTableViewStyleSourceList;
+
     // FIXME: Implement data source support for autosaveExpandedItems and use that.
 
     // rowSizeStyle does not default to NSTableViewRowSizeStyleDefault, but needs to be set to it for outline views in sourcelist style.
     _outlineView.rowSizeStyle = NSTableViewRowSizeStyleDefault;
+//    _outlineView.rowSizeStyle = NSTableViewRowSizeStyleLarge;
+    _outlineView.rowSizeStyle = NSTableViewRowSizeStyleSmall;
 
     NSTableColumn* column = [[NSTableColumn alloc] initWithIdentifier:@"OutlineColumn"];
     column.editable = NO;
@@ -228,18 +240,58 @@
         cellView = [[NSTableCellView alloc] init];
         cellView.identifier = tableColumn.identifier;
 
+        cellView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+//        cellView.translatesAutoresizingMaskIntoConstraints = NO;
+cellView.autoresizesSubviews = YES;
+
+
         NSTextField* textField = [NSTextField labelWithString:@""];
+
+        // Configure textField as a label that shows vertically centered text.
+//          textField.translatesAutoresizingMaskIntoConstraints = NO;
+textField.autoresizesSubviews = YES;
+        textField.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
+//        textField.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin | NSViewMaxYMargin;
+
+#if 0
+        textField.editable = NO;
+        textField.selectable = NO;
+        textField.bordered = NO;
+        textField.bezeled = NO;
+        textField.drawsBackground = NO;
+        textField.alignment = NSTextAlignmentNatural;
+        textField.usesSingleLineMode = YES;
+        textField.allowsDefaultTighteningForTruncation = NO;
+        textField.allowsEditingTextAttributes = NO;
+        textField.importsGraphics = NO;
+#endif
+
         textField.lineBreakMode = NSLineBreakByTruncatingTail;
+//        textField.translatesAutoresizingMaskIntoConstraints = NO;
+//        textField.lineBreakStrategy = NSLineBreakStrategyNone;
+//        textField.lineBreakStrategy = NSLineBreakStrategyStandard;
+
+//        [textField layoutManager];
 
         // https://stackoverflow.com/a/29725553/551986
         // "If your cell view is an NSTableCellView, that class also responds to -setObjectValue:. [...]
         //  However, an NSTableCellView does not inherently do anything with the object value. It just holds it.
         //  What you can then do is have the subviews bind to it through the objectValue property."
-        [textField bind:@"objectValue" toObject:cellView withKeyPath:@"objectValue" options:nil];
+        //[textField bind:NSValueBinding toObject:cellView withKeyPath:@"objectValue" options:nil];
 
         [cellView addSubview:textField];
         cellView.textField = textField;
     }
+
+NSLog(@"item: %@", item);
+    cellView.objectValue = [item objectValue];
+    cellView.textField.stringValue = [item objectValue];
+//    cellView.textField.font = [NSFont systemFontOfSize:20];
+//    [cellView.textField setFont:[NSFont systemFontOfSize:20]];
+
+NSLog(@"cellView frame: %@", NSStringFromRect(cellView.frame));
+NSLog(@"cellView.textField frame: %@", NSStringFromRect(cellView.textField.frame));
+
 
     return cellView;
 }
@@ -254,5 +306,20 @@
     if (auto page = [item page]; page.has_value())
         [_pdfView goToPage:page.value()];
 }
+
+- (void)outlineView:(NSOutlineView *)outlineView 
+      didAddRowView:(NSTableRowView *)rowView 
+             forRow:(NSInteger)row {
+    //[rowView setTranslatesAutoresizingMaskIntoConstraints:NO];   // Disable constraints interfering with row view content
+//    rowView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable | NSViewMinXMargin | NSViewMaxXMargin | NSViewMinYMargin | NSViewMaxYMargin;
+rowView.autoresizesSubviews = YES;
+//    rowView.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
+
+ }
+
+- (CGFloat)outlineView:(NSOutlineView *)outlineView 
+     heightOfRowByItem:(id)item {
+    return 45;
+ }
 
 @end

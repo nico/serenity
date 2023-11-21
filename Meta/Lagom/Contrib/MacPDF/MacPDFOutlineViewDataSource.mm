@@ -60,7 +60,15 @@
 {
     if (_groupName)
         return _groupName;
-    return [NSString stringWithFormat:@"%s", _item->title.characters()]; // FIXME: encoding?
+    auto* s = [NSString stringWithUTF8String:_item->title.characters()];
+
+    unichar esc = 0x1b; // esc
+    auto* weird = [NSString stringWithCharacters:&esc length:1];
+
+    if ([s containsString:weird])
+        dbgln("found that weird thing");
+
+    return s;
 }
 @end
 
