@@ -72,6 +72,8 @@ enum class BitmapFormat;
 enum class ColorRole;
 enum class TextAlignment;
 
+class VectorFont;
+
 }
 
 using Gfx::Color;

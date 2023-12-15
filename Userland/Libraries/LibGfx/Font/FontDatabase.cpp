@@ -216,6 +216,18 @@ RefPtr<Gfx::Font> FontDatabase::get(FlyString const& family, FlyString const& va
     return nullptr;
 }
 
+RefPtr<Gfx::VectorFont> FontDatabase::get_vector(FlyString const& family, FlyString const& variant)
+{
+    auto it = m_private->typefaces.find(family);
+    if (it == m_private->typefaces.end())
+        return nullptr;
+    for (auto const& typeface : it->value) {
+        if (typeface->variant() == variant)
+            return typeface->vector_font();
+    }
+    return nullptr;
+}
+
 RefPtr<Typeface> FontDatabase::get_or_create_typeface(FlyString const& family, FlyString const& variant)
 {
     auto it = m_private->typefaces.find(family);

@@ -39,6 +39,7 @@ public:
     void set_vector_font(RefPtr<VectorFont>);
 
     RefPtr<Font> get_font(float point_size, Font::AllowInexactSizeMatch = Font::AllowInexactSizeMatch::No) const;
+    RefPtr<VectorFont> vector_font() const { return m_vector_font; }
 
 private:
     FlyString m_family;
