@@ -33,7 +33,7 @@ namespace PDF {
         "Courier-BoldOblique", "CourierNew,BoldItalic");
 }
 
-PDFErrorOr<NonnullRefPtr<PDFFont>> PDFFont::create(Document* document, NonnullRefPtr<DictObject> const& dict, float font_size)
+PDFErrorOr<NonnullRefPtr<PDFFont>> PDFFont::create(Document* document, NonnullRefPtr<DictObject> const& dict)
 {
     auto subtype = TRY(dict->get_name(document, CommonNames::Subtype))->name();
 
@@ -51,16 +51,16 @@ PDFErrorOr<NonnullRefPtr<PDFFont>> PDFFont::create(Document* document, NonnullRe
         return Error::internal_error("Unhandled font subtype");
     }
 
-    TRY(font->initialize(document, dict, font_size));
+    TRY(font->initialize(document, dict));
     return font.release_nonnull();
 }
 
-PDFErrorOr<void> PDFFont::initialize(Document*, NonnullRefPtr<DictObject> const&, float)
+PDFErrorOr<void> PDFFont::initialize(Document*, NonnullRefPtr<DictObject> const&)
 {
     return {};
 }
 
-PDFErrorOr<NonnullRefPtr<Gfx::Font>> PDFFont::replacement_for(StringView name, float font_size)
+PDFErrorOr<NonnullRefPtr<Gfx::VectorFont>> PDFFont::replacement_for(StringView name)
 {
     bool is_bold = name.contains("bold"sv, CaseSensitivity::CaseInsensitive);
     bool is_italic = name.contains("italic"sv, CaseSensitivity::CaseInsensitive);
@@ -86,10 +86,9 @@ PDFErrorOr<NonnullRefPtr<Gfx::Font>> PDFFont::replacement_for(StringView name, f
         font_variant = "Regular"_fly_string;
     }
 
-    float point_size = (font_size * POINTS_PER_INCH) / DEFAULT_DPI;
-    auto font = Gfx::FontDatabase::the().get(font_family, font_variant, point_size);
+    auto font = Gfx::FontDatabase::the().get_vector(font_family, font_variant);
     if (!font)
-        return Error::internal_error("Failed to load {} {} at {}pt", font_family, font_variant, point_size);
+        return Error::internal_error("Failed to load {} {}", font_family, font_variant);
     return font.release_nonnull();
 }
 

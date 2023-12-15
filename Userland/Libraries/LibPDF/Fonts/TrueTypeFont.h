@@ -21,11 +21,11 @@ public:
     DeprecatedFlyString base_font_name() const { return m_base_font_name; }
 
 protected:
-    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&, float font_size) override;
+    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&) override;
 
 private:
     DeprecatedFlyString m_base_font_name;
-    RefPtr<Gfx::Font> m_font;
+    RefPtr<Gfx::VectorFont> m_font;
 };
 
 }

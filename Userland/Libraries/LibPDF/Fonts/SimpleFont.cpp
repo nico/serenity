@@ -15,9 +15,9 @@
 
 namespace PDF {
 
-PDFErrorOr<void> SimpleFont::initialize(Document* document, NonnullRefPtr<DictObject> const& dict, float font_size)
+PDFErrorOr<void> SimpleFont::initialize(Document* document, NonnullRefPtr<DictObject> const& dict)
 {
-    TRY(PDFFont::initialize(document, dict, font_size));
+    TRY(PDFFont::initialize(document, dict));
     if (dict->contains(CommonNames::Encoding)) {
         auto encoding_object = MUST(dict->get_object(document, CommonNames::Encoding));
         m_encoding = TRY(Encoding::from_object(document, encoding_object));

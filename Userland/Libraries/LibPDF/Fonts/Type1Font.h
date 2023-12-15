@@ -29,12 +29,12 @@ public:
     DeprecatedFlyString base_font_name() const { return m_base_font_name; }
 
 protected:
-    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&, float font_size) override;
+    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&) override;
 
 private:
     DeprecatedFlyString m_base_font_name;
     RefPtr<Type1FontProgram> m_font_program;
-    RefPtr<Gfx::Font> m_font;
+    RefPtr<Gfx::VectorFont> m_font;
     HashMap<Type1GlyphCacheKey, RefPtr<Gfx::Bitmap>> m_glyph_cache;
 };
 

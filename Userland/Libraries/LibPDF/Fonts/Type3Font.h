@@ -17,7 +17,7 @@ public:
     PDFErrorOr<void> draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint point, float width, u8 char_code, Renderer const&) override;
 
 protected:
-    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&, float font_size) override;
+    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&) override;
 
 private:
     HashMap<DeprecatedFlyString, NonnullRefPtr<StreamObject>> m_char_procs;

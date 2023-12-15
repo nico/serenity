@@ -18,7 +18,7 @@ class Renderer;
 
 class PDFFont : public RefCounted<PDFFont> {
 public:
-    static PDFErrorOr<NonnullRefPtr<PDFFont>> create(Document*, NonnullRefPtr<DictObject> const&, float font_size);
+    static PDFErrorOr<NonnullRefPtr<PDFFont>> create(Document*, NonnullRefPtr<DictObject> const&);
 
     virtual ~PDFFont() = default;
 
@@ -26,8 +26,8 @@ public:
     virtual PDFErrorOr<Gfx::FloatPoint> draw_string(Gfx::Painter&, Gfx::FloatPoint, ByteString const&, Renderer const&) = 0;
 
 protected:
-    virtual PDFErrorOr<void> initialize(Document* document, NonnullRefPtr<DictObject> const& dict, float font_size);
-    static PDFErrorOr<NonnullRefPtr<Gfx::Font>> replacement_for(StringView name, float font_size);
+    virtual PDFErrorOr<void> initialize(Document* document, NonnullRefPtr<DictObject> const& dict);
+    static PDFErrorOr<NonnullRefPtr<Gfx::VectorFont>> replacement_for(StringView name);
 };
 
 }

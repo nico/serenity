@@ -37,12 +37,12 @@ PDFErrorOr<Gfx::FloatPoint> CIDFontType0::draw_string(Gfx::Painter&, Gfx::FloatP
 
 class CIDFontType2 : public CIDFontType {
 public:
-    static PDFErrorOr<NonnullOwnPtr<CIDFontType2>> create(Document*, NonnullRefPtr<DictObject> const& descendant, float font_size);
+    static PDFErrorOr<NonnullOwnPtr<CIDFontType2>> create(Document*, NonnullRefPtr<DictObject> const& descendant);
 
     PDFErrorOr<Gfx::FloatPoint> draw_string(Gfx::Painter&, Gfx::FloatPoint, ByteString const&) override;
 };
 
-PDFErrorOr<NonnullOwnPtr<CIDFontType2>> CIDFontType2::create(Document* document, NonnullRefPtr<DictObject> const& descendant, float font_size)
+PDFErrorOr<NonnullOwnPtr<CIDFontType2>> CIDFontType2::create(Document* document, NonnullRefPtr<DictObject> const& descendant)
 {
     auto descriptor = TRY(descendant->get_dict(document, CommonNames::FontDescriptor));
 
@@ -58,13 +58,11 @@ PDFErrorOr<NonnullOwnPtr<CIDFontType2>> CIDFontType2::create(Document* document,
     RefPtr<Gfx::Font> font;
     if (descriptor->contains(CommonNames::FontFile2)) {
         auto font_file_stream = TRY(descriptor->get_stream(document, CommonNames::FontFile2));
-        float point_size = (font_size * POINTS_PER_INCH) / DEFAULT_DPI;
         // FIXME: Load font_file_stream->bytes() as TTF data, similar to TrueTypeFont::initialize().
         //        Unfortunately, TTF data in Type0 CIDFontType2 fonts don't contain the "cmap" table
         //        that's mandatory per TTF spec and the PDF stores that mapping in CIDToGIDMap instead.
         //        OpenType::Font::try_load currently rejects TTF data without "cmap" data.
         (void)font_file_stream;
-        (void)point_size;
     }
 
     return TRY(adopt_nonnull_own_or_enomem(new (nothrow) CIDFontType2()));
@@ -91,9 +89,9 @@ PDFErrorOr<Gfx::FloatPoint> CIDFontType2::draw_string(Gfx::Painter&, Gfx::FloatP
 Type0Font::Type0Font() = default;
 Type0Font::~Type0Font() = default;
 
-PDFErrorOr<void> Type0Font::initialize(Document* document, NonnullRefPtr<DictObject> const& dict, float font_size)
+PDFErrorOr<void> Type0Font::initialize(Document* document, NonnullRefPtr<DictObject> const& dict)
 {
-    TRY(PDFFont::initialize(document, dict, font_size));
+    TRY(PDFFont::initialize(document, dict));
 
     m_base_font_name = TRY(dict->get_name(document, CommonNames::BaseFont))->name();
 
@@ -117,7 +115,7 @@ PDFErrorOr<void> Type0Font::initialize(Document* document, NonnullRefPtr<DictObj
         m_cid_font_type = TRY(try_make<CIDFontType0>());
     } else if (subtype == CommonNames::CIDFontType2) {
         // TrueType-based
-        m_cid_font_type = TRY(CIDFontType2::create(document, descendant_font, font_size));
+        m_cid_font_type = TRY(CIDFontType2::create(document, descendant_font));
     } else {
         return Error { Error::Type::MalformedPDF, "invalid /Subtype for Type 0 font" };
     }

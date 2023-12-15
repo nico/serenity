@@ -475,7 +475,7 @@ PDFErrorOr<NonnullRefPtr<PDFFont>> Renderer::get_font(FontCacheKey const& key)
         return it->value;
     }
 
-    auto font = TRY(PDFFont::create(m_document, key.font_dictionary, key.font_size));
+    auto font = TRY(PDFFont::create(m_document, key.font_dictionary));
     m_font_cache.set(key, font);
     return font;
 }
@@ -493,6 +493,7 @@ RENDERER_HANDLER(text_set_font)
     auto fonts_dictionary = MUST(resources->get_dict(m_document, CommonNames::Font));
     auto font_dictionary = MUST(fonts_dictionary->get_dict(m_document, target_font_name));
 
+    // XXX remove font_size from cache_key, and make use of it elsewhere
     FontCacheKey cache_key { move(font_dictionary), font_size };
     text_state().font = TRY(get_font(cache_key));
 

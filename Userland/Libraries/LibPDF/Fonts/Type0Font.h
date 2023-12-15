@@ -31,7 +31,7 @@ public:
     DeprecatedFlyString base_font_name() const { return m_base_font_name; }
 
 protected:
-    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&, float) override;
+    PDFErrorOr<void> initialize(Document*, NonnullRefPtr<DictObject> const&) override;
 
 private:
     float get_char_width(u16 char_code) const;

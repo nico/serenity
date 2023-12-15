@@ -14,9 +14,9 @@
 
 namespace PDF {
 
-PDFErrorOr<void> Type1Font::initialize(Document* document, NonnullRefPtr<DictObject> const& dict, float font_size)
+PDFErrorOr<void> Type1Font::initialize(Document* document, NonnullRefPtr<DictObject> const& dict)
 {
-    TRY(SimpleFont::initialize(document, dict, font_size));
+    TRY(SimpleFont::initialize(document, dict));
 
     m_base_font_name = TRY(dict->get_name(document, CommonNames::BaseFont))->name();
 
@@ -45,30 +45,31 @@ PDFErrorOr<void> Type1Font::initialize(Document* document, NonnullRefPtr<DictObj
         }
     }
     if (!m_font_program) {
-        m_font = TRY(replacement_for(base_font_name().to_lowercase(), font_size));
+        m_font = TRY(replacement_for(base_font_name().to_lowercase()));
     }
 
     VERIFY(m_font_program || m_font);
     return {};
 }
 
-Optional<float> Type1Font::get_glyph_width(u8 char_code) const
+Optional<float> Type1Font::get_glyph_width(u8) const
 {
-    if (m_font)
-        return m_font->glyph_width(char_code);
+    //if (m_font)
+    //    return m_font->glyph_width(char_code);
     return OptionalNone {};
 }
 
-void Type1Font::set_font_size(float font_size)
+void Type1Font::set_font_size(float)
 {
-    if (m_font)
-        m_font = m_font->with_size((font_size * POINTS_PER_INCH) / DEFAULT_DPI);
+    //if (m_font)
+    //    m_font = m_font->with_size((font_size * POINTS_PER_INCH) / DEFAULT_DPI);
 }
 
 PDFErrorOr<void> Type1Font::draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint point, float width, u8 char_code, Renderer const& renderer)
 {
     auto style = renderer.state().paint_style;
 
+#if 0
     if (!m_font_program) {
         // Undo shift in Glyf::Glyph::append_simple_path() via OpenType::Font::rasterize_glyph().
         auto position = point.translated(0, -m_font->pixel_metrics().ascent);
@@ -82,6 +83,7 @@ PDFErrorOr<void> Type1Font::draw_glyph(Gfx::Painter& painter, Gfx::FloatPoint po
         }
         return {};
     }
+#endif
 
     auto effective_encoding = encoding();
     if (!effective_encoding)

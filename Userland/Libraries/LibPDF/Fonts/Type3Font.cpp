@@ -11,9 +11,9 @@
 
 namespace PDF {
 
-PDFErrorOr<void> Type3Font::initialize(Document* document, NonnullRefPtr<DictObject> const& dict, float font_size)
+PDFErrorOr<void> Type3Font::initialize(Document* document, NonnullRefPtr<DictObject> const& dict)
 {
-    TRY(SimpleFont::initialize(document, dict, font_size));
+    TRY(SimpleFont::initialize(document, dict));
 
     // "TABLE 5.9 Entries in a Type 3 font dictionary"
 

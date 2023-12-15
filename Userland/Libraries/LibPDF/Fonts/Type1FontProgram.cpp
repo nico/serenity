@@ -95,7 +95,7 @@ Gfx::FloatPoint Type1FontProgram::glyph_translation(DeprecatedFlyString const& c
     if (!maybe_glyph.has_value())
         return {};
 
-    auto& glyph = maybe_glyph.value();
+    auto const& glyph = maybe_glyph.value();
     auto transform = glyph_transform_to_device_space(glyph, width);
 
     // Undo the translation we applied earlier.
@@ -107,6 +107,7 @@ Gfx::FloatPoint Type1FontProgram::glyph_translation(DeprecatedFlyString const& c
 
 Gfx::AffineTransform Type1FontProgram::glyph_transform_to_device_space(Glyph const& glyph, float width) const
 {
+    // XXX this is wrong now i think
     auto scale = width / (m_font_matrix.a() * glyph.width() + m_font_matrix.e());
     auto transform = m_font_matrix;
 
