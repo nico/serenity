@@ -103,6 +103,12 @@ PDFErrorOr<NonnullRefPtr<Document>> Document::create(ReadonlyBytes bytes)
         bytes = bytes.slice(offset_to_start);
     }
 
+    size_t superfluous_bytes_after_end = TRY(DocumentParser::scan_for_eof_marker(bytes));
+    if (superfluous_bytes_after_end != 0) {
+        dbgln("warning: PDF %%EOF not at end of file, {} trailing bytes", superfluous_bytes_after_end);
+        bytes = bytes.trim(bytes.size() - superfluous_bytes_after_end);
+    }
+
     auto parser = adopt_ref(*new DocumentParser({}, bytes));
     auto document = adopt_ref(*new Document(parser));
 

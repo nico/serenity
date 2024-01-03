@@ -85,6 +85,18 @@ PDFErrorOr<size_t> DocumentParser::scan_for_header_start(ReadonlyBytes bytes)
     return start_offset.value();
 }
 
+PDFErrorOr<size_t> DocumentParser::scan_for_eof_marker(ReadonlyBytes bytes)
+{
+    // PDF 1.7 spec, APPENDIX H, 3.4.4 "File Trailer":
+    // "18. Acrobat viewers require only that the %%EOF marker appear somewhere within the last 1024 bytes of the file."
+    StringView last_bytes = bytes.slice_from_end(min(bytes.size(), 1024));
+    Optional<size_t> eof_offset = last_bytes.find_last("%%EOF"sv);
+    if (!eof_offset.has_value())
+        return Error { Error::Type::Parse, "Failed to find %%EOF marker" };
+    size_t end_of_eof_offset = eof_offset.value() + "%%EOF"sv.length();
+    return last_bytes.length() - end_of_eof_offset;
+}
+
 PDFErrorOr<Version> DocumentParser::parse_header()
 {
     m_reader.move_to(0);
