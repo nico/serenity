@@ -5,6 +5,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+ #define JPEG_DEBUG 1
+
 #include <AK/Debug.h>
 #include <AK/Endian.h>
 #include <AK/Error.h>
@@ -230,6 +232,11 @@ public:
         return m_byte_offset;
     }
 
+    u64 byte_offset_from_start() const
+    {
+        return static_cast<AK::FixedMemoryStream const&>(*m_stream).offset() + m_byte_offset;
+    }
+
 private:
     JPEGStream(NonnullOwnPtr<Stream> stream, Vector<u8> buffer)
         : m_stream(move(stream))
@@ -351,9 +358,10 @@ private:
                 }
 
                 Marker const marker = 0xFF00 | next_byte;
-                if (marker < JPEG_RST0 || marker > JPEG_RST7) {
+                if ((marker < JPEG_RST0 || marker > JPEG_RST7) && marker != JPEG_SOI && marker != JPEG_EOI) {
                     // Note: The only way to know that we reached the end of a segment is to read
                     //       the marker of the following one. So we store it for later use.
+                    dbgln_if(JPEG_DEBUG, "Saving marker: 0x{:04x}", marker);
                     jpeg_stream.saved_marker({}) = marker;
                     m_last_byte_was_ff = false;
                     continue;
@@ -800,6 +808,7 @@ static ErrorOr<void> decode_huffman_stream(JPEGLoadingContext& context, Vector<M
 
             if (context.dc_restart_interval > 0) {
                 if (i != 0 && i % (context.dc_restart_interval * context.sampling_factors.vertical * context.sampling_factors.horizontal) == 0) {
+dbgln("Restarting decoder at macroblock {}, offset 0x{:x}", i, context.stream.byte_offset_from_start());
                     reset_decoder(context);
 
                     // Restart markers are stored in byte boundaries. Advance the huffman stream cursor to
@@ -876,6 +885,7 @@ static inline bool is_supported_marker(Marker const marker)
 
 static inline ErrorOr<Marker> read_marker_at_cursor(JPEGStream& stream)
 {
+    dbgln_if(JPEG_DEBUG, "JPEG: trying to read marker at 0x{:x}", stream.byte_offset_from_start());
     u16 marker = TRY(stream.read_u16());
 
     if (marker == 0xFFFF) {
@@ -890,6 +900,7 @@ static inline ErrorOr<Marker> read_marker_at_cursor(JPEGStream& stream)
     if (is_supported_marker(marker))
         return marker;
 
+    dbgln_if(JPEG_DEBUG, "JPEG: Unsupported marker 0x{:04x} before offset 0x{:x}", marker, stream.byte_offset_from_start());
     return Error::from_string_literal("Reached an unsupported marker");
 }
 
@@ -910,6 +921,7 @@ static ErrorOr<void> read_start_of_scan(JPEGStream& stream, JPEGLoadingContext& 
         return Error::from_string_literal("SOS found before reading a SOF");
 
     [[maybe_unused]] u16 const bytes_to_read = TRY(read_effective_chunk_size(stream));
+dbgln("SOS Bytes to read: {}", bytes_to_read);
     u8 const component_count = TRY(stream.read_u8());
 
     Scan current_scan(HuffmanStream { context.stream });
