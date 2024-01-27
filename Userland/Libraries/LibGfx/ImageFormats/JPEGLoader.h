@@ -51,4 +51,6 @@ private:
     NonnullOwnPtr<JPEGLoadingContext> m_context;
 };
 
+void inverse_dct_8x8(i16*);
+
 }

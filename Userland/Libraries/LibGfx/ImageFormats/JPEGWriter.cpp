@@ -28,7 +28,7 @@ static Array<double, 64> create_cosine_lookup_table()
     return table;
 }
 
-static void dct_and_quantize_8x8(i16 component[], Array<u8, 64> const& quantization_table)
+void dct_and_quantize_8x8(i16 component[], Array<u8, 64> const& quantization_table)
 {
     static auto cosine_table = create_cosine_lookup_table();
 

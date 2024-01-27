@@ -26,4 +26,6 @@ private:
     JPEGWriter() = delete;
 };
 
+void dct_and_quantize_8x8(i16 component[], Array<u8, 64> const& quantization_table);
+
 }

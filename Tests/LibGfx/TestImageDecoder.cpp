@@ -14,6 +14,7 @@
 #include <LibGfx/ImageFormats/ILBMLoader.h>
 #include <LibGfx/ImageFormats/ImageDecoder.h>
 #include <LibGfx/ImageFormats/JPEGLoader.h>
+#include <LibGfx/ImageFormats/JPEGWriter.h>
 #include <LibGfx/ImageFormats/JPEGXLLoader.h>
 #include <LibGfx/ImageFormats/PAMLoader.h>
 #include <LibGfx/ImageFormats/PBMLoader.h>
@@ -304,6 +305,36 @@ TEST_CASE(test_ilbm_malformed_frame)
         auto frame_or_error = plugin_decoder->frame(0);
         EXPECT(frame_or_error.is_error());
     }
+}
+
+static void test_jpeg_decoder_compliance(i16* input)
+{
+    i16 image[64];
+    memcpy(image, input, sizeof(image));
+    Gfx::inverse_dct_8x8(image);
+
+    i16 output[64];
+    memcpy(output, image, sizeof(output));
+    Array<u8, 64> no_quantization_table;
+    no_quantization_table.fill(1);
+    Gfx::dct_and_quantize_8x8(output, no_quantization_table);
+
+    for (int i = 0; i < 64; ++i) {
+        EXPECT(abs(input[i] - output[i]) <= 1);
+    }
+}
+
+TEST_CASE(test_jpeg_decoder_compliance)
+{
+    i16 input[64] = {};
+    input[0] = 8 * -128; // black 8x8 square
+    test_jpeg_decoder_compliance(input);
+
+    input[0] = 8 * 127; // white 8x8 square
+    test_jpeg_decoder_compliance(input);
+
+    input[0] = 0; // gray 8x8 square
+    test_jpeg_decoder_compliance(input);
 }
 
 TEST_CASE(test_jpeg_sof0_one_scan)

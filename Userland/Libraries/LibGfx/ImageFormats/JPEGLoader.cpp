@@ -1412,7 +1412,7 @@ static ErrorOr<void> dequantize(JPEGLoadingContext& context, Vector<Macroblock>&
     return {};
 }
 
-static void inverse_dct_8x8(i16* block_component)
+void inverse_dct_8x8(i16* block_component)
 {
     static float const m0 = 2.0f * AK::cos(1.0f / 16.0f * 2.0f * AK::Pi<float>);
     static float const m1 = 2.0f * AK::cos(2.0f / 16.0f * 2.0f * AK::Pi<float>);
