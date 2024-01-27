@@ -1420,7 +1420,7 @@ void inverse_dct_8x8(i16* block_component)
     static float const m5 = 2.0f * AK::cos(3.0f / 16.0f * 2.0f * AK::Pi<float>);
     static float const m2 = m0 - m5;
     static float const m4 = m0 + m5;
-    static float const s0 = AK::cos(0.0f / 16.0f * AK::Pi<float>) * AK::rsqrt(8.0f);
+    static float const s0 = AK::cos(0.0f / 16.0f * AK::Pi<float>) / AK::sqrt(8.0f);
     static float const s1 = AK::cos(1.0f / 16.0f * AK::Pi<float>) / 2.0f;
     static float const s2 = AK::cos(2.0f / 16.0f * AK::Pi<float>) / 2.0f;
     static float const s3 = AK::cos(3.0f / 16.0f * AK::Pi<float>) / 2.0f;
@@ -1554,14 +1554,14 @@ void inverse_dct_8x8(i16* block_component)
         float const b6 = c6 - c7;
         float const b7 = c7;
 
-        block_component[l * 8 + 0] = b0 + b7;
-        block_component[l * 8 + 1] = b1 + b6;
-        block_component[l * 8 + 2] = b2 + b5;
-        block_component[l * 8 + 3] = b3 + b4;
-        block_component[l * 8 + 4] = b3 - b4;
-        block_component[l * 8 + 5] = b2 - b5;
-        block_component[l * 8 + 6] = b1 - b6;
-        block_component[l * 8 + 7] = b0 - b7;
+        block_component[l * 8 + 0] = round_to<i16>(b0 + b7);
+        block_component[l * 8 + 1] = round_to<i16>(b1 + b6);
+        block_component[l * 8 + 2] = round_to<i16>(b2 + b5);
+        block_component[l * 8 + 3] = round_to<i16>(b3 + b4);
+        block_component[l * 8 + 4] = round_to<i16>(b3 - b4);
+        block_component[l * 8 + 5] = round_to<i16>(b2 - b5);
+        block_component[l * 8 + 6] = round_to<i16>(b1 - b6);
+        block_component[l * 8 + 7] = round_to<i16>(b0 - b7);
     }
 }
 
