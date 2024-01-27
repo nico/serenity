@@ -1420,7 +1420,11 @@ static void inverse_dct(JPEGLoadingContext const& context, Vector<Macroblock>& m
     static float const m5 = 2.0f * AK::cos(3.0f / 16.0f * 2.0f * AK::Pi<float>);
     static float const m2 = m0 - m5;
     static float const m4 = m0 + m5;
+#if 0
     static float const s0 = AK::cos(0.0f / 16.0f * AK::Pi<float>) * AK::rsqrt(8.0f);
+#else
+    static float const s0 = AK::cos(0.0f / 16.0f * AK::Pi<float>) / AK::sqrt(8.0f);
+#endif
     static float const s1 = AK::cos(1.0f / 16.0f * AK::Pi<float>) / 2.0f;
     static float const s2 = AK::cos(2.0f / 16.0f * AK::Pi<float>) / 2.0f;
     static float const s3 = AK::cos(3.0f / 16.0f * AK::Pi<float>) / 2.0f;
@@ -1428,6 +1432,8 @@ static void inverse_dct(JPEGLoadingContext const& context, Vector<Macroblock>& m
     static float const s5 = AK::cos(5.0f / 16.0f * AK::Pi<float>) / 2.0f;
     static float const s6 = AK::cos(6.0f / 16.0f * AK::Pi<float>) / 2.0f;
     static float const s7 = AK::cos(7.0f / 16.0f * AK::Pi<float>) / 2.0f;
+
+    float workspace[64];
 
     for (u32 vcursor = 0; vcursor < context.mblock_meta.vcount; vcursor += context.sampling_factors.vertical) {
         for (u32 hcursor = 0; hcursor < context.mblock_meta.hcount; hcursor += context.sampling_factors.horizontal) {
@@ -1496,6 +1502,7 @@ static void inverse_dct(JPEGLoadingContext const& context, Vector<Macroblock>& m
                             float const b6 = c6 - c7;
                             float const b7 = c7;
 
+#if 0
                             block_component[0 * 8 + k] = b0 + b7;
                             block_component[1 * 8 + k] = b1 + b6;
                             block_component[2 * 8 + k] = b2 + b5;
@@ -1504,8 +1511,19 @@ static void inverse_dct(JPEGLoadingContext const& context, Vector<Macroblock>& m
                             block_component[5 * 8 + k] = b2 - b5;
                             block_component[6 * 8 + k] = b1 - b6;
                             block_component[7 * 8 + k] = b0 - b7;
+#else
+                            workspace[0 * 8 + k] = b0 + b7;
+                            workspace[1 * 8 + k] = b1 + b6;
+                            workspace[2 * 8 + k] = b2 + b5;
+                            workspace[3 * 8 + k] = b3 + b4;
+                            workspace[4 * 8 + k] = b3 - b4;
+                            workspace[5 * 8 + k] = b2 - b5;
+                            workspace[6 * 8 + k] = b1 - b6;
+                            workspace[7 * 8 + k] = b0 - b7;
+#endif
                         }
                         for (u32 l = 0; l < 8; ++l) {
+#if 0
                             float const g0 = block_component[l * 8 + 0] * s0;
                             float const g1 = block_component[l * 8 + 4] * s4;
                             float const g2 = block_component[l * 8 + 2] * s2;
@@ -1514,6 +1532,16 @@ static void inverse_dct(JPEGLoadingContext const& context, Vector<Macroblock>& m
                             float const g5 = block_component[l * 8 + 1] * s1;
                             float const g6 = block_component[l * 8 + 7] * s7;
                             float const g7 = block_component[l * 8 + 3] * s3;
+#else
+                            float const g0 = workspace[l * 8 + 0] * s0;
+                            float const g1 = workspace[l * 8 + 4] * s4;
+                            float const g2 = workspace[l * 8 + 2] * s2;
+                            float const g3 = workspace[l * 8 + 6] * s6;
+                            float const g4 = workspace[l * 8 + 5] * s5;
+                            float const g5 = workspace[l * 8 + 1] * s1;
+                            float const g6 = workspace[l * 8 + 7] * s7;
+                            float const g7 = workspace[l * 8 + 3] * s3;
+#endif
 
                             float const f0 = g0;
                             float const f1 = g1;
@@ -1563,6 +1591,7 @@ static void inverse_dct(JPEGLoadingContext const& context, Vector<Macroblock>& m
                             float const b6 = c6 - c7;
                             float const b7 = c7;
 
+#if 0
                             block_component[l * 8 + 0] = b0 + b7;
                             block_component[l * 8 + 1] = b1 + b6;
                             block_component[l * 8 + 2] = b2 + b5;
@@ -1571,6 +1600,16 @@ static void inverse_dct(JPEGLoadingContext const& context, Vector<Macroblock>& m
                             block_component[l * 8 + 5] = b2 - b5;
                             block_component[l * 8 + 6] = b1 - b6;
                             block_component[l * 8 + 7] = b0 - b7;
+#else
+                            block_component[l * 8 + 0] = round_to<i16>(b0 + b7);
+                            block_component[l * 8 + 1] = round_to<i16>(b1 + b6);
+                            block_component[l * 8 + 2] = round_to<i16>(b2 + b5);
+                            block_component[l * 8 + 3] = round_to<i16>(b3 + b4);
+                            block_component[l * 8 + 4] = round_to<i16>(b3 - b4);
+                            block_component[l * 8 + 5] = round_to<i16>(b2 - b5);
+                            block_component[l * 8 + 6] = round_to<i16>(b1 - b6);
+                            block_component[l * 8 + 7] = round_to<i16>(b0 - b7);
+#endif
                         }
                     }
                 }
@@ -1663,9 +1702,15 @@ static void ycbcr_to_rgb(Vector<Macroblock>& macroblocks)
         auto* cb = macroblock.cb;
         auto* cr = macroblock.cr;
         for (u8 i = 0; i < 64; ++i) {
+#if 0
             int r = y[i] + 1.402f * (cr[i] - 128);
             int g = y[i] - 0.3441f * (cb[i] - 128) - 0.7141f * (cr[i] - 128);
             int b = y[i] + 1.772f * (cb[i] - 128);
+#else
+            int r = round_to<int>(y[i] + 1.402f * (cr[i] - 128));
+            int g = round_to<int>(y[i] - 0.3441f * (cb[i] - 128) - 0.7141f * (cr[i] - 128));
+            int b = round_to<int>(y[i] + 1.772f * (cb[i] - 128));
+#endif
             y[i] = clamp(r, 0, 255);
             cb[i] = clamp(g, 0, 255);
             cr[i] = clamp(b, 0, 255);

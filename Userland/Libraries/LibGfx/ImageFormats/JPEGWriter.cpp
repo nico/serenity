@@ -122,9 +122,15 @@ public:
                 // Conversion from YCbCr to RGB isn't specified in the first JPEG specification but in the JFIF extension:
                 // See: https://www.itu.int/rec/dologin_pub.asp?lang=f&id=T-REC-T.871-201105-I!!PDF-E&type=items
                 // 7 - Conversion to and from RGB
+#if 0
                 auto const y_ = clamp(0.299 * original_pixel.red() + 0.587 * original_pixel.green() + 0.114 * original_pixel.blue(), 0, 255);
                 auto const cb = clamp(-0.1687 * original_pixel.red() - 0.3313 * original_pixel.green() + 0.5 * original_pixel.blue() + 128, 0, 255);
                 auto const cr = clamp(0.5 * original_pixel.red() - 0.4187 * original_pixel.green() - 0.0813 * original_pixel.blue() + 128, 0, 255);
+#else
+                auto const y_ = clamp(round_to<i16>(0.299 * original_pixel.red() + 0.587 * original_pixel.green() + 0.114 * original_pixel.blue()), 0, 255);
+                auto const cb = clamp(round_to<i16>(-0.1687 * original_pixel.red() - 0.3313 * original_pixel.green() + 0.5 * original_pixel.blue() + 128), 0, 255);
+                auto const cr = clamp(round_to<i16>(0.5 * original_pixel.red() - 0.4187 * original_pixel.green() - 0.0813 * original_pixel.blue() + 128), 0, 255);
+#endif
 
                 // A.3.1 - Level shift
                 macroblock.r[pixel_offset] = y_ - 128;
