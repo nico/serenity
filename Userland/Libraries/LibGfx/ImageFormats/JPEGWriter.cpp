@@ -14,6 +14,58 @@
 
 namespace Gfx {
 
+static Array<double, 64> create_cosine_lookup_table()
+{
+    static constexpr double pi_over_16 = AK::Pi<double> / 16;
+
+    Array<double, 64> table;
+
+    for (u8 u = 0; u < 8; ++u) {
+        for (u8 x = 0; x < 8; ++x)
+            table[u * 8 + x] = cos((2 * x + 1) * u * pi_over_16);
+    }
+
+    return table;
+}
+
+static void dct_and_quantize_8x8(i16 component[], Array<u8, 64> const& quantization_table)
+{
+    static auto cosine_table = create_cosine_lookup_table();
+
+    constexpr double inverse_sqrt_2 = M_SQRT1_2;
+
+    Array<i16, 64> result {};
+
+    auto const sum_xy = [&](u8 u, u8 v) {
+        double sum {};
+        for (u8 x {}; x < 8; ++x) {
+            for (u8 y {}; y < 8; ++y)
+                sum += component[x * 8 + y] * cosine_table[u * 8 + x] * cosine_table[v * 8 + y];
+        }
+        return sum;
+    };
+
+    for (u8 u {}; u < 8; ++u) {
+        double const cu = u == 0 ? inverse_sqrt_2 : 1;
+        for (u8 v {}; v < 8; ++v) {
+            auto const table_index = u * 8 + v;
+
+            double const cv = v == 0 ? inverse_sqrt_2 : 1;
+
+            // A.3.3 - FDCT and IDCT
+            double const fdct = cu * cv * sum_xy(u, v) / 4;
+
+            // A.3.4 - DCT coefficient quantization
+            i16 const quantized = round(fdct / quantization_table[table_index]);
+
+            result[table_index] = quantized;
+        }
+    }
+
+    for (u8 i {}; i < result.size(); ++i)
+        component[i] = result[i];
+}
+
 namespace {
 
 // This is basically a BigEndianOutputBitStream, the only difference
@@ -136,63 +188,13 @@ public:
         return {};
     }
 
-    static Array<double, 64> create_cosine_lookup_table()
-    {
-        static constexpr double pi_over_16 = AK::Pi<double> / 16;
-
-        Array<double, 64> table;
-
-        for (u8 u = 0; u < 8; ++u) {
-            for (u8 x = 0; x < 8; ++x)
-                table[u * 8 + x] = cos((2 * x + 1) * u * pi_over_16);
-        }
-
-        return table;
-    }
-
     void fdct_and_quantization()
     {
-        static auto cosine_table = create_cosine_lookup_table();
 
         for (auto& macroblock : m_macroblocks) {
-            constexpr double inverse_sqrt_2 = M_SQRT1_2;
-
-            auto const convert_one_component = [&](i16 component[], QuantizationTable const& table) {
-                Array<i16, 64> result {};
-
-                auto const sum_xy = [&](u8 u, u8 v) {
-                    double sum {};
-                    for (u8 x {}; x < 8; ++x) {
-                        for (u8 y {}; y < 8; ++y)
-                            sum += component[x * 8 + y] * cosine_table[u * 8 + x] * cosine_table[v * 8 + y];
-                    }
-                    return sum;
-                };
-
-                for (u8 u {}; u < 8; ++u) {
-                    double const cu = u == 0 ? inverse_sqrt_2 : 1;
-                    for (u8 v {}; v < 8; ++v) {
-                        auto const table_index = u * 8 + v;
-
-                        double const cv = v == 0 ? inverse_sqrt_2 : 1;
-
-                        // A.3.3 - FDCT and IDCT
-                        double const fdct = cu * cv * sum_xy(u, v) / 4;
-
-                        // A.3.4 - DCT coefficient quantization
-                        i16 const quantized = round(fdct / table.table[table_index]);
-
-                        result[table_index] = quantized;
-                    }
-                }
-
-                for (u8 i {}; i < result.size(); ++i)
-                    component[i] = result[i];
-            };
-
-            convert_one_component(macroblock.y, m_luminance_quantization_table);
-            convert_one_component(macroblock.cb, m_chrominance_quantization_table);
-            convert_one_component(macroblock.cr, m_chrominance_quantization_table);
+            dct_and_quantize_8x8(macroblock.y, m_luminance_quantization_table.table);
+            dct_and_quantize_8x8(macroblock.cb, m_chrominance_quantization_table.table);
+            dct_and_quantize_8x8(macroblock.cr, m_chrominance_quantization_table.table);
         }
     }
 
