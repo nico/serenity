@@ -1487,14 +1487,14 @@ void inverse_dct_8x8(i16* block_component)
         float const b6 = c6 - c7;
         float const b7 = c7;
 
-        block_component[0 * 8 + k] = b0 + b7;
-        block_component[1 * 8 + k] = b1 + b6;
-        block_component[2 * 8 + k] = b2 + b5;
-        block_component[3 * 8 + k] = b3 + b4;
-        block_component[4 * 8 + k] = b3 - b4;
-        block_component[5 * 8 + k] = b2 - b5;
-        block_component[6 * 8 + k] = b1 - b6;
-        block_component[7 * 8 + k] = b0 - b7;
+        block_component[0 * 8 + k] = round_to<i16>(b0 + b7);
+        block_component[1 * 8 + k] = round_to<i16>(b1 + b6);
+        block_component[2 * 8 + k] = round_to<i16>(b2 + b5);
+        block_component[3 * 8 + k] = round_to<i16>(b3 + b4);
+        block_component[4 * 8 + k] = round_to<i16>(b3 - b4);
+        block_component[5 * 8 + k] = round_to<i16>(b2 - b5);
+        block_component[6 * 8 + k] = round_to<i16>(b1 - b6);
+        block_component[7 * 8 + k] = round_to<i16>(b0 - b7);
     }
     for (u32 l = 0; l < 8; ++l) {
         float const g0 = block_component[l * 8 + 0] * s0;

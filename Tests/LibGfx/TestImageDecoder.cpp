@@ -335,6 +335,10 @@ TEST_CASE(test_jpeg_decoder_compliance)
 
     input[0] = 0; // gray 8x8 square
     test_jpeg_decoder_compliance(input);
+
+    for (int i = 0; i < 64; ++i)
+        input[i] = i;
+    test_jpeg_decoder_compliance(input);
 }
 
 TEST_CASE(test_jpeg_sof0_one_scan)
