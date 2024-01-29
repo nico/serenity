@@ -134,6 +134,15 @@ Vector<float> DeviceRGBColorSpace::default_decode() const
     return { 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f };
 }
 
+static Optional<DeviceCMYKColorSpace::cmyk_profile_loader> s_default_cmyk_profile_loader;
+static Optional<NonnullRefPtr<Gfx::ICC::Profile>> s_default_cmyk_profile;
+
+void DeviceCMYKColorSpace::set_default_cmyk_profile_loader(cmyk_profile_loader loader)
+{
+    s_default_cmyk_profile_loader = move(loader);
+    s_default_cmyk_profile.clear();
+}
+
 NonnullRefPtr<DeviceCMYKColorSpace> DeviceCMYKColorSpace::the()
 {
     static auto instance = adopt_ref(*new DeviceCMYKColorSpace());
@@ -142,7 +151,26 @@ NonnullRefPtr<DeviceCMYKColorSpace> DeviceCMYKColorSpace::the()
 
 PDFErrorOr<ColorOrStyle> DeviceCMYKColorSpace::style(ReadonlySpan<float> arguments) const
 {
+    if (s_default_cmyk_profile_loader.has_value() && !s_default_cmyk_profile.has_value()) {
+        s_default_cmyk_profile = s_default_cmyk_profile_loader.value()();
+        s_default_cmyk_profile_loader.clear();
+    }
+
     VERIFY(arguments.size() == 4);
+
+    if (s_default_cmyk_profile.has_value()) {
+        u8 bytes[4];
+        bytes[0] = static_cast<u8>(arguments[0] * 255.0f);
+        bytes[1] = static_cast<u8>(arguments[1] * 255.0f);
+        bytes[2] = static_cast<u8>(arguments[2] * 255.0f);
+        bytes[3] = static_cast<u8>(arguments[3] * 255.0f);
+
+        auto pcs = TRY(s_default_cmyk_profile.value()->to_pcs(bytes));
+        Array<u8, 3> output;
+        TRY(ICCBasedColorSpace::sRGB()->from_pcs(s_default_cmyk_profile.value(), pcs, output.span()));
+        return Color(output[0], output[1], output[2]);
+    }
+
     auto c = arguments[0];
     auto m = arguments[1];
     auto y = arguments[2];
