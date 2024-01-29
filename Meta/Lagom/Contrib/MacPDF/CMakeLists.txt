@@ -56,3 +56,6 @@ foreach(xib ${RESOURCES})
                 "${CMAKE_CURRENT_SOURCE_DIR}/${xib}"
         COMMENT "Compiling ${CMAKE_CURRENT_SOURCE_DIR}/${xib}.xib")
 endforeach()
+
+include(${SerenityOS_SOURCE_DIR}/Meta/CMake/adobe_icc_profiles.cmake)
+
