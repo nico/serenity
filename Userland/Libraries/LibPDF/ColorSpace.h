@@ -113,12 +113,9 @@ private:
 
 class DeviceCMYKColorSpace final : public ColorSpace {
 public:
-    static NonnullRefPtr<DeviceCMYKColorSpace> the();
+    static ErrorOr<NonnullRefPtr<DeviceCMYKColorSpace>> the();
 
     ~DeviceCMYKColorSpace() override = default;
-
-    using cmyk_profile_loader = AK::Function<NonnullRefPtr<Gfx::ICC::Profile>()>;
-    static void set_default_cmyk_profile_loader(cmyk_profile_loader);
 
     PDFErrorOr<ColorOrStyle> style(ReadonlySpan<float> arguments) const override;
     int number_of_components() const override { return 4; }

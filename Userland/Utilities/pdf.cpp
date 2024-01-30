@@ -226,6 +226,10 @@ static PDF::PDFErrorOr<int> pdf_main(Main::Arguments arguments)
         // Get from Build/lagom/bin/pdf to Base/res/fonts.
         auto source_root = LexicalPath(MUST(Core::System::current_executable_path())).parent().parent().parent().parent().string();
         Core::ResourceImplementation::install(make<Core::ResourceImplementationFile>(TRY(String::formatted("{}/Base/res", source_root))));
+
+        // Get from Build/lagom/bin/pdf to Build/lagom/Userland/Libraries/LibPDF/Adobe.
+        auto build_root = LexicalPath(MUST(Core::System::current_executable_path())).parent().parent().string();
+        Core::ResourceImplementation::install(make<Core::ResourceImplementationFile>(TRY(String::formatted("{}/Userland/Libraries/LibPDF", build_root))));
     }
 #endif
 

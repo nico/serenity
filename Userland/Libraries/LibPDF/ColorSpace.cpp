@@ -53,7 +53,7 @@ PDFErrorOr<NonnullRefPtr<ColorSpace>> ColorSpace::create(DeprecatedFlyString con
     if (name == CommonNames::DeviceRGB)
         return DeviceRGBColorSpace::the();
     if (name == CommonNames::DeviceCMYK)
-        return DeviceCMYKColorSpace::the();
+        return TRY(DeviceCMYKColorSpace::the());
     if (name == CommonNames::Pattern)
         return Error::rendering_unsupported_error("Pattern color spaces not yet implemented");
     VERIFY_NOT_REACHED();
@@ -134,48 +134,41 @@ Vector<float> DeviceRGBColorSpace::default_decode() const
     return { 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f };
 }
 
-static Optional<DeviceCMYKColorSpace::cmyk_profile_loader> s_default_cmyk_profile_loader;
-static Optional<NonnullRefPtr<Gfx::ICC::Profile>> s_default_cmyk_profile;
+static RefPtr<Gfx::ICC::Profile> s_default_cmyk_profile;
+static RefPtr<Core::Resource> s_default_cmyk_resource;
 
-void DeviceCMYKColorSpace::set_default_cmyk_profile_loader(cmyk_profile_loader loader)
+static ErrorOr<void> load_default_cmyk_profile()
 {
-    s_default_cmyk_profile_loader = move(loader);
-    s_default_cmyk_profile.clear();
+    auto resource = TRY(Core::Resource::load_from_uri("resource://icc/Adobe/CMYK/USWebCoatedSWOP.icc"sv));
+    auto profile = TRY(Gfx::ICC::Profile::try_load_from_externally_owned_memory(resource->data()));
+    s_default_cmyk_resource = move(resource);
+    s_default_cmyk_profile = move(profile);
+    return {};
 }
 
-NonnullRefPtr<DeviceCMYKColorSpace> DeviceCMYKColorSpace::the()
+ErrorOr<NonnullRefPtr<DeviceCMYKColorSpace>> DeviceCMYKColorSpace::the()
 {
+    if (s_default_cmyk_profile.is_null())
+        TRY(load_default_cmyk_profile());
+
     static auto instance = adopt_ref(*new DeviceCMYKColorSpace());
     return instance;
 }
 
 PDFErrorOr<ColorOrStyle> DeviceCMYKColorSpace::style(ReadonlySpan<float> arguments) const
 {
-    if (s_default_cmyk_profile_loader.has_value() && !s_default_cmyk_profile.has_value()) {
-        s_default_cmyk_profile = s_default_cmyk_profile_loader.value()();
-        s_default_cmyk_profile_loader.clear();
-    }
-
     VERIFY(arguments.size() == 4);
 
-    if (s_default_cmyk_profile.has_value()) {
-        u8 bytes[4];
-        bytes[0] = static_cast<u8>(arguments[0] * 255.0f);
-        bytes[1] = static_cast<u8>(arguments[1] * 255.0f);
-        bytes[2] = static_cast<u8>(arguments[2] * 255.0f);
-        bytes[3] = static_cast<u8>(arguments[3] * 255.0f);
+    u8 bytes[4];
+    bytes[0] = static_cast<u8>(arguments[0] * 255.0f);
+    bytes[1] = static_cast<u8>(arguments[1] * 255.0f);
+    bytes[2] = static_cast<u8>(arguments[2] * 255.0f);
+    bytes[3] = static_cast<u8>(arguments[3] * 255.0f);
+    auto pcs = TRY(s_default_cmyk_profile->to_pcs(bytes));
 
-        auto pcs = TRY(s_default_cmyk_profile.value()->to_pcs(bytes));
-        Array<u8, 3> output;
-        TRY(ICCBasedColorSpace::sRGB()->from_pcs(s_default_cmyk_profile.value(), pcs, output.span()));
-        return Color(output[0], output[1], output[2]);
-    }
-
-    auto c = arguments[0];
-    auto m = arguments[1];
-    auto y = arguments[2];
-    auto k = arguments[3];
-    return Color::from_cmyk(c, m, y, k);
+    Array<u8, 3> output;
+    TRY(ICCBasedColorSpace::sRGB()->from_pcs(*s_default_cmyk_profile, pcs, output.span()));
+    return Color(output[0], output[1], output[2]);
 }
 
 Vector<float> DeviceCMYKColorSpace::default_decode() const

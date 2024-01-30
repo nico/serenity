@@ -56,7 +56,3 @@ foreach(xib ${RESOURCES})
                 "${CMAKE_CURRENT_SOURCE_DIR}/${xib}"
         COMMENT "Compiling ${CMAKE_CURRENT_SOURCE_DIR}/${xib}.xib")
 endforeach()
-
-include(${SerenityOS_SOURCE_DIR}/Meta/CMake/adobe_icc_profiles.cmake)
-message(INFO "from ${ADOBE_ICC_CMYK_SWOP_INSTALL_PATH} to ${CMAKE_BINARY_DIR}/bin/MacPDF.app/Contents/Resources/")
-configure_file("${ADOBE_ICC_CMYK_SWOP_INSTALL_PATH}" "${CMAKE_BINARY_DIR}/bin/MacPDF.app/Contents/Resources/Adobe/${ADOBE_ICC_CMYK_SWOP}" COPYONLY)
