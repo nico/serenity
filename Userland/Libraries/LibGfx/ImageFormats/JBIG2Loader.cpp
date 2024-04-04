@@ -953,10 +953,7 @@ static ErrorOr<NonnullOwnPtr<BitBuffer>> generic_region_decoding_procedure(Gener
     }
 
     // 6.2.5 Decoding using a template and arithmetic coding
-    if (inputs.is_extended_reference_template_used)
-        return Error::from_string_literal("JBIG2ImageDecoderPlugin: Cannot decode EXTTEMPLATE yet");
-
-    int number_of_adaptive_template_pixels = inputs.gb_template == 0 ? 4 : 1;
+    int number_of_adaptive_template_pixels = inputs.gb_template == 0 ? (inputs.is_extended_reference_template_used ? 12 : 4) : 1;
     for (int i = 0; i < number_of_adaptive_template_pixels; ++i)
         TRY(check_valid_adaptive_template_pixel(inputs.adaptive_template_pixels[i]));
 
@@ -982,6 +979,17 @@ static ErrorOr<NonnullOwnPtr<BitBuffer>> generic_region_decoding_procedure(Gener
             result = (result << 1) | (u16)get_pixel(buffer, x - 2 + i, y - 1);
         for (int i = 0; i < 4; ++i)
             result = (result << 1) | (u16)get_pixel(buffer, x - 4 + i, y);
+        return result;
+    };
+
+    // Figure 3(b) – Template when GBTEMPLATE = 0 and EXTTEMPLATE = 1,
+    constexpr auto compute_context_0_ext = [](NonnullOwnPtr<BitBuffer> const& buffer, ReadonlySpan<AdaptiveTemplatePixel> adaptive_pixels, int x, int y) -> u16 {
+        u16 result = 0;
+        for (int i = 0; i < 12; ++i)
+            result = (result << 1) | (u16)get_pixel(buffer, x + adaptive_pixels[i].x, y + adaptive_pixels[i].y);
+        for (int i = 0; i < 3; ++i)
+            result = (result << 1) | (u16)get_pixel(buffer, x - 1 + i, y - 1);
+        result = (result << 1) | (u16)get_pixel(buffer, x - 1, y);
         return result;
     };
 
@@ -1023,13 +1031,16 @@ static ErrorOr<NonnullOwnPtr<BitBuffer>> generic_region_decoding_procedure(Gener
     };
 
     u16 (*compute_context)(NonnullOwnPtr<BitBuffer> const&, ReadonlySpan<AdaptiveTemplatePixel>, int, int);
-    if (inputs.gb_template == 0)
-        compute_context = compute_context_0;
-    else if (inputs.gb_template == 1)
+    if (inputs.gb_template == 0) {
+        if (inputs.is_extended_reference_template_used)
+            compute_context = compute_context_0_ext;
+        else
+            compute_context = compute_context_0;
+    } else if (inputs.gb_template == 1) {
         compute_context = compute_context_1;
-    else if (inputs.gb_template == 2)
+    } else if (inputs.gb_template == 2) {
         compute_context = compute_context_2;
-    else {
+    } else {
         VERIFY(inputs.gb_template == 3);
         compute_context = compute_context_3;
     }
@@ -2076,14 +2087,12 @@ static ErrorOr<void> decode_immediate_generic_region(JBIG2LoadingContext& contex
     if (!uses_mmr) {
         dbgln_if(JBIG2_DEBUG, "Non-MMR generic region, GBTEMPLATE={} TPGDON={} EXTTEMPLATE={}", arithmetic_coding_template, typical_prediction_generic_decoding_on, uses_extended_reference_template);
 
-        if (arithmetic_coding_template == 0 && uses_extended_reference_template) {
-            // This was added in T.88 Amendment 2 (https://www.itu.int/rec/T-REC-T.88-200306-S!Amd2/en) mid-2003.
-            // I haven't seen it being used in the wild, and the spec says "32-byte field as shown below" and then shows 24 bytes,
-            // so it's not clear how much data to read.
-            return Error::from_string_literal("JBIG2ImageDecoderPlugin: GBTEMPLATE=0 EXTTEMPLATE=1 not yet implemented");
-        }
-
-        size_t number_of_adaptive_template_pixels = arithmetic_coding_template == 0 ? 4 : 1;
+        // EXTTEMPLATE was added in T.88 Amendment 2 (https://www.itu.int/rec/T-REC-T.88-200306-S!Amd2/en) mid-2003.
+        // The spec says "32-byte field as shown below" and then shows 24 bytes, so it's not clear how much data to read.
+        // We're goign with 24 bytes, since a) that makes more sense b) it's what the `jbig2` ITU reference implementation writes
+        // (...but that reference implementation has many bugs, so b) isn't a very strong argument). No other jbig2 decoders
+        // seem to support EXTTEMPLATE.
+        size_t number_of_adaptive_template_pixels = arithmetic_coding_template == 0 ? (uses_extended_reference_template ? 12 : 4) : 1;
         if (data.size() < 2 * number_of_adaptive_template_pixels)
             return Error::from_string_literal("JBIG2ImageDecoderPlugin: No adaptive template data");
         for (size_t i = 0; i < number_of_adaptive_template_pixels; ++i) {
