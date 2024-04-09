@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include <AK/BitStream.h>
 #include <AK/Debug.h>
 #include <AK/Enumerate.h>
 #include <AK/MemoryStream.h>
@@ -518,7 +519,7 @@ struct TileData {
 struct JPEG2000LoadingContext {
     enum class State {
         NotDecoded = 0,
-        DecodedTileHeaders,
+        ImageDecoded,
         Error,
     };
     State state { State::NotDecoded };
@@ -978,6 +979,49 @@ ErrorOr<u32> TagTree::read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& 
 
 }
 
+struct PacketHeader {
+    bool is_empty { false };
+};
+
+ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
+{
+    PacketHeader header;
+    // B.10 Packet header information coding
+
+    // B.10.3 Zero length packet
+    // "The first bit in the packet header denotes whether the packet has a length of zero (empty packet). The value 0 indicates a
+    //  zero length; no code-blocks are included in this case. The value 1 indicates a non-zero length; this case is considered
+    //  exclusively hereinafter."
+    bool is_non_zero = TRY(bitstream.read_bit());
+    header.is_empty = !is_non_zero;
+    if (header.is_empty) {
+        dbgln_if(JPEG2000_DEBUG, "empty packet");
+        return header;
+    }
+
+    return Error::from_string_literal("cannot decode packet headers yet");
+}
+
+ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
+{
+    TRY(parse_codestream_tile_headers(context));
+
+    // FIXME: Check may_use_SOP_marker and may_use_EPH_marker presence, error out for now if they're set
+    // FIXME: Check progression_order
+    // FIXME: Read more data than just the first tile-part
+
+    auto data = context.tiles[0].tile_parts[0].data;
+    FixedMemoryStream stream { data };
+    BigEndianInputBitStream bitstream { MaybeOwned { stream } };
+
+    TRY(read_packet_header(bitstream));
+
+    // FIXME: Read actual packet data too
+    // FIXME: Actually decode image :)
+
+    return Error::from_string_literal("cannot decode imag yet");
+}
+
 bool JPEG2000ImageDecoderPlugin::sniff(ReadonlyBytes data)
 {
     return data.starts_with(jp2_id_string) || data.starts_with(marker_id_string);
@@ -1010,9 +1054,9 @@ ErrorOr<ImageFrameDescriptor> JPEG2000ImageDecoderPlugin::frame(size_t index, Op
     if (m_context->state == JPEG2000LoadingContext::State::Error)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Decoding failed");
 
-    if (m_context->state < JPEG2000LoadingContext::State::DecodedTileHeaders) {
-        TRY(parse_codestream_tile_headers(*m_context));
-        m_context->state = JPEG2000LoadingContext::State::DecodedTileHeaders;
+    if (m_context->state < JPEG2000LoadingContext::State::ImageDecoded) {
+        TRY(decode_image(*m_context));
+        m_context->state = JPEG2000LoadingContext::State::ImageDecoded;
     }
 
     return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Draw the rest of the owl");
