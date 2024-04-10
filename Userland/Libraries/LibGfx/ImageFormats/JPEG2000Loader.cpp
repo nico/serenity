@@ -987,6 +987,26 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
 {
     PacketHeader header;
     // B.10 Packet header information coding
+    // "The packets have headers with the following information:
+    // - zero length packet;
+    // - code-block inclusion;
+    // - zero bit-plane information;
+    // - number of coding passes;
+    // - length of the code-block compressed image data from a given code-block."
+
+    // The most useful section is B.10.8 Order of information within packet header,
+    // which has an example packet header bitstream, and the data layout:
+    // "bit for zero or non-zero length packet
+    //  for each sub-band (LL or HL, LH and HH)
+    //      for all code-blocks in this sub-band confined to the relevant precinct, in raster order
+    //          code-block inclusion bits (if not previously included then tag tree, else one bit)
+    //          if code-block included
+    //              if first instance of code-block
+    //                  zero bit-planes information
+    //              number of coding passes included
+    //              increase of code-block length indicator (Lblock)
+    //              for each codeword segment
+    //                  length of codeword segment
 
     // B.10.3 Zero length packet
     // "The first bit in the packet header denotes whether the packet has a length of zero (empty packet). The value 0 indicates a
@@ -998,6 +1018,33 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
         dbgln_if(JPEG2000_DEBUG, "empty packet");
         return header;
     }
+
+    // B.10.4 Code-block inclusion
+    // "For code-blocks that have been included in a previous packet, a single bit is used to represent the information, where
+    //  a 1 means that the code-block is included in this layer and a 0 means that it is not."
+    // FIXME: Implement.
+
+    // "For code-blocks that have not been previously included in any packet, this information is signalled with a separate tag
+    //  tree code for each precinct as confined to a sub-band. The values in this tag tree are the number of the layer in which the
+    //  current code-block is first included."
+    // FIXME: Gulp. Implement.
+
+    // B.10.5 Zero bit-plane information
+    // "If a code-block is included for the first time,
+    //  [...] the number of actual bit-planes for which coding passes are generated is Mb – P
+    //  [...] these missing bit-planes are all taken to be zero
+    //  [...] The value of P is coded in the packet header with a separate tag tree for every precinct"
+    // And Annex E, E.1 Inverse quantization procedure:
+    // "Mb = G + exp_b - 1       (E-2)
+    //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5).""
+    // FIXME: Implement.
+
+    // B.10.6 Number of coding passes
+    // Table B.4 – Codewords for the number of coding passes for each code-block
+    // FIXME: Implement.
+
+    // B.10.7 Length of the compressed image data from a given code-block
+    // FIXME: Implement.
 
     return Error::from_string_literal("cannot decode packet headers yet");
 }
