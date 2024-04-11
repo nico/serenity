@@ -983,8 +983,27 @@ struct PacketHeader {
     bool is_empty { false };
 };
 
+struct CodeBlock {
+    // Becomes true when the first packet including this codeblock is read.
+    bool has_been_included_in_previous_packet { false };
+
+    // The layer that this code-block is first included in per B.10.4.
+    u32 first_included_in_layer { 0 };
+
+    // B.10.7.1 Single codeword segment
+    // "Lblock is a code-block state variable. [...] The value of Lblock is initially set to three."
+    u32 Lblock { 3 };
+};
+
 ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
 {
+    // B.9 Packets
+    // "All compressed image data representing a specific tile, layer, component, resolution level and precinct appears in the
+    //  codestream in a contiguous segment called a packet. Packet data is aligned at 8-bit (one byte) boundaries."
+    // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
+    // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
+    // That means there are 2^(PPX - xcb') * 2^(PPy - ycb') code-blocks in a precinct, and also in a packet.
+
     PacketHeader header;
     // B.10 Packet header information coding
     // "The packets have headers with the following information:
@@ -1006,28 +1025,67 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
     //              number of coding passes included
     //              increase of code-block length indicator (Lblock)
     //              for each codeword segment
-    //                  length of codeword segment
+    //                  length of codeword segment"
+    // We try to decode only the first packet header of only the LL subband for now. That covers several code-blocks still, though.
+    // Let's just do the first code-block for now too. Decoding the tag trees requires knowing how many codeblocks are in this packet still,
+    // to know the depth of the tag trees.
+
+    // B.10.1 Bit-stuffing routine
+    // "If the value of the byte is 0xFF, the next byte includes an extra zero bit stuffed into the MSB. Once all bits of the
+    //  packet header have been assembled, the last byte is packed to the byte boundary and emitted."
+    u8 last_full_byte { 0 };
+    auto read_bit = [&bitstream, &last_full_byte]() -> ErrorOr<bool> {
+        if (bitstream.is_aligned_to_byte_boundary()) {
+            if (last_full_byte == 0xFF) {
+               bool stuff_bit = TRY(bitstream.read_bit());
+               if (stuff_bit)
+                   return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Invalid bit-stuffing");
+            }
+            last_full_byte = 0;
+        }
+        bool bit = TRY(bitstream.read_bit());
+        last_full_byte = (last_full_byte << 1) | bit;
+        return bit;
+    };
+
+    // Tag trees are used to store the code-block inclusion bits and the zero bit-plane information.
+    // B.10.2 Tag trees
+    // "At every node of this tree the minimum integer of the (up to four) nodes below it is recorded. [...]
+    //  Level 0 is the lowest level of the tag tree; it contains the top node. [...]
+    //  Each node has a [...] current value, [...] initialized to zero. A 0 bit in the tag tree means that the minimum
+    //  (or the value in the case of the highest level) is larger than the current value and a 1 bit means that the minimum
+    //  (or the value in the case of the highest level) is equal to the current value.
+    //  For each contiguous 0 bit in the tag tree the current value is incremented by one.
+    //  Nodes at higher levels cannot be coded until lower level node values are fixed (i.e, a 1 bit is coded). [...]
+    //  Only the information needed for the current code-block is stored at the current point in the packet header."
+    // The example in Figure B.13 / Table B.5 is useful to understand what exactly "only the information needed" means.
 
     // B.10.3 Zero length packet
     // "The first bit in the packet header denotes whether the packet has a length of zero (empty packet). The value 0 indicates a
     //  zero length; no code-blocks are included in this case. The value 1 indicates a non-zero length; this case is considered
     //  exclusively hereinafter."
-    bool is_non_zero = TRY(bitstream.read_bit());
+    bool is_non_zero = TRY(read_bit());
     header.is_empty = !is_non_zero;
     if (header.is_empty) {
         dbgln_if(JPEG2000_DEBUG, "empty packet");
         return header;
     }
 
-    // B.10.4 Code-block inclusion
-    // "For code-blocks that have been included in a previous packet, a single bit is used to represent the information, where
-    //  a 1 means that the code-block is included in this layer and a 0 means that it is not."
-    // FIXME: Implement.
+    CodeBlock current_block {}; // FIXME: Get from somewhere
 
-    // "For code-blocks that have not been previously included in any packet, this information is signalled with a separate tag
-    //  tree code for each precinct as confined to a sub-band. The values in this tag tree are the number of the layer in which the
-    //  current code-block is first included."
-    // FIXME: Gulp. Implement.
+    // B.10.4 Code-block inclusion
+    bool is_included;
+    if (current_block.has_been_included_in_previous_packet) {
+        // "For code-blocks that have been included in a previous packet, a single bit is used to represent the information, where
+        //  a 1 means that the code-block is included in this layer and a 0 means that it is not."
+        is_included = TRY(read_bit());
+    } else {
+        // "For code-blocks that have not been previously included in any packet, this information is signalled with a separate tag
+        //  tree code for each precinct as confined to a sub-band. The values in this tag tree are the number of the layer in which the
+        //  current code-block is first included."
+        // FIXME: Gulp. Implement.
+    }
+    dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
 
     // B.10.5 Zero bit-plane information
     // "If a code-block is included for the first time,
