@@ -10,6 +10,30 @@
 
 namespace Gfx {
 
+namespace JPEG2000 {
+
+struct TagTreeNode;
+class TagTree {
+public:
+    TagTree(TagTree&&);
+    ~TagTree();
+
+    TagTree(TagTree const&) = delete;
+    TagTree& operator=(TagTree const&) = delete;
+
+    static ErrorOr<TagTree> create(u32 x_count, u32 y_count);
+
+    ErrorOr<u32> read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& read_bit, Optional<u32> stop_at = {}) const;
+
+private:
+    TagTree(Vector<TagTreeNode>, TagTreeNode&);
+
+    Vector<TagTreeNode> m_nodes;
+    TagTreeNode& m_root;
+};
+
+}
+
 struct JPEG2000LoadingContext;
 
 class JPEG2000ImageDecoderPlugin : public ImageDecoderPlugin {

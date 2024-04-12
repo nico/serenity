@@ -804,6 +804,116 @@ static ErrorOr<void> decode_jpeg2000_header(JPEG2000LoadingContext& context, Rea
     return {};
 }
 
+namespace JPEG2000 {
+
+// Tag trees are used to store the code-block inclusion bits and the zero bit-plane information.
+// B.10.2 Tag trees
+// "At every node of this tree the minimum integer of the (up to four) nodes below it is recorded. [...]
+//  Level 0 is the lowest level of the tag tree; it contains the top node. [...]
+//  Each node has a [...] current value, [...] initialized to zero. A 0 bit in the tag tree means that the minimum
+//  (or the value in the case of the highest level) is larger than the current value and a 1 bit means that the minimum
+//  (or the value in the case of the highest level) is equal to the current value.
+//  For each contiguous 0 bit in the tag tree the current value is incremented by one.
+//  Nodes at higher levels cannot be coded until lower level node values are fixed (i.e, a 1 bit is coded). [...]
+//  Only the information needed for the current code-block is stored at the current point in the packet header."
+// The example in Figure B.13 / Table B.5 is useful to understand what exactly "only the information needed" means.
+struct TagTreeNode {
+    u32 value { 0 };
+    enum State {
+        Pending,
+        Final,
+    };
+    State state { Pending };
+    Array<TagTreeNode*, 4> children {};
+    u32 level { 0 }; // 0 for leaf nodes, 1 for the next level, etc.
+
+    bool is_leaf() const { return level == 0; }
+
+    ErrorOr<u32> read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& read_bit, u32 start_value, Optional<u32> stop_at = {})
+    {
+        value = max(value, start_value);
+        while (true) {
+            if (stop_at.has_value() && value == stop_at.value())
+                return value;
+
+            if (state == Final) {
+                if (is_leaf())
+                    return value;
+                u32 x_index = (x >> (level - 1)) & 1;
+                u32 y_index = (y >> (level - 1)) & 1;
+                return children[y_index * 2 + x_index]->read_value(x, y, read_bit, value, stop_at);
+            }
+
+            bool bit = TRY(read_bit());
+            if (!bit)
+                value++;
+            else
+                state = Final;
+        }
+    }
+};
+
+TagTree::TagTree(Vector<TagTreeNode> nodes, TagTreeNode& root)
+    : m_nodes(move(nodes))
+    , m_root(root)
+{
+}
+
+TagTree::TagTree(TagTree&&) = default;
+TagTree::~TagTree() = default;
+
+ErrorOr<TagTree> TagTree::create(u32 x_count, u32 y_count)
+{
+    // In leaf-to-root order.
+    Vector<u32> nodes_in_level;
+    Vector<u32> width_in_level;
+    Vector<u32> height_in_level;
+    size_t number_of_nodes = 0;
+    do {
+        nodes_in_level.append(x_count * y_count);
+        width_in_level.append(x_count);
+        height_in_level.append(y_count);
+        number_of_nodes += nodes_in_level.last();
+        x_count = max(ceil_div(x_count, 2), 1);
+        y_count = max(ceil_div(y_count, 2), 1);
+    } while (width_in_level.last() > 1 || height_in_level.last() > 1);
+
+    // In root-to-leaf order.
+    Vector<TagTreeNode> nodes;
+    TRY(nodes.try_resize(number_of_nodes));
+    u32 level_offset = 0, node_offset = 0;
+    for (ssize_t level = nodes_in_level.size() - 1; level >= 0; --level) {
+        level_offset += nodes_in_level[level];
+        for (u32 y = 0; y < height_in_level[level]; ++y) {
+            for (u32 x = 0; x < width_in_level[level]; ++x, ++node_offset) {
+                nodes[node_offset].level = level;
+                if (level == 0)
+                    continue;
+                for (u32 y_offset = 0; y_offset < 2; ++y_offset) {
+                    for (u32 x_offset = 0; x_offset < 2; ++x_offset) {
+                        u32 child_x = x * 2 + x_offset;
+                        u32 child_y = y * 2 + y_offset;
+                        if (child_x >= width_in_level[level - 1] || child_y >= height_in_level[level - 1])
+                            continue;
+                        u32 child_index = (y_offset << 1) | x_offset;
+                        nodes[node_offset].children[child_index] = &nodes[level_offset + child_y * width_in_level[level - 1] + child_x];
+                    }
+                }
+            }
+        }
+    }
+
+    auto& root = nodes[0];
+    return TagTree { move(nodes), root };
+}
+
+ErrorOr<u32> TagTree::read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& read_bit, Optional<u32> stop_at) const
+{
+    return m_root.read_value(x, y, read_bit, m_root.value, stop_at);
+}
+
+}
+
 bool JPEG2000ImageDecoderPlugin::sniff(ReadonlyBytes data)
 {
     return data.starts_with(jp2_id_string);
