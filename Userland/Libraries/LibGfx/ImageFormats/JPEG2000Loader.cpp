@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#define JPEG2000_DEBUG 1
+
 #include <AK/BitStream.h>
 #include <AK/Debug.h>
 #include <AK/Enumerate.h>
@@ -995,7 +997,7 @@ struct CodeBlock {
     u32 Lblock { 3 };
 };
 
-ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream)
 {
     // B.9 Packets
     // "All compressed image data representing a specific tile, layer, component, resolution level and precinct appears in the
@@ -1003,6 +1005,9 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
     // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
     // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
     // That means there are 2^(PPX - xcb') * 2^(PPy - ycb') code-blocks in a precinct, and also in a packet.
+
+    // XXX repeat image, tile, component <=wavelet=> subband, precinct, code-block, packet, layer?
+    // (Described in 5.3 Coding principles)
 
     PacketHeader header;
     // B.10 Packet header information coding
@@ -1034,9 +1039,10 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
     // "If the value of the byte is 0xFF, the next byte includes an extra zero bit stuffed into the MSB. Once all bits of the
     //  packet header have been assembled, the last byte is packed to the byte boundary and emitted."
     u8 last_full_byte { 0 };
-    auto read_bit = [&bitstream, &last_full_byte]() -> ErrorOr<bool> {
+    Function<ErrorOr<bool>()> read_bit = [&bitstream, &last_full_byte]() -> ErrorOr<bool> {
         if (bitstream.is_aligned_to_byte_boundary()) {
             if (last_full_byte == 0xFF) {
+dbgln("reading stuff bit");
                bool stuff_bit = TRY(bitstream.read_bit());
                if (stuff_bit)
                    return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Invalid bit-stuffing");
@@ -1044,6 +1050,7 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
             last_full_byte = 0;
         }
         bool bit = TRY(bitstream.read_bit());
+//dbgln("reading bit {}", bit);
         last_full_byte = (last_full_byte << 1) | bit;
         return bit;
     };
@@ -1072,6 +1079,19 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
     }
 
     CodeBlock current_block {}; // FIXME: Get from somewhere
+    u32 current_layer_index = 0; // FIXME: Get from somewhere
+
+    // B.7
+    // FIXME: complete
+    // u32 cbx_prime = min(context.cod.code_block_width_exponent, context.cod.precinct_sizes[0].PPx);
+    // u32 cby_prime = min(context.cod.code_block_height_exponent, context.cod.precinct_sizes[0].PPy);
+
+    // XXX limit precinct size to tile size? where does the spec say that?
+    u32 codeblock_x_count = 1;
+    u32 codeblock_y_count = 1;
+
+
+    auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
 
     // B.10.4 Code-block inclusion
     bool is_included;
@@ -1083,7 +1103,7 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
         // "For code-blocks that have not been previously included in any packet, this information is signalled with a separate tag
         //  tree code for each precinct as confined to a sub-band. The values in this tag tree are the number of the layer in which the
         //  current code-block is first included."
-        // FIXME: Gulp. Implement.
+        is_included = TRY(code_block_inclusion_tree.read_value(0, 0, read_bit, current_layer_index + 1)) <= current_layer_index;
     }
     dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
 
@@ -1094,17 +1114,70 @@ ErrorOr<PacketHeader> read_packet_header(BigEndianInputBitStream& bitstream)
     //  [...] The value of P is coded in the packet header with a separate tag tree for every precinct"
     // And Annex E, E.1 Inverse quantization procedure:
     // "Mb = G + exp_b - 1       (E-2)
-    //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5).""
-    // FIXME: Implement.
+    //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
+    auto p_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
+    bool is_included_for_the_first_time = is_included && !current_block.has_been_included_in_previous_packet;
+    if (is_included_for_the_first_time) {
+        u32 p = TRY(p_tree.read_value(0, 0, read_bit));
+        dbgln("zero bit-plane information: {}", p);
+        current_block.has_been_included_in_previous_packet = true;
+    }
 
     // B.10.6 Number of coding passes
     // Table B.4 – Codewords for the number of coding passes for each code-block
-    // FIXME: Implement.
+    u8 number_of_coding_passes = TRY([&]() -> ErrorOr<u8> {
+        if (!TRY(read_bit()))
+            return 1;
+        if (!TRY(read_bit()))
+            return 2;
+
+        u8 bits = TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        if (bits != 3)
+            return 3 + bits;
+
+        bits = TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        if (bits != 31)
+            return 6 + bits;
+
+        bits = TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        bits = (bits << 1) | TRY(read_bit());
+        return 37 + bits;
+    }());
+    dbgln("number of coding passes: {}", number_of_coding_passes);
 
     // B.10.7 Length of the compressed image data from a given code-block
+    // XXX unclear to me to decide if we're dealing with B.10.7.1 or B.10.7.2.
+    // FIXME: Figure out. For now, always B.10.7.1, but that won't always be right.
+
+    // B.10.7.1 Single codeword segment
+    // "The length of a codeword segment is represented by a binary number of length:
+    //      bits = Lblock + ⌊log2(number_of_coding_passes)⌋
+    //  where Lblock is a code-block state variable. A separate Lblock is used for each code-block in the precinct.
+    //  The value of Lblock is initially set to three. The number of bytes contributed by each code-block is preceded by signalling
+    //  bits that increase the value of Lblock, as needed. A signalling bit of zero indicates the current value of Lblock is sufficient.
+    //  If there are k ones followed by a zero, the value of Lblock is incremented by k."
+    u32 k = 0;
+    while (TRY(read_bit()))
+        k++;
+    current_block.Lblock += k;
+    u32 bits = current_block.Lblock + (u32)floor(log2(number_of_coding_passes));
+    dbgln("length of codeword segment: {} bits", bits);
+
+    // B.10.7.2 Multiple codeword segments
     // FIXME: Implement.
 
-    return Error::from_string_literal("cannot decode packet headers yet");
+//    return Error::from_string_literal("cannot decode packet headers yet");
+    return header;
 }
 
 ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
@@ -1116,10 +1189,15 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // FIXME: Read more data than just the first tile-part
 
     auto data = context.tiles[0].tile_parts[0].data;
+// dbgln("first byte: {:#x}", data[0]);
+// dbgln("second byte: {:#x}", data[1]);
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
-    TRY(read_packet_header(bitstream));
+    auto header = TRY(read_packet_header(context, bitstream));
+    (void)header;
+
+dbgln("header was {} bytes long", TRY(stream.tell()));
 
     // FIXME: Read actual packet data too
     // FIXME: Actually decode image :)
