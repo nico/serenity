@@ -1226,7 +1226,18 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
     // FIXME: Read actual packet data too
     // That's Annex D.
-
+    // D.3 Decoding passes over the bit-planes
+    // "four coding passes:
+    //  - significance coding,
+    //  - sign coding,
+    //  - magnitude refinement coding, and
+    //  - cleanup coding."
+    // "three coding passes over each bit-plane:
+    //  - significance and sign coding in a significance propagation pass,
+    //  - magnitude refinement coding in a magnitude refinement pass, and
+    //  - cleanup and sign coding in a cleanup pass."
+    // "The first bit-plane within the current block with a non-zero element has a cleanup pass only.
+    //  The remaining bit-planes are decoded in three coding passes."
 
     // FIXME: Actually decode image :)
 
