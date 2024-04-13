@@ -981,10 +981,6 @@ ErrorOr<u32> TagTree::read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& 
 
 }
 
-struct PacketHeader {
-    bool is_empty { false };
-};
-
 struct CodeBlock {
     // Becomes true when the first packet including this codeblock is read.
     bool has_been_included_in_previous_packet { false };
@@ -995,6 +991,22 @@ struct CodeBlock {
     // B.10.7.1 Single codeword segment
     // "Lblock is a code-block state variable. [...] The value of Lblock is initially set to three."
     u32 Lblock { 3 };
+
+    bool is_included { true };
+
+    // XXX comment
+    u32 p { 0 };
+
+    u8 number_of_coding_passes { 0 };
+
+    u32 length_of_data { 0 };
+};
+
+struct PacketHeader {
+    bool is_empty { false };
+
+    // XXX eeeehhhh
+    CodeBlock block;
 };
 
 ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream)
@@ -1106,6 +1118,7 @@ dbgln("reading stuff bit");
         is_included = TRY(code_block_inclusion_tree.read_value(0, 0, read_bit, current_layer_index + 1)) <= current_layer_index;
     }
     dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
+    current_block.is_included = is_included;
 
     // B.10.5 Zero bit-plane information
     // "If a code-block is included for the first time,
@@ -1120,6 +1133,7 @@ dbgln("reading stuff bit");
     if (is_included_for_the_first_time) {
         u32 p = TRY(p_tree.read_value(0, 0, read_bit));
         dbgln("zero bit-plane information: {}", p);
+        current_block.p = p;
         current_block.has_been_included_in_previous_packet = true;
     }
 
@@ -1154,6 +1168,7 @@ dbgln("reading stuff bit");
         return 37 + bits;
     }());
     dbgln("number of coding passes: {}", number_of_coding_passes);
+    current_block.number_of_coding_passes = number_of_coding_passes;
 
     // B.10.7 Length of the compressed image data from a given code-block
     // XXX unclear to me to decide if we're dealing with B.10.7.1 or B.10.7.2.
@@ -1171,12 +1186,22 @@ dbgln("reading stuff bit");
         k++;
     current_block.Lblock += k;
     u32 bits = current_block.Lblock + (u32)floor(log2(number_of_coding_passes));
-    dbgln("length of codeword segment: {} bits", bits);
+    dbgln("bits for length of codeword segment: {} bits", bits);
+    if (bits > 32)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Too many bits for length of codeword segment");
+    u32 length = 0;
+    for (u32 i = 0; i < bits; ++i) {
+        bool bit = TRY(read_bit());
+        length = (length << 1) | bit;
+    }
+    dbgln("length of codeword segment: {} bytes", length);
+    current_block.length_of_data = length;
 
     // B.10.7.2 Multiple codeword segments
     // FIXME: Implement.
 
 //    return Error::from_string_literal("cannot decode packet headers yet");
+    header.block = current_block;
     return header;
 }
 
@@ -1200,9 +1225,12 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 dbgln("header was {} bytes long", TRY(stream.tell()));
 
     // FIXME: Read actual packet data too
+    // That's Annex D.
+
+
     // FIXME: Actually decode image :)
 
-    return Error::from_string_literal("cannot decode imag yet");
+    return Error::from_string_literal("cannot decode image yet");
 }
 
 bool JPEG2000ImageDecoderPlugin::sniff(ReadonlyBytes data)
