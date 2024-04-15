@@ -1209,7 +1209,12 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 {
     TRY(parse_codestream_tile_headers(context));
 
-    // FIXME: Check may_use_SOP_marker and may_use_EPH_marker presence, error out for now if they're set
+    // FIXME: Look at tile COC, COD, image COC too
+    if (context.cod.may_use_SOP_marker)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: SOP marker not yet implemented");
+    if (context.cod.may_use_EPH_marker)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: EPH marker not yet implemented");
+
     // FIXME: Check progression_order
     // FIXME: Read more data than just the first tile-part
 
@@ -1238,6 +1243,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     //  - cleanup and sign coding in a cleanup pass."
     // "The first bit-plane within the current block with a non-zero element has a cleanup pass only.
     //  The remaining bit-planes are decoded in three coding passes."
+    // XXX error out if any bit in code_block_style is set
 
     // FIXME: Actually decode image :)
 
