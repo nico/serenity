@@ -1243,7 +1243,10 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     //  - cleanup and sign coding in a cleanup pass."
     // "The first bit-plane within the current block with a non-zero element has a cleanup pass only.
     //  The remaining bit-planes are decoded in three coding passes."
-    // XXX error out if any bit in code_block_style is set
+
+    // FIXME: Relax. Will need implementing D.5, D.6, D.7, and probably more.
+    if (context.cod.code_block_style != 0)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
 
     // FIXME: Actually decode image :)
 
