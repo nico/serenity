@@ -1250,6 +1250,24 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
     // FIXME: Actually decode image :)
 
+    // D.4 Initializing and terminating
+    // Table D.7 – Initial states for all contexts
+
+    // Figure D.3 – Flow chart for all coding passes on a code-block bit-plane
+    // Table D.10 – Decisions in the context model flow chart
+    // Table D.11 – Decoding in the context model flow chart
+    bool is_first_significant_bitplane_for_code_block = true;
+    if (!is_first_significant_bitplane_for_code_block) {
+        // XXX significance propagation pass
+        // XXX magnitude refinement pass
+    }
+    // Cleanup pass
+    // D8, Are four contiguous undecoded coefficients in a column each with a 0 context?, See D.3.4
+    bool are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context = true;
+    if (are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context) {
+        // C4, Run-length context label
+    }
+
     return Error::from_string_literal("cannot decode image yet");
 }
 
