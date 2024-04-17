@@ -1289,42 +1289,49 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
             dbgln("first_coefficient_index: {}", first_coefficient_index);
             u8 coefficient_index = first_coefficient_index;
 
-            // C2, Decode sign bit of current coefficient
-            // Sign bit
-            // D.3.2 Sign bit decoding
-            // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
-            // FIXME: compute
-            i8 v_contribution = 0;
-            i8 h_contribution = 0;
-            // Table D.3 – Sign contexts from the vertical and horizontal contributions
-            u8 context_label = 9;
-            if (h_contribution == 0)
-                context_label += abs(v_contribution);
-            else
-                context_label += 3 + h_contribution * v_contribution;
-            u8 xor_bit = 0;
-            if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
-                xor_bit = 1;
-            bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
-            dbgln("sign_bit: {}", sign_bit);
+            bool is_first_coefficient = true;
+            bool is_current_coefficient_significant = true;
+            do {
+                if (!is_first_coefficient) {
+                    // C0, Go to the next coefficient or column
+                    ++coefficient_index;
+                    // XXX: ...or column
 
-            // D10, Are there more coefficients remaining of the four column coefficients?
-            // XXX increment coefficient_index by 1 each round
-            bool are_there_more_coefficients_remaining_of_the_four_column_coefficients = coefficient_index < 3;
-            if (are_there_more_coefficients_remaining_of_the_four_column_coefficients) {
-                // C0, Go to the next coefficient or column
-                ++coefficient_index;
-                // XXX: ...or column
+                    // C1, Decode significance bit of current coefficient (See D.3.1)
+                    // Table D.1 – Contexts for the significance propagation and cleanup coding passes
+                    // XXX make sub-band dependent. assumes LL atm.
+                    u8 context = 0; // XXX compute
+                    bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+                    dbgln("is_newly_significant: {}", is_newly_significant);
+                    // XXX store this somewhere
+                    is_current_coefficient_significant = is_newly_significant;
+                }
+                is_first_coefficient = false;
 
-                // C1, Decode significance bit of current coefficient (See D.3.1)
-                // Table D.1 – Contexts for the significance propagation and cleanup coding passes
-                // XXX make sub-band dependent. assumes LL atm.
-                u8 context = 0; // XXX compute
-                bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                dbgln("is_newly_significant: {}", is_newly_significant);
+                // D3, Did the current coefficient just become significant?
+                if (is_current_coefficient_significant) {
+                    // C2, Decode sign bit of current coefficient
+                    // Sign bit
+                    // D.3.2 Sign bit decoding
+                    // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
+                    // FIXME: compute
+                    i8 v_contribution = 0;
+                    i8 h_contribution = 0;
+                    // Table D.3 – Sign contexts from the vertical and horizontal contributions
+                    u8 context_label = 9;
+                    if (h_contribution == 0)
+                        context_label += abs(v_contribution);
+                    else
+                        context_label += 3 + h_contribution * v_contribution;
+                    u8 xor_bit = 0;
+                    if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
+                        xor_bit = 1;
+                    bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
+                    dbgln("sign_bit: {}", sign_bit);
+                }
 
-                // FIXME: check D3
-            }
+                // D10, Are there more coefficients remaining of the four column coefficients?
+            } while (coefficient_index < 3);
         }
 
         // FIXME: D12
