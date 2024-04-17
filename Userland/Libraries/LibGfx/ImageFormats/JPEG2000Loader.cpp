@@ -13,6 +13,7 @@
 #include <LibGfx/ImageFormats/ISOBMFF/JPEG2000Boxes.h>
 #include <LibGfx/ImageFormats/ISOBMFF/Reader.h>
 #include <LibGfx/ImageFormats/JPEG2000Loader.h>
+#include <LibGfx/ImageFormats/QMArithmeticDecoder.h>
 #include <LibTextCodec/Decoder.h>
 
 // Core coding system spec (.jp2 format): T-REC-T.800-201511-S!!PDF-E.pdf available here:
@@ -1229,6 +1230,7 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 
 dbgln("header was {} bytes long", TRY(stream.tell()));
 
+
     // FIXME: Read actual packet data too
     // That's Annex D.
     // D.3 Decoding passes over the bit-planes
@@ -1250,8 +1252,18 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
     // FIXME: Actually decode image :)
 
+    auto packet_data = data.slice(stream.offset(), header.block.length_of_data);
+    // FIXME: Loop to next header after this, I suppose.
+
+    auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
+
     // D.4 Initializing and terminating
     // Table D.7 – Initial states for all contexts
+    QMArithmeticDecoder::Context uniform_context { 46, 0 };
+    QMArithmeticDecoder::Context run_length_context { 3, 0 };
+    //QMArithmeticDecoder::Context all_zero_neighbors_context = { 4, 0 };
+    Array<QMArithmeticDecoder::Context, 16> all_other_contexts {};
+    all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
 
     // Figure D.3 – Flow chart for all coding passes on a code-block bit-plane
     // Table D.10 – Decisions in the context model flow chart
@@ -1261,11 +1273,62 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
         // XXX significance propagation pass
         // XXX magnitude refinement pass
     }
-    // Cleanup pass
+    // Cleanup pass (textual description in D.3.4 Cleanup pass)
     // D8, Are four contiguous undecoded coefficients in a column each with a 0 context?, See D.3.4
     bool are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context = true;
     if (are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context) {
         // C4, Run-length context label
+        auto not_four_zeros = arithmetic_decoder.get_next_bit(run_length_context);
+        dbgln("not_four_zeros: {}", not_four_zeros);
+
+        bool are_the_four_contiguous_bits_all_zero = !not_four_zeros;
+        if (!are_the_four_contiguous_bits_all_zero) {
+            // C5
+            u8 first_coefficient_index = arithmetic_decoder.get_next_bit(uniform_context);
+            first_coefficient_index = (first_coefficient_index << 1) | arithmetic_decoder.get_next_bit(uniform_context);
+            dbgln("first_coefficient_index: {}", first_coefficient_index);
+            u8 coefficient_index = first_coefficient_index;
+
+            // C2, Decode sign bit of current coefficient
+            // Sign bit
+            // D.3.2 Sign bit decoding
+            // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
+            // FIXME: compute
+            i8 v_contribution = 0;
+            i8 h_contribution = 0;
+            // Table D.3 – Sign contexts from the vertical and horizontal contributions
+            u8 context_label = 9;
+            if (h_contribution == 0)
+                context_label += abs(v_contribution);
+            else
+                context_label += 3 + h_contribution * v_contribution;
+            u8 xor_bit = 0;
+            if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
+                xor_bit = 1;
+            bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
+            dbgln("sign_bit: {}", sign_bit);
+
+            // D10, Are there more coefficients remaining of the four column coefficients?
+            // XXX increment coefficient_index by 1 each round
+            bool are_there_more_coefficients_remaining_of_the_four_column_coefficients = coefficient_index < 3;
+            if (are_there_more_coefficients_remaining_of_the_four_column_coefficients) {
+                // C0, Go to the next coefficient or column
+                ++coefficient_index;
+                // XXX: ...or column
+
+                // C1, Decode significance bit of current coefficient (See D.3.1)
+                // Table D.1 – Contexts for the significance propagation and cleanup coding passes
+                // XXX make sub-band dependent. assumes LL atm.
+                u8 context = 0; // XXX compute
+                bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+                dbgln("is_newly_significant: {}", is_newly_significant);
+
+                // FIXME: check D3
+            }
+        }
+
+        // FIXME: D12
+        // FIXME: C0, loop
     }
 
     return Error::from_string_literal("cannot decode image yet");
