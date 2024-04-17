@@ -1257,6 +1257,123 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
     auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
 
+    // Strips of four vertical coefficents at a time.
+    // State per coefficient:
+    // - significance
+    // - sign
+    // - magnitude
+    // Store this as a struct with:
+    // - u8 with 2 bits for significance and sign for the four coefficients
+    // - One u16 per coefficient for magnitude
+    // FIXME: Store this external to this function since some bitplanes could
+    //        be in a later packet.
+
+    // XXX reuse cbx_prime, cby_prime in header parser and store that somewhere.
+    int w = 1 << context.cod.code_block_width_exponent;
+    int h = 1 << context.cod.code_block_height_exponent;
+
+    int num_strips = ceil_div(h, 4);
+
+    Vector<u8> significance_and_sign;
+    TRY(significance_and_sign.try_resize(w * num_strips));
+
+    Vector<u16> magnitudes;
+    TRY(magnitudes.try_resize(w * h));
+
+    auto is_significant = [&](int x, int y) {
+        if (x < 0 || x >= w || y < 0 || y >= h)
+            return false;
+        auto strip_index = y / 4;
+        auto strip_y = y % 4;
+        auto strip_offset = strip_index * w;
+        auto strip_value = significance_and_sign[strip_offset + x];
+        return (strip_value & (1 << strip_y)) != 0;
+    };
+    auto get_sign = [&](int x, int y) {
+        auto strip_index = y / 4;
+        auto strip_y = y % 4;
+        auto strip_offset = strip_index * w;
+        auto strip_value = significance_and_sign[strip_offset + x];
+        return (strip_value & (1 << (strip_y + 4))) != 0;
+    };
+
+    auto set_significant = [&](int x, int y, bool value) {
+        auto strip_index = y / 4;
+        auto strip_y = y % 4;
+        auto strip_offset = strip_index * w;
+        auto strip_value = significance_and_sign[strip_offset + x];
+        if (value)
+            strip_value |= 1 << strip_y;
+        else
+            strip_value &= ~(1 << strip_y);
+        significance_and_sign[strip_offset + x] = strip_value;
+    };
+    auto set_sign = [&](int x, int y, bool value) {
+        auto strip_index = y / 4;
+        auto strip_y = y % 4;
+        auto strip_offset = strip_index * w;
+        auto strip_value = significance_and_sign[strip_offset + x];
+        if (value)
+            strip_value |= 1 << (strip_y + 4);
+        else
+            strip_value &= ~(1 << (strip_y + 4));
+        significance_and_sign[strip_offset + x] = strip_value;
+    };
+
+    auto compute_context_ll_lh = [&](int x, int y) {
+        // Table D.1 – Contexts for the significance propagation and cleanup coding passes
+        u8 sum_h = is_significant(x - 1, y) + is_significant(x + 1, y);
+        u8 sum_v = is_significant(x, y - 1) + is_significant(x, y + 1);
+        u8 sum_d = is_significant(x - 1, y - 1) + is_significant(x - 1, y + 1) + is_significant(x + 1, y - 1) + is_significant(x + 1, y + 1);
+
+        if (sum_h == 2)
+            return 8;
+
+        if (sum_h == 1) {
+            if (sum_v >= 1)
+                return 7;
+            if (sum_d >= 1)
+                return 6;
+            return 5;
+        }
+
+        if (sum_v == 2)
+            return 4;
+        if (sum_v == 1)
+            return 3;
+        if (sum_d >= 2)
+            return 2;
+        if (sum_d == 1)
+            return 1;
+
+        return 0;
+    };
+
+    auto v_or_h_contribution = [&](IntPoint p, IntPoint d0, IntPoint d1) -> i8 {
+        auto p0 = p + d0;
+        auto p1 = p + d1;
+        // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
+        if (is_significant(p1.x(), p1.y())) {
+            if (get_sign(p1.x(), p1.y()) == false) { // positive (XXX enum class)
+                if (is_significant(p0.x(), p0.y()))
+                    return get_sign(p0.x(), p0.y()) == false ? 1 : 0;
+                return 1;
+            }
+            if (is_significant(p0.x(), p0.y()))
+                return get_sign(p0.x(), p0.y()) == false ? 0 : -1;
+            return -1;
+        }
+        if (is_significant(p0.x(), p0.y()))
+            return get_sign(p0.x(), p0.y()) == false ? 1 : -1;
+        return 0;
+    };
+    // FIXME: loop over all code-blocks in packet
+    // FIXME: If code-block not included, continue to next code-block
+    // FIXME: Loop over all bitplanes in packet
+
+    // header.block.number_of_coding_passes is probably number of bitplanes in this packet (?)
+    // XXX optionally reinitialize contexts between bitplanes
+
     // D.4 Initializing and terminating
     // Table D.7 – Initial states for all contexts
     QMArithmeticDecoder::Context uniform_context { 46, 0 };
@@ -1268,74 +1385,88 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // Figure D.3 – Flow chart for all coding passes on a code-block bit-plane
     // Table D.10 – Decisions in the context model flow chart
     // Table D.11 – Decoding in the context model flow chart
+    // D0, Is this the first significant bit-plane for the code-block?
     bool is_first_significant_bitplane_for_code_block = true;
     if (!is_first_significant_bitplane_for_code_block) {
         // XXX significance propagation pass
         // XXX magnitude refinement pass
     }
-    // Cleanup pass (textual description in D.3.4 Cleanup pass)
-    // D8, Are four contiguous undecoded coefficients in a column each with a 0 context?, See D.3.4
-    bool are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context = true;
-    if (are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context) {
-        // C4, Run-length context label
-        auto not_four_zeros = arithmetic_decoder.get_next_bit(run_length_context);
-        dbgln("not_four_zeros: {}", not_four_zeros);
 
-        bool are_the_four_contiguous_bits_all_zero = !not_four_zeros;
-        if (!are_the_four_contiguous_bits_all_zero) {
-            // C5
-            u8 first_coefficient_index = arithmetic_decoder.get_next_bit(uniform_context);
-            first_coefficient_index = (first_coefficient_index << 1) | arithmetic_decoder.get_next_bit(uniform_context);
-            dbgln("first_coefficient_index: {}", first_coefficient_index);
-            u8 coefficient_index = first_coefficient_index;
+    for (int y = 0; y < h; y += 4) {
+        int y_end = min(y + 4, h);
+        int num_rows = y_end - y;
+        for (int x = 0; x < w; ++x) {
+            Array<u8, 4> contexts {};
+            for (int i = 0; i < 4; ++i)
+                contexts[i] = compute_context_ll_lh(x, y + i);
 
-            bool is_first_coefficient = true;
-            bool is_current_coefficient_significant = true;
-            do {
-                if (!is_first_coefficient) {
-                    // C0, Go to the next coefficient or column
-                    ++coefficient_index;
-                    // XXX: ...or column
+            // Cleanup pass (textual description in D.3.4 Cleanup pass)
+            // D8, Are four contiguous undecoded coefficients in a column each with a 0 context?, See D.3.4
+            bool are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context = num_rows == 4 && (contexts[0] + contexts[1] + contexts[2] + contexts[3] == 0);
+            if (are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context) {
+                // C4, Run-length context label
+                auto not_four_zeros = arithmetic_decoder.get_next_bit(run_length_context);
+                dbgln("not_four_zeros: {}", not_four_zeros);
 
-                    // C1, Decode significance bit of current coefficient (See D.3.1)
-                    // Table D.1 – Contexts for the significance propagation and cleanup coding passes
-                    // XXX make sub-band dependent. assumes LL atm.
-                    u8 context = 0; // XXX compute
-                    bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                    dbgln("is_newly_significant: {}", is_newly_significant);
-                    // XXX store this somewhere
-                    is_current_coefficient_significant = is_newly_significant;
+                // D11, Are the four contiguous bits all zero?
+                bool are_the_four_contiguous_bits_all_zero = !not_four_zeros;
+                if (!are_the_four_contiguous_bits_all_zero) {
+                    // C5
+                    u8 first_coefficient_index = arithmetic_decoder.get_next_bit(uniform_context);
+                    first_coefficient_index = (first_coefficient_index << 1) | arithmetic_decoder.get_next_bit(uniform_context);
+                    dbgln("first_coefficient_index: {}", first_coefficient_index);
+                    u8 coefficient_index = first_coefficient_index;
+
+                    bool is_first_coefficient = true;
+                    bool is_current_coefficient_significant = true;
+                    do {
+                        if (!is_first_coefficient) {
+                            // C0, Go to the next coefficient or column
+                            ++coefficient_index;
+
+                            // C1, Decode significance bit of current coefficient (See D.3.1)
+                            // Table D.1 – Contexts for the significance propagation and cleanup coding passes
+                            // XXX make sub-band dependent. assumes LL atm.
+                            u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
+                            bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+                            dbgln("is_newly_significant: {}", is_newly_significant);
+                            is_current_coefficient_significant = is_newly_significant;
+                            set_significant(x, y + coefficient_index, is_newly_significant);
+                        }
+                        is_first_coefficient = false;
+
+                        // D3, Did the current coefficient just become significant?
+                        if (is_current_coefficient_significant) {
+                            // C2, Decode sign bit of current coefficient
+                            // Sign bit
+                            // D.3.2 Sign bit decoding
+                            // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
+                            i8 v_contribution = v_or_h_contribution({ x, y + coefficient_index }, { 0, -1 }, { 0, 1 });
+                            i8 h_contribution = v_or_h_contribution({ x, y + coefficient_index }, { -1, 0 }, { 1, 0 });
+                            // Table D.3 – Sign contexts from the vertical and horizontal contributions
+                            u8 context_label = 9;
+                            if (h_contribution == 0)
+                                context_label += abs(v_contribution);
+                            else
+                                context_label += 3 + h_contribution * v_contribution;
+                            u8 xor_bit = 0;
+                            if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
+                                xor_bit = 1;
+                            bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
+                            dbgln("sign_bit: {}", sign_bit);
+                            set_sign(x, y + coefficient_index, sign_bit);
+                        }
+
+                        // D10, Are there more coefficients remaining of the four column coefficients?
+                    } while (coefficient_index < num_rows);
                 }
-                is_first_coefficient = false;
 
-                // D3, Did the current coefficient just become significant?
-                if (is_current_coefficient_significant) {
-                    // C2, Decode sign bit of current coefficient
-                    // Sign bit
-                    // D.3.2 Sign bit decoding
-                    // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
-                    // FIXME: compute
-                    i8 v_contribution = 0;
-                    i8 h_contribution = 0;
-                    // Table D.3 – Sign contexts from the vertical and horizontal contributions
-                    u8 context_label = 9;
-                    if (h_contribution == 0)
-                        context_label += abs(v_contribution);
-                    else
-                        context_label += 3 + h_contribution * v_contribution;
-                    u8 xor_bit = 0;
-                    if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
-                        xor_bit = 1;
-                    bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
-                    dbgln("sign_bit: {}", sign_bit);
-                }
-
-                // D10, Are there more coefficients remaining of the four column coefficients?
-            } while (coefficient_index < 3);
+                // D12, Are there more coefficients in the cleanup pass?
+                // C0, Go to the next coefficient or column
+                // (Both done by loop.)
+            }
         }
 
-        // FIXME: D12
-        // FIXME: C0, loop
     }
 
     return Error::from_string_literal("cannot decode image yet");
