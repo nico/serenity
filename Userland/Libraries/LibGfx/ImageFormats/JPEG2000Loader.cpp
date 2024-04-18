@@ -1618,6 +1618,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                         // C1, Decode significance bit of current coefficient
                         // XXX make sub-band dependent. assumes LL atm.
                         u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
+                        // dbgln("alt context {}", context);
                         bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                         dbgln("alt is_newly_significant: {}", is_newly_significant);
                         set_significant(x, y + coefficient_index, is_newly_significant);
