@@ -1248,13 +1248,18 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     if (context.cod.may_use_EPH_marker)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: EPH marker not yet implemented");
 
+    if (context.cod.number_of_layers != 1)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
+
     // FIXME: Check progression_order
     // FIXME: Read more data than just the first tile-part
 
     if (context.tiles.size() != 1)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one tile yet");
-    if (context.tiles[0].tile_parts.size() != 1)
-        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one tile-part yet");
+
+    // Guaranteed by parse_codestream_tile_header.
+    VERIFY(!context.tiles[0].tile_parts.is_empty());
+
     int tile_index = 0;
     auto pq = context.siz.tile_2d_index_from_1d_index(tile_index);
 
@@ -1270,6 +1275,9 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     int try0 = ceil_div(component_rect.top(), denominator);
     int trx1 = ceil_div(component_rect.right(), denominator);
     int try1 = ceil_div(component_rect.bottom(), denominator);
+
+dbgln("component rect: {}", component_rect);
+dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
 
     // B.6
     // (B-16)
@@ -1292,16 +1300,49 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // (B-18
     int ycb_prime = min(context.cod.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
 
+    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, context.cod.code_block_width_exponent, context.cod.code_block_height_exponent, xcb_prime, ycb_prime);
+
+
     // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
     // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
     // That means there are 2^(PPX - xcb') * 2^(PPy - ycb') code-blocks in a precinct, and also in a packet.
     // XXX where does the spec say that?
-    auto codeblock_x_count = (1 << PPx) / (1 << xcb_prime);
-    auto codeblock_y_count = (1 << PPy) / (1 << ycb_prime);
+    // XXX also, if precincts are way larger than the image, then this here produces
+    //     oodles of codeblocks outside the subband. Need to clip somewhere, but ideally the spec would say that somewhere.
+    auto precinct_rect = IntRect({ 0, 0, 1 << PPx, 1 << PPy });
+    precinct_rect.intersect({ trx0, try0, trx1 - trx0, try1 - try0 });
+    if (precinct_rect.x() % (1 << xcb_prime) != 0) {
+        int new_x = (precinct_rect.x() / (1 << xcb_prime)) * (1 << xcb_prime);
+        int additional_width = precinct_rect.x() - new_x;
+        precinct_rect.set_x(new_x);
+        precinct_rect.set_width(precinct_rect.width() + additional_width);
+    }
+    if (precinct_rect.y() % (1 << ycb_prime) != 0) {
+        int new_y = (precinct_rect.y() / (1 << ycb_prime)) * (1 << ycb_prime);
+        int additional_height = precinct_rect.y() - new_y;
+        precinct_rect.set_y(new_y);
+        precinct_rect.set_height(precinct_rect.height() + additional_height);
+    }
+    if (precinct_rect.right() % (1 << xcb_prime) != 0) {
+        int new_right = ceil_div(precinct_rect.right(), (1 << xcb_prime)) * (1 << xcb_prime);
+        precinct_rect.set_width(new_right - precinct_rect.x());
+    }
+    if (precinct_rect.bottom() % (1 << ycb_prime) != 0) {
+        int new_bottom = ceil_div(precinct_rect.bottom(), (1 << ycb_prime)) * (1 << ycb_prime);
+        precinct_rect.set_height(new_bottom - precinct_rect.y());
+    }
+    dbgln("precinct rect: {}", precinct_rect);
+
+    // auto codeblock_x_count = (1 << PPx) / (1 << xcb_prime);
+    // auto codeblock_y_count = (1 << PPy) / (1 << ycb_prime);
+    auto codeblock_x_count = precinct_rect.width() / (1 << xcb_prime);
+    auto codeblock_y_count = precinct_rect.height() / (1 << ycb_prime);
 
     dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
 
     auto data = context.tiles[0].tile_parts[0].data;
+    if (data.is_empty())
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot handle tile-parts without any packets yet");
 // dbgln("first byte: {:#x}", data[0]);
 // dbgln("second byte: {:#x}", data[1]);
     FixedMemoryStream stream { data };
