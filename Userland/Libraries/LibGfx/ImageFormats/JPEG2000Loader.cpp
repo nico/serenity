@@ -154,6 +154,41 @@ struct ImageAndTileSize {
         u8 vertical_separation { 0 }; // "YRsiz" in spec.
     };
     Vector<ComponentInformation> components;
+
+    // (B-5)
+    u32 number_of_x_tiles() const { return ceil_div(width - x_offset, tile_width); }
+    u32 number_of_y_tiles() const { return ceil_div(height - y_offset, tile_height); }
+
+    IntPoint tile_2d_index_from_1d_index(u32 tile_index) const
+    {
+        // (B-6)
+        return { tile_index % number_of_x_tiles(), tile_index / number_of_x_tiles() };
+    }
+
+    IntRect reference_grid_coordinates_for_tile(IntPoint tile_2d_index) const
+    {
+        int p = tile_2d_index.x();
+        int q = tile_2d_index.y();
+        int tx0 = max(tile_x_offset + p * tile_width, x_offset); // (B-7)
+        int ty0 = max(tile_y_offset + q * tile_height, y_offset); // (B-8)
+        int tx1 = min(tile_x_offset + (p + 1) * tile_width, width); // (B-9)
+        int ty1 = min(tile_y_offset + (q + 1) * tile_height, height); // (B-10)
+        return { tx0, ty0, tx1 - tx0, ty1 - ty0 }; // (B-11)
+    }
+
+    IntRect reference_grid_coordinates_for_tile_component(IntPoint tile_2d_index, int component_index) const
+    {
+        auto tile_rect = reference_grid_coordinates_for_tile(tile_2d_index);
+
+        // (B-12)
+        int tcx0 = ceil_div(tile_rect.left(), static_cast<int>(components[component_index].horizontal_separation));
+        int tcx1 = ceil_div(tile_rect.right(), static_cast<int>(components[component_index].horizontal_separation));
+        int tcy0 = ceil_div(tile_rect.top(), static_cast<int>(components[component_index].vertical_separation));
+        int tcy1 = ceil_div(tile_rect.bottom(), static_cast<int>(components[component_index].vertical_separation));
+
+        return { tcx0, tcy0, tcx1 - tcx0, tcy1 - tcy0 }; // (B-13)
+    }
+
 };
 
 static ErrorOr<ImageAndTileSize> read_image_and_tile_size(ReadonlyBytes data)
@@ -171,6 +206,14 @@ static ErrorOr<ImageAndTileSize> read_image_and_tile_size(ReadonlyBytes data)
     siz.tile_x_offset = TRY(stream.read_value<BigEndian<u32>>());
     siz.tile_y_offset = TRY(stream.read_value<BigEndian<u32>>());
     u16 component_count = TRY(stream.read_value<BigEndian<u16>>()); // "Csiz" in spec.
+
+    // B.3 Image area division into tiles and tile-components
+    // (B-3)
+    if (!(0 <= siz.tile_x_offset && siz.tile_x_offset <= siz.x_offset && 0 <= siz.tile_y_offset && siz.tile_y_offset <= siz.y_offset))
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Invalid tile offset");
+    // (B-4)
+    if (!(siz.tile_width + siz.tile_x_offset > siz.x_offset && siz.tile_height + siz.tile_y_offset > siz.y_offset))
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Invalid tile size");
 
     for (size_t i = 0; i < component_count; ++i) {
         ImageAndTileSize::ComponentInformation component;
@@ -199,7 +242,7 @@ struct CodingStyleParameters {
     };
 
     // Table A.15 – Coding style parameter values of the SPcod and SPcoc parameters
-    // "Number of decomposition levels, NL, Zero implies no transformation."
+    // "Number of decomposition levels, N_L, Zero implies no transformation."
     u8 number_of_decomposition_levels { 0 };
     u8 code_block_width_exponent { 0 };  // "xcb" in spec; 2 already added.
     u8 code_block_height_exponent { 0 }; // "ycb" in spec; 2 already added.
@@ -877,7 +920,6 @@ static ErrorOr<void> decode_jpeg2000_header(JPEG2000LoadingContext& context, Rea
         context.icc_data = color_header_box.icc_data.bytes();
 
     TRY(parse_codestream_main_header(context));
-
     auto size_from_siz = IntSize { context.siz.width, context.siz.height };
     if (size_from_siz != context.size) {
         // FIXME: If this is common, warn and use size from SIZ marker.
@@ -1013,14 +1055,11 @@ struct PacketHeader {
     CodeBlock block;
 };
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count)
 {
     // B.9 Packets
     // "All compressed image data representing a specific tile, layer, component, resolution level and precinct appears in the
     //  codestream in a contiguous segment called a packet. Packet data is aligned at 8-bit (one byte) boundaries."
-    // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
-    // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
-    // That means there are 2^(PPX - xcb') * 2^(PPy - ycb') code-blocks in a precinct, and also in a packet.
 
     // XXX repeat image, tile, component <=wavelet=> subband, precinct, code-block, packet, layer?
     // (Described in 5.3 Coding principles)
@@ -1096,16 +1135,6 @@ dbgln("reading stuff bit");
 
     CodeBlock current_block {}; // FIXME: Get from somewhere
     u32 current_layer_index = 0; // FIXME: Get from somewhere
-
-    // B.7
-    // FIXME: complete
-    // u32 cbx_prime = min(context.cod.code_block_width_exponent, context.cod.precinct_sizes[0].PPx);
-    // u32 cby_prime = min(context.cod.code_block_height_exponent, context.cod.precinct_sizes[0].PPy);
-
-    // XXX limit precinct size to tile size? where does the spec say that?
-    u32 codeblock_x_count = 1;
-    u32 codeblock_y_count = 1;
-
 
     auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
 
@@ -1222,13 +1251,63 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // FIXME: Check progression_order
     // FIXME: Read more data than just the first tile-part
 
+    if (context.tiles.size() != 1)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one tile yet");
+    if (context.tiles[0].tile_parts.size() != 1)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one tile-part yet");
+    int tile_index = 0;
+    auto pq = context.siz.tile_2d_index_from_1d_index(tile_index);
+
+    // Compute tile size at resolution level r.
+    int r = 0;
+    int component_index = 0;
+
+    // B.5
+    // (B-14)
+    auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
+    int denominator = 1 << (context.cod.number_of_decomposition_levels - r);
+    int trx0 = ceil_div(component_rect.left(), denominator);
+    int try0 = ceil_div(component_rect.top(), denominator);
+    int trx1 = ceil_div(component_rect.right(), denominator);
+    int try1 = ceil_div(component_rect.bottom(), denominator);
+
+    // B.6
+    // (B-16)
+    int num_precincts_wide = 0;
+    int num_precincts_high = 0;
+    int PPx = context.cod.precinct_sizes[r].PPx; // XXX could be from tile header
+    if (trx1 != trx0) {
+        num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
+    }
+    int PPy = context.cod.precinct_sizes[r].PPy; // XXX could be from tile header
+    if (try1 != try0) {
+        num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
+    }
+    dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
+
+    // B.7
+    // (B-17)
+    int xcb_prime = min(context.cod.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
+
+    // (B-18
+    int ycb_prime = min(context.cod.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
+
+    // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
+    // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
+    // That means there are 2^(PPX - xcb') * 2^(PPy - ycb') code-blocks in a precinct, and also in a packet.
+    // XXX where does the spec say that?
+    auto codeblock_x_count = (1 << PPx) / (1 << xcb_prime);
+    auto codeblock_y_count = (1 << PPy) / (1 << ycb_prime);
+
+    dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
+
     auto data = context.tiles[0].tile_parts[0].data;
 // dbgln("first byte: {:#x}", data[0]);
 // dbgln("second byte: {:#x}", data[1]);
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
-    auto header = TRY(read_packet_header(context, bitstream));
+    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count));
     (void)header;
 
 dbgln("header was {} bytes long", TRY(stream.tell()));
@@ -1271,9 +1350,22 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // FIXME: Store this external to this function since some bitplanes could
     //        be in a later packet.
 
-    // XXX reuse cbx_prime, cby_prime in header parser and store that somewhere.
-    int w = 1 << context.cod.code_block_width_exponent;
-    int h = 1 << context.cod.code_block_height_exponent;
+    int codeblock_index = 0;
+    int codeblock_2d_index_x = codeblock_index % codeblock_x_count;
+    int codeblock_2d_index_y = codeblock_index / codeblock_x_count;
+    int codeblock_x = codeblock_2d_index_x * (1 << xcb_prime);
+    int codeblock_y = codeblock_2d_index_y * (1 << ycb_prime);
+    int codeblock_width = 1 << xcb_prime;
+    int codeblock_height = 1 << ycb_prime;
+
+    // B.7 Division of the sub-bands into code-blocks
+    // "NOTE – Code-blocks in the partition may extend beyond the boundaries of the sub-band coefficients. When this happens, only the
+    //  coefficients lying within the sub-band are coded using the method described in Annex D. The first stripe coded using this method
+    //  corresponds to the first four rows of sub-band coefficients in the code-block or to as many such rows as are present."
+    auto resolution_level_rect = IntRect({trx0, try0, trx1 - trx0, try1 - try0 }); // XXX (B-15) once more than LL
+    int w = resolution_level_rect.intersected({ codeblock_x, codeblock_y, codeblock_width, codeblock_height }).width();
+    int h = resolution_level_rect.intersected({ codeblock_x, codeblock_y, codeblock_width, codeblock_height }).height();
+    dbgln("code-block size: {}x{}", w, h);
 
     int num_strips = ceil_div(h, 4);
 
