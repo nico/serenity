@@ -16,6 +16,9 @@
 #include <LibGfx/ImageFormats/QMArithmeticDecoder.h>
 #include <LibTextCodec/Decoder.h>
 
+#include <LibCore/File.h>
+#include <LibGfx/ImageFormats/PNGWriter.h>
+
 // Core coding system spec (.jp2 format): T-REC-T.800-201511-S!!PDF-E.pdf available here:
 // https://www.itu.int/rec/dologin_pub.asp?lang=e&id=T-REC-T.800-201511-S!!PDF-E&type=items
 
@@ -1320,7 +1323,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
         significance_and_sign[strip_offset + x] = strip_value;
     };
 
-    auto compute_context_ll_lh = [&](int x, int y) {
+    auto compute_context_ll_lh = [&](int x, int y) -> unsigned {
         // Table D.1 – Contexts for the significance propagation and cleanup coding passes
         u8 sum_h = is_significant(x - 1, y) + is_significant(x + 1, y);
         u8 sum_v = is_significant(x, y - 1) + is_significant(x, y + 1);
@@ -1396,9 +1399,13 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
         int y_end = min(y + 4, h);
         int num_rows = y_end - y;
         for (int x = 0; x < w; ++x) {
+            dbgln("x: {}, y: {}", x, y);
+
             Array<u8, 4> contexts {};
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < 4; ++i) {
                 contexts[i] = compute_context_ll_lh(x, y + i);
+                // dbgln("context[{}]: {}", i, contexts[i]);
+            }
 
             // Cleanup pass (textual description in D.3.4 Cleanup pass)
             // D8, Are four contiguous undecoded coefficients in a column each with a 0 context?, See D.3.4
@@ -1419,13 +1426,13 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
                     bool is_first_coefficient = true;
                     bool is_current_coefficient_significant = true;
+                    set_significant(x, y + coefficient_index, true);
                     do {
                         if (!is_first_coefficient) {
                             // C0, Go to the next coefficient or column
                             ++coefficient_index;
 
                             // C1, Decode significance bit of current coefficient (See D.3.1)
-                            // Table D.1 – Contexts for the significance propagation and cleanup coding passes
                             // XXX make sub-band dependent. assumes LL atm.
                             u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                             bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
@@ -1458,16 +1465,84 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                         }
 
                         // D10, Are there more coefficients remaining of the four column coefficients?
-                    } while (coefficient_index < num_rows);
+                    } while (coefficient_index + 1 < num_rows);
                 }
+            } else {
+                u8 coefficient_index = 0;
+                bool is_first_coefficient = true;
+                do {
+                    if (!is_first_coefficient) {
+                        // C0, Go to the next coefficient or column
+                        ++coefficient_index;
+                    }
+                    is_first_coefficient = false;
 
-                // D12, Are there more coefficients in the cleanup pass?
-                // C0, Go to the next coefficient or column
-                // (Both done by loop.)
+                    // D9, Is the coefficient significant or has the bit already been coded during the Significance Propagation coding pass?
+                    // FIXME: Update once we have a significance propagation pass
+                    // Note: The significance propagation pass is pretty similar to this loop here.
+                    bool is_significant_or_coded = is_significant(x, y);
+                    if (!is_significant_or_coded) {
+                        // C1, Decode significance bit of current coefficient
+                        // XXX make sub-band dependent. assumes LL atm.
+                        u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
+                        bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+                        dbgln("alt is_newly_significant: {}", is_newly_significant);
+                        set_significant(x, y + coefficient_index, is_newly_significant);
+
+                        // D3, Did the current coefficient just become significant?
+                        if (is_newly_significant) {
+                            // C2, Decode sign bit of current coefficient
+                            // Sign bit
+                            // D.3.2 Sign bit decoding
+                            // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
+                            i8 v_contribution = v_or_h_contribution({ x, y + coefficient_index }, { 0, -1 }, { 0, 1 });
+                            i8 h_contribution = v_or_h_contribution({ x, y + coefficient_index }, { -1, 0 }, { 1, 0 });
+                            // Table D.3 – Sign contexts from the vertical and horizontal contributions
+                            u8 context_label = 9;
+                            if (h_contribution == 0)
+                                context_label += abs(v_contribution);
+                            else
+                                context_label += 3 + h_contribution * v_contribution;
+                            u8 xor_bit = 0;
+                            if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
+                                xor_bit = 1;
+                            bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
+                            dbgln("other sign_bit: {}", sign_bit);
+                            set_sign(x, y + coefficient_index, sign_bit);
+                        }
+                    }
+                    // D10, Are there more coefficients remaining of the four column coefficients?
+                } while (coefficient_index + 1 < num_rows);
             }
+            // D12, Are there more coefficients in the cleanup pass?
+            // C0, Go to the next coefficient or column
+            // (Both done by loop.)
         }
 
     }
+
+{
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            //auto pixel = bitmap->scanline(y)[x];
+            auto value = get_sign(x, y) ? 0 : 255;
+            Color pixel;
+            pixel.set_red(value);
+            pixel.set_green(value);
+            pixel.set_blue(value);
+            pixel.set_alpha(255);
+            bitmap->set_pixel(x, y, pixel);
+        }
+    }
+
+    static int n_images = 0;
+    auto name = TRY(String::formatted("image-{}.png", n_images++));
+    auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
+    auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
+    auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
+    TRY(file->write_until_depleted(bytes));
+}
 
     return Error::from_string_literal("cannot decode image yet");
 }
