@@ -1516,7 +1516,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     QMArithmeticDecoder::Context uniform_context { 46, 0 };
     QMArithmeticDecoder::Context run_length_context { 3, 0 };
     //QMArithmeticDecoder::Context all_zero_neighbors_context = { 4, 0 };
-    Array<QMArithmeticDecoder::Context, 16> all_other_contexts {};
+    Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
     all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
 
     // Figure D.3 – Flow chart for all coding passes on a code-block bit-plane
@@ -1534,8 +1534,9 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     Vector<u8> became_significant_in_pass;
     became_significant_in_pass.resize(w * h);
 
-    // XXX don't start at 0, start at the first bitplane that's in this packet.
-    for (int current_bitplane = 0; current_bitplane < header.block.number_of_coding_passes; ++current_bitplane) {
+    // XXX don't start current_bitplane at 0, start at the first bitplane that's in this packet.
+    for (int pass = 0, current_bitplane = 0; pass < header.block.number_of_coding_passes; ++pass, ++current_bitplane) {
+        dbgln();
         dbgln("current bitplane: {}", current_bitplane);
 
         // D0, Is this the first bit-plane for the code-block?
@@ -1594,6 +1595,9 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                     }
                 }
             }
+            ++pass;
+            if (pass >= header.block.number_of_coding_passes)
+                break;
 
             // D.3.3 Magnitude refinement pass
             for (int y = 0; y < h; y += 4) { // XXX does += 4 make sense here?
@@ -1631,7 +1635,9 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                     }
                 }
             }
-
+            ++pass;
+            if (pass >= header.block.number_of_coding_passes)
+                break;
         }
 
         // Cleanup pass (textual description in D.3.4 Cleanup pass)
@@ -1723,7 +1729,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                         // D9, Is the coefficient significant or has the bit already been coded during the Significance Propagation coding pass?
                         // FIXME: Update once we have a significance propagation pass
                         // Note: The significance propagation pass is pretty similar to this loop here.
-                        bool is_significant_or_coded = is_significant(x, y);
+                        bool is_significant_or_coded = is_significant(x, y + coefficient_index);
                         if (!is_significant_or_coded) {
                             // C1, Decode significance bit of current coefficient
                             // XXX make sub-band dependent. assumes LL atm.
