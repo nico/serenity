@@ -1522,13 +1522,6 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // Figure D.3 – Flow chart for all coding passes on a code-block bit-plane
     // Table D.10 – Decisions in the context model flow chart
     // Table D.11 – Decoding in the context model flow chart
-    // D0, Is this the first significant bit-plane for the code-block?
-    bool is_first_significant_bitplane_for_code_block = true;
-    if (!is_first_significant_bitplane_for_code_block) {
-        // XXX significance propagation pass
-        // XXX magnitude refinement pass
-    }
-
 
     // XXX have to store this on the codeblock, so that we can continue decoding in the next packet.
     Vector<u8> became_significant_in_pass;
@@ -1549,9 +1542,9 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                 int y_end = min(y + 4, h);
                 int num_rows = y_end - y;
                 for (int x = 0; x < w; ++x) {
-                    dbgln("x: {}, y: {}", x, y);
-
                     for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
+                        dbgln("sigprop x: {}, y: {}", x, y + coefficient_index);
+
                         // D1, Is the current coefficient already significant?
                         if (!is_significant(x, y + coefficient_index)) {
                             // D2, Is the context bin zero? (see Table D.1)
@@ -1605,9 +1598,9 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                 int num_rows = y_end - y;
                 // XXX maybe store a "is any pixel significant in this scanline" flag to skip entire scanlines? measure if that's worth it.
                 for (int x = 0; x < w; ++x) {
-                    dbgln("x: {}, y: {}", x, y);
-
                     for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
+                        dbgln("magnitude x: {}, y: {}", x, y + coefficient_index);
+
                         // D5, Is the coefficient insignificant?
                         if (!is_significant(x, y + coefficient_index))
                             continue;
@@ -1641,11 +1634,12 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
         }
 
         // Cleanup pass (textual description in D.3.4 Cleanup pass)
+        // XXX have a "everything is signifcant" bit and skip this pass when it's set? Measure.
         for (int y = 0; y < h; y += 4) {
             int y_end = min(y + 4, h);
             int num_rows = y_end - y;
             for (int x = 0; x < w; ++x) {
-                dbgln("x: {}, y: {}", x, y);
+                dbgln("cleanup x: {}, y: {}", x, y);
 
                 Array<u8, 4> contexts {};
                 for (int i = 0; i < 4; ++i) {
@@ -1666,7 +1660,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                         // C5
                         u8 first_coefficient_index = arithmetic_decoder.get_next_bit(uniform_context);
                         first_coefficient_index = (first_coefficient_index << 1) | arithmetic_decoder.get_next_bit(uniform_context);
-                        dbgln("cleanupfirst_coefficient_index: {}", first_coefficient_index);
+                        dbgln("cleanup first_coefficient_index: {}", first_coefficient_index);
                         u8 coefficient_index = first_coefficient_index;
 
                         bool is_first_coefficient = true;
@@ -1683,7 +1677,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                                 // XXX make sub-band dependent. assumes LL atm.
                                 u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                                 bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                                dbgln("cleanupis_newly_significant: {}", is_newly_significant);
+                                dbgln("cleanup is_newly_significant: {}", is_newly_significant);
                                 is_current_coefficient_significant = is_newly_significant;
                                 set_significant(x, y + coefficient_index, is_newly_significant);
                                 if (is_newly_significant)
@@ -1734,6 +1728,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                             // C1, Decode significance bit of current coefficient
                             // XXX make sub-band dependent. assumes LL atm.
                             u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
+                            dbgln("alt cleanup context: {}", context);
                             // dbgln("alt context {}", context);
                             bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                             dbgln("cleanup alt is_newly_significant: {}", is_newly_significant);
