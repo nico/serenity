@@ -98,7 +98,7 @@ u8 QMArithmeticDecoder::B(size_t offset) const
     //  1-bits (without bit stuffing) are supplied to the decoder until the coding interval is complete."
     if (BP + offset >= m_data.size())
         return 0xFF;
-dbgln("B({}) = {:#x}", BP + offset, m_data[BP + offset]);
+// dbgln("B({}) = {:#x}", BP + offset, m_data[BP + offset]);
     return m_data[BP + offset];
 }
 
