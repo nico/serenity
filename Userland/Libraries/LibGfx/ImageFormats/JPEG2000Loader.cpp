@@ -1529,6 +1529,9 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     Vector<u8> became_significant_in_pass;
     became_significant_in_pass.resize(w * h);
 
+    int num_bits = (header.block.number_of_coding_passes - 1) / 3; // /shruggie
+    dbgln("num_bits: {}", num_bits);
+
     // XXX don't start current_bitplane at 0, start at the first bitplane that's in this packet.
     for (int pass = 0, current_bitplane = 0; pass < header.block.number_of_coding_passes; ++pass, ++current_bitplane) {
         dbgln();
@@ -1559,8 +1562,10 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                                 dbgln("sigprop is_newly_significant: {}", is_newly_significant);
                                 // is_current_coefficient_significant = is_newly_significant;
                                 set_significant(x, y + coefficient_index, is_newly_significant);
-                                if (is_newly_significant)
+                                if (is_newly_significant) {
                                     became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
+                                    magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
+                                }
 
                                 // D3, Did the current coefficient just become significant?
                                 if (is_newly_significant) {
@@ -1622,7 +1627,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                             }
                             bool magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                             dbgln("magnitude_bit: {}", magnitude_bit);
-                            magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << current_bitplane;
+                            magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << (num_bits - current_bitplane);
                         }
 
                         // D7, Are there more coefficients in the magnitude refinement pass?
@@ -1669,6 +1674,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                         bool is_current_coefficient_significant = true;
                         set_significant(x, y + coefficient_index, true);
                         became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
+                        magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
 
                         do {
                             if (!is_first_coefficient) {
@@ -1682,8 +1688,10 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                                 dbgln("cleanup is_newly_significant: {}", is_newly_significant);
                                 is_current_coefficient_significant = is_newly_significant;
                                 set_significant(x, y + coefficient_index, is_newly_significant);
-                                if (is_newly_significant)
+                                if (is_newly_significant) {
                                     became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
+                                    magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
+                                }
                             }
                             is_first_coefficient = false;
 
@@ -1735,8 +1743,10 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                             bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                             dbgln("cleanup alt is_newly_significant: {}", is_newly_significant);
                             set_significant(x, y + coefficient_index, is_newly_significant);
-                            if (is_newly_significant)
+                            if (is_newly_significant) {
                                 became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
+                                magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
+                            }
 
                             // D3, Did the current coefficient just become significant?
                             if (is_newly_significant) {
