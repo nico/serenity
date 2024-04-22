@@ -1272,6 +1272,7 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // B.5
     // (B-14)
     auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
+    // FIXME: Look at context.cocs too.
     int denominator = 1 << (cod.parameters.number_of_decomposition_levels - r);
     int trx0 = ceil_div(component_rect.left(), denominator);
     int try0 = ceil_div(component_rect.top(), denominator);
@@ -1285,10 +1286,12 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
     // (B-16)
     int num_precincts_wide = 0;
     int num_precincts_high = 0;
+    // FIXME: Look at context.cocs too.
     int PPx = cod.parameters.precinct_sizes[r].PPx; // XXX could be from tile header
     if (trx1 != trx0) {
         num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
     }
+    // FIXME: Look at context.cocs too.
     int PPy = cod.parameters.precinct_sizes[r].PPy; // XXX could be from tile header
     if (try1 != try0) {
         num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
@@ -1297,11 +1300,14 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
 
     // B.7
     // (B-17)
+    // FIXME: Look at context.cocs too.
     int xcb_prime = min(cod.parameters.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
 
     // (B-18)
+    // FIXME: Look at context.cocs too.
     int ycb_prime = min(cod.parameters.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
 
+    // FIXME: Look at context.cocs too.
     dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, cod.parameters.code_block_width_exponent, cod.parameters.code_block_height_exponent, xcb_prime, ycb_prime);
 
 
@@ -1371,6 +1377,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // "The first bit-plane within the current block with a non-zero element has a cleanup pass only.
     //  The remaining bit-planes are decoded in three coding passes."
 
+    // FIXME: Look at context.cocs too.
     // FIXME: Relax. Will need implementing D.5, D.6, D.7, and probably more.
     if (cod.parameters.code_block_style != 0)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
