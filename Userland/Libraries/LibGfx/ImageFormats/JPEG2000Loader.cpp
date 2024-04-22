@@ -1272,7 +1272,7 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // B.5
     // (B-14)
     auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
-    int denominator = 1 << (cod.number_of_decomposition_levels - r);
+    int denominator = 1 << (cod.parameters.number_of_decomposition_levels - r);
     int trx0 = ceil_div(component_rect.left(), denominator);
     int try0 = ceil_div(component_rect.top(), denominator);
     int trx1 = ceil_div(component_rect.right(), denominator);
@@ -1285,11 +1285,11 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
     // (B-16)
     int num_precincts_wide = 0;
     int num_precincts_high = 0;
-    int PPx = cod.precinct_sizes[r].PPx; // XXX could be from tile header
+    int PPx = cod.parameters.precinct_sizes[r].PPx; // XXX could be from tile header
     if (trx1 != trx0) {
         num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
     }
-    int PPy = cod.precinct_sizes[r].PPy; // XXX could be from tile header
+    int PPy = cod.parameters.precinct_sizes[r].PPy; // XXX could be from tile header
     if (try1 != try0) {
         num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
     }
@@ -1297,12 +1297,12 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
 
     // B.7
     // (B-17)
-    int xcb_prime = min(cod.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
+    int xcb_prime = min(cod.parameters.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
 
-    // (B-18
-    int ycb_prime = min(cod.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
+    // (B-18)
+    int ycb_prime = min(cod.parameters.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
 
-    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, cod.code_block_width_exponent, cod.code_block_height_exponent, xcb_prime, ycb_prime);
+    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, cod.parameters.code_block_width_exponent, cod.parameters.code_block_height_exponent, xcb_prime, ycb_prime);
 
 
     // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
@@ -1372,7 +1372,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     //  The remaining bit-planes are decoded in three coding passes."
 
     // FIXME: Relax. Will need implementing D.5, D.6, D.7, and probably more.
-    if (cod.code_block_style != 0)
+    if (cod.parameters.code_block_style != 0)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
 
     // FIXME: Actually decode image :)
