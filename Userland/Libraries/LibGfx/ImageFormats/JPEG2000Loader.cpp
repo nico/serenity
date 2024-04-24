@@ -1913,7 +1913,11 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             //auto pixel = bitmap->scanline(y)[x];
-            auto value = get_sign(x, y) ? 0 : 255;
+            auto sign = get_sign(x, y);
+            auto magnitude = magnitudes[y * w + x];
+            auto value = magnitude * (sign ? -1 : 1);
+            value = (value + 256) / 2;
+            dbgln("x {} y {} value {}", x, y, value);
             Color pixel;
             pixel.set_red(value);
             pixel.set_green(value);
