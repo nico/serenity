@@ -1363,13 +1363,9 @@ dbgln("reading stuff bit");
     return header;
 }
 
-ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
+ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
 {
-    TRY(parse_codestream_tile_headers(context));
-
-    if (context.tiles.size() != 1)
-        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one tile yet");
-    auto& tile = context.tiles[0];
+    auto& tile = context.tiles[tile_index];
     auto const& cod = tile.cod.value_or(context.cod);
 
     // FIXME: Look at tile COC, image COC too
@@ -1387,7 +1383,6 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
 
-    int tile_index = 0;
     auto pq = context.siz.tile_2d_index_from_1d_index(tile_index);
 
     // Compute tile size at resolution level r.
@@ -1936,7 +1931,17 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     TRY(file->write_until_depleted(bytes));
 }
 
-    return Error::from_string_literal("cannot decode image yet");
+    return Error::from_string_literal("cannot decode tile yet");
+}
+
+ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
+{
+    TRY(parse_codestream_tile_headers(context));
+
+    for (size_t i = 0; i < context.tiles.size(); ++i)
+        TRY(decode_tile(context, i));
+
+    return {};
 }
 
 bool JPEG2000ImageDecoderPlugin::sniff(ReadonlyBytes data)
