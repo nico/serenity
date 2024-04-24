@@ -1120,7 +1120,39 @@ ErrorOr<u32> TagTree::read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& 
 
 }
 
+// XXX say that this is per component-tile. Image first divided into tiles, then those into component tiles.
+//
+// XXX words (DWT, a single LL at r=0, HL/LH/HH at r > 0, etc)
+//
+// +-----+-----+----------+
+// | LL0 | HL1 |          |
+// +-----+-----+   HL2    |
+// | LH1 | HH1 |          |
+// +-----+-----+----------+
+// |           |          |
+// |    LH2    |    HH2   |
+// |           |          |
+// +-----------+----------+
+//
+// Subbands can be subdivided into precincts. A precinct is a rect in the same location in all subbands of a resolution level.
+// In practice, precincts are often 512k pixels x 512k pixels, so most images have only a single precinct.
+// The part of a precinct that covers only a single subband is called a "precinct limited to a subband".
+// A precinct limited to a subband is subdivided into codeblocks. These are in practice often 64x64 pixels.
+// (XXX Maybe it's a rectangle before DWT and so reaches across resolution levels, and what I wrote is a precinct limited to a resolution level?)
+// Codeblocks store bitplanes of the coefficients that are the result of wavelet-transforming the input image.
+// Codeblocks have independent arithmetic decoder context state, so coefficients in several codeblocks can be decoded in parallel.
+// Not all bitplanes of the coefficients have to be stored together. This allows incrementally refining the image's color resolution.
+// A set of bitplanes coded at a time is called a layer.
+enum class SubBand {
+    HorizontalLowpassVerticalLowpass,   // "LL" in spec
+    HorizontalHighpassVerticalLowpass,  // "HL" in spec
+    HorizontalLowpassVerticalHighpass,  // "LH" in spec
+    HorizontalHighpassVerticalHighpass, // "HH" in spec
+};
+
 struct CodeBlock {
+    SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
+
     // Becomes true when the first packet including this codeblock is read.
     bool has_been_included_in_previous_packet { false };
 
