@@ -551,10 +551,98 @@ static ErrorOr<Comment> read_comment(ReadonlyBytes data)
     return com;
 }
 
+// B.12 Progression order
+struct ProgressionData {
+    int layer { 0 };
+    int resolution_level { 0 };
+    int component { 0 };
+    int precinct { 0 };
+
+    bool operator==(ProgressionData const&) const = default;
+};
+
+class ProgressionIterator {
+public:
+    virtual ~ProgressionIterator() = default;
+
+    virtual bool has_next() const = 0;
+    virtual ProgressionData next() = 0;
+};
+
+// B.12.1.1 Layer-resolution level-component-position progression
+class LayerResolutionLevelComponentPositionProgressionIterator : public ProgressionIterator {
+public:
+    // XXX number_of_decomposition_levels can be component-dependent, need to pass in a map instead.
+    // XXX number of precincts can be resolution-level-dependent and component-dependent
+    // XXX Supporting POC packets will probably require changes to this too.
+    LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int number_of_decomposition_levels, int component_count, int number_of_precincts);
+    virtual bool has_next() const override;
+    virtual ProgressionData next() override;
+
+private:
+    ProgressionData m_current {};
+    ProgressionData m_end {};
+};
+
+LayerResolutionLevelComponentPositionProgressionIterator::LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int number_of_decomposition_levels, int component_count, int number_of_precincts)
+{
+    m_end.layer = number_of_layers;
+    m_end.resolution_level = number_of_decomposition_levels + 1;
+    m_end.component = component_count;
+    m_end.precinct = number_of_precincts;
+}
+
+bool LayerResolutionLevelComponentPositionProgressionIterator::has_next() const
+{
+    return m_current != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
+}
+
+ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
+{
+    ++m_current.precinct;
+    if (m_current.precinct < m_end.precinct)
+        return m_current;
+
+    m_current.precinct = 0;
+    ++m_current.component;
+    if (m_current.component < m_end.component)
+        return m_current;
+
+    m_current.component = 0;
+    ++m_current.resolution_level;
+    if (m_current.resolution_level < m_end.resolution_level)
+        return m_current;
+
+    m_current.resolution_level = 0;
+    ++m_current.layer;
+    VERIFY(m_current.layer < m_end.layer);
+    return m_current;
+}
+
+static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(CodingStyleDefault::ProgressionOrder progression_order, int number_of_layers)
+{
+    (void)number_of_layers;
+    switch (progression_order) {
+    case CodingStyleDefault::ProgressionOrder::LayerResolutionComponentPosition:
+//        return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers);
+        return Error::from_string_literal("JPEG200Loader: LayerResolutionComponentPosition progression order not yet supported");
+    case CodingStyleDefault::ResolutionLayerComponentPosition:
+        return Error::from_string_literal("JPEG200Loader: ResolutionLayerComponentPosition progression order not yet supported");
+    case CodingStyleDefault::ResolutionPositionComponentLayer:
+        return Error::from_string_literal("JPEG200Loader: ResolutionPositionComponentLayer progression order not yet supported");
+    case CodingStyleDefault::PositionComponentResolutionLayer:
+        return Error::from_string_literal("JPEG200Loader: PositionComponentResolutionLayer progression order not yet supported");
+    case CodingStyleDefault::ComponentPositionResolutionLayer:
+        return Error::from_string_literal("JPEG200Loader: ComponentPositionResolutionLayer progression order not yet supported");
+    }
+}
+
 struct TilePartData {
     StartOfTilePart sot;
     Vector<Comment> coms;
     ReadonlyBytes data;
+
+    OwnPtr<ProgressionIterator> progression_iterator;
 };
 
 struct TileData {
@@ -734,6 +822,11 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     tile.tile_parts.append({});
     auto& tile_part = tile.tile_parts.last();
     tile_part.sot = start_of_tile;
+
+    // XXX do i need to look at COC too?
+    auto progression_order = tile.cod.value_or(context.cod).progression_order;
+    auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
+    tile_part.progression_iterator = TRY(make_progression_iterator(progression_order, number_of_layers));
 
     bool found_start_of_data = false;
     while (!found_start_of_data) {
