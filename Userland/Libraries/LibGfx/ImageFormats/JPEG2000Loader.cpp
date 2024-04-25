@@ -637,6 +637,75 @@ ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
     return m_current;
 }
 
+// B.12.1.2 Resolution level-layer-component-position progression
+class ResolutionLevelLayerComponentPositionProgressionIterator : public ProgressionIterator {
+public:
+    // XXX Supporting POC packets will probably require changes to this
+    ResolutionLevelLayerComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts);
+    virtual bool has_next() const override;
+    virtual ProgressionData next() override;
+
+private:
+    Function<int(int resolution_level, int component)> m_number_of_precincts;
+    ProgressionData m_current {};
+    ProgressionData m_end {};
+};
+
+ResolutionLevelLayerComponentPositionProgressionIterator::ResolutionLevelLayerComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts)
+    : m_number_of_precincts(move(number_of_precincts))
+{
+    m_end.layer = number_of_layers;
+    m_end.resolution_level = max_number_of_decomposition_levels + 1;
+    m_end.component = component_count;
+    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
+
+    m_current.precinct = -1;
+}
+
+bool ResolutionLevelLayerComponentPositionProgressionIterator::has_next() const
+{
+    return m_current != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
+}
+
+ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
+{
+    // B.12.1.2 Resolution level-layer-component-position progression
+    // "for each r = 0,..., Nmax
+    //      for each l = 0,..., L – 1
+    //          for each i = 0,..., Csiz – 1
+    //              for each k = 0,..., numprecincts – 1
+    //                  packet for component i, resolution level r, layer l, and precinct k."
+    // FIXME: This always iterates up to Nmax, instead of just N_l of each component. That means several of the iteration results will be invalid and skipped.
+    // (This is a performance issue, not a correctness issue.)
+
+    ++m_current.precinct;
+    if (m_current.precinct < m_end.precinct)
+        return m_current;
+
+    m_current.precinct = 0;
+    ++m_current.component;
+    if (m_current.component < m_end.component) {
+        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
+        return m_current;
+    }
+
+    m_current.component = 0;
+    ++m_current.layer;
+    if (m_current.layer < m_end.layer) {
+        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
+        return m_current;
+    }
+
+    m_current.layer = 0;
+
+    ++m_current.resolution_level;
+    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
+    VERIFY(m_current.resolution_level < m_end.resolution_level);
+
+    return m_current;
+}
+
+
 struct TilePartData {
     StartOfTilePart sot;
     Vector<Comment> coms;
@@ -747,7 +816,7 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
     case CodingStyleDefault::ProgressionOrder::LayerResolutionComponentPosition:
         return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
     case CodingStyleDefault::ResolutionLayerComponentPosition:
-        return Error::from_string_literal("JPEG200Loader: ResolutionLayerComponentPosition progression order not yet supported");
+        return make<ResolutionLevelLayerComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
     case CodingStyleDefault::ResolutionPositionComponentLayer:
         return Error::from_string_literal("JPEG200Loader: ResolutionPositionComponentLayer progression order not yet supported");
     case CodingStyleDefault::PositionComponentResolutionLayer:
