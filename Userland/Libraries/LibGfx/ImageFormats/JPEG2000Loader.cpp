@@ -1379,6 +1379,15 @@ struct PacketHeader {
     CodeBlock block;
 };
 
+IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width_increment, int height_increment)
+{
+    int new_x = (inner_rect.x() / width_increment) * width_increment;
+    int new_y = (inner_rect.y() / height_increment) * height_increment;
+    int new_right = ceil_div(inner_rect.right(), width_increment) * width_increment;
+    int new_bottom = ceil_div(inner_rect.bottom(), height_increment) * height_increment;
+    return IntRect::intersection(outer_rect, IntRect::from_two_points({ new_x, new_y }, { new_right, new_bottom }));
+}
+
 ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
 {
     int N_L = coding_parameters.number_of_decomposition_levels;
@@ -1651,27 +1660,7 @@ dbgln("ll_rect: {}", ll_rect);
     int precinct_y_index = progression_data.precinct / num_precincts_wide;
 
     auto precinct_rect = IntRect({ precinct_x_index * (1 << PPx), precinct_y_index * (1 << PPy), 1 << PPx, 1 << PPy });
-    precinct_rect.intersect(ll_rect);
-    if (precinct_rect.x() % (1 << xcb_prime) != 0) {
-        int new_x = (precinct_rect.x() / (1 << xcb_prime)) * (1 << xcb_prime);
-        int additional_width = precinct_rect.x() - new_x;
-        precinct_rect.set_x(new_x);
-        precinct_rect.set_width(precinct_rect.width() + additional_width);
-    }
-    if (precinct_rect.y() % (1 << ycb_prime) != 0) {
-        int new_y = (precinct_rect.y() / (1 << ycb_prime)) * (1 << ycb_prime);
-        int additional_height = precinct_rect.y() - new_y;
-        precinct_rect.set_y(new_y);
-        precinct_rect.set_height(precinct_rect.height() + additional_height);
-    }
-    if (precinct_rect.right() % (1 << xcb_prime) != 0) {
-        int new_right = ceil_div(precinct_rect.right(), (1 << xcb_prime)) * (1 << xcb_prime);
-        precinct_rect.set_width(new_right - precinct_rect.x());
-    }
-    if (precinct_rect.bottom() % (1 << ycb_prime) != 0) {
-        int new_bottom = ceil_div(precinct_rect.bottom(), (1 << ycb_prime)) * (1 << ycb_prime);
-        precinct_rect.set_height(new_bottom - precinct_rect.y());
-    }
+    precinct_rect = aligned_enclosing_rect(precinct_rect, ll_rect, 1 << xcb_prime, 1 << ycb_prime);
     dbgln("precinct rect: {}", precinct_rect);
 
     // auto codeblock_x_count = (1 << PPx) / (1 << xcb_prime);
