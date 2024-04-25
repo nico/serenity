@@ -1631,11 +1631,11 @@ dbgln("ll_rect: {}", ll_rect);
     // (B-16)
     int num_precincts_wide = 0;
     int num_precincts_high = 0;
-    int PPx = coding_parameters.precinct_sizes[r].PPx; // XXX could be from tile header
+    int PPx = coding_parameters.precinct_sizes[r].PPx;
     if (ll_rect.width() != 0) {
         num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.left() / (1 << PPx));
     }
-    int PPy = coding_parameters.precinct_sizes[r].PPy; // XXX could be from tile header
+    int PPy = coding_parameters.precinct_sizes[r].PPy;
     if (ll_rect.height() != 0) {
         num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
     }
