@@ -1328,7 +1328,7 @@ struct PacketHeader {
     CodeBlock block;
 };
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, int r)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, int r, u32 current_layer_index)
 {
     // B.9 Packets
     // "All compressed image data representing a specific tile, layer, component, resolution level and precinct appears in the
@@ -1416,7 +1416,6 @@ dbgln("reading stuff bit");
         dbgln("reading header info for sub-band {}", (int)sub_band);
 
         CodeBlock current_block {}; // FIXME: Get from somewhere
-        u32 current_layer_index = 0; // FIXME: Get from somewhere
 
         // FIXME: codeblock_x_count and codeblock_y_count are per sub-band, so need to compute them in here.
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
@@ -1638,7 +1637,7 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
-    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count, r));
+    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count, r, progression_data.layer));
     (void)header;
 
 dbgln("header was {} bytes long", TRY(stream.tell()));
