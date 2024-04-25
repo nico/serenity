@@ -189,6 +189,19 @@ struct ImageAndTileSize {
         return { tcx0, tcy0, tcx1 - tcx0, tcy1 - tcy0 }; // (B-13)
     }
 
+    IntRect reference_grid_coordinates_for_ll_band(IntPoint tile_2d_index, int component_index, int r, int N_L) const
+    {
+        // B.5
+        // (B-14)
+        auto component_rect = reference_grid_coordinates_for_tile_component(tile_2d_index, component_index);
+        int denominator = 1 << (N_L - r);
+        int trx0 = ceil_div(component_rect.left(), denominator);
+        int try0 = ceil_div(component_rect.top(), denominator);
+        int trx1 = ceil_div(component_rect.right(), denominator);
+        int try1 = ceil_div(component_rect.bottom(), denominator);
+
+        return { trx0, try0, trx1 - trx0, try1 - try0 };
+    }
 };
 
 static ErrorOr<ImageAndTileSize> read_image_and_tile_size(ReadonlyBytes data)
@@ -1557,29 +1570,21 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
     int r = progression_data.resolution_level;
     int component_index = progression_data.component;
 
-    // B.5
-    // (B-14)
-    auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
-    int denominator = 1 << (number_of_decomposition_levels_for_component(context, tile, component_index) - r);
-    int trx0 = ceil_div(component_rect.left(), denominator);
-    int try0 = ceil_div(component_rect.top(), denominator);
-    int trx1 = ceil_div(component_rect.right(), denominator);
-    int try1 = ceil_div(component_rect.bottom(), denominator);
+    auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(pq, component_index, r, number_of_decomposition_levels_for_component(context, tile, component_index));
 
-dbgln("component rect: {}", component_rect);
-dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
+dbgln("ll_rect: {}", ll_rect);
 
     // B.6
     // (B-16)
     int num_precincts_wide = 0;
     int num_precincts_high = 0;
     int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx; // XXX could be from tile header
-    if (trx1 != trx0) {
-        num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
+    if (ll_rect.width() != 0) {
+        num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.left() / (1 << PPx));
     }
     int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy; // XXX could be from tile header
-    if (try1 != try0) {
-        num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
+    if (ll_rect.height() != 0) {
+        num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
     }
     dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
 
@@ -1599,7 +1604,7 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
     // XXX also, if precincts are way larger than the image, then this here produces
     //     oodles of codeblocks outside the subband. Need to clip somewhere, but ideally the spec would say that somewhere.
     auto precinct_rect = IntRect({ 0, 0, 1 << PPx, 1 << PPy });
-    precinct_rect.intersect({ trx0, try0, trx1 - trx0, try1 - try0 });
+    precinct_rect.intersect(ll_rect);
     if (precinct_rect.x() % (1 << xcb_prime) != 0) {
         int new_x = (precinct_rect.x() / (1 << xcb_prime)) * (1 << xcb_prime);
         int additional_width = precinct_rect.x() - new_x;
@@ -1692,7 +1697,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // "NOTE – Code-blocks in the partition may extend beyond the boundaries of the sub-band coefficients. When this happens, only the
     //  coefficients lying within the sub-band are coded using the method described in Annex D. The first stripe coded using this method
     //  corresponds to the first four rows of sub-band coefficients in the code-block or to as many such rows as are present."
-    auto resolution_level_rect = IntRect({trx0, try0, trx1 - trx0, try1 - try0 }); // XXX (B-15) once more than LL
+    auto resolution_level_rect = ll_rect; // XXX use (B-15) once this handles bands other than LL
     int w = resolution_level_rect.intersected({ codeblock_x, codeblock_y, codeblock_width, codeblock_height }).width();
     int h = resolution_level_rect.intersected({ codeblock_x, codeblock_y, codeblock_width, codeblock_height }).height();
     dbgln("code-block size: {}x{}", w, h);
