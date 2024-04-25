@@ -1348,6 +1348,18 @@ ErrorOr<u32> TagTree::read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& 
 
 }
 
+struct PacketContext {
+    // precinct size
+    // code-block size
+    // precinct rect
+    // code--block counts
+    // sub-band rects
+    // ProgressionData
+    // CodingParameters
+    int xcb_prime { 0 };
+    int ycb_prime { 0 };
+    IntRect precinct_rect;
+};
 
 struct CodeBlock {
     SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
@@ -1375,8 +1387,13 @@ struct CodeBlock {
 struct PacketHeader {
     bool is_empty { false };
 
+    int codeblock_x_count { 0 };
+    int codeblock_y_count { 0 };
+
     // XXX eeeehhhh
     CodeBlock block;
+
+    // Instead: 2d-grid of code-blocks for reach subband in packet
 };
 
 IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width_increment, int height_increment)
@@ -1388,7 +1405,7 @@ IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width
     return IntRect::intersection(outer_rect, IntRect::from_two_points({ new_x, new_y }, { new_right, new_bottom }));
 }
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, BigEndianInputBitStream& bitstream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
 {
     int N_L = coding_parameters.number_of_decomposition_levels;
     int r = data.resolution_level;
@@ -1484,7 +1501,14 @@ dbgln("reading stuff bit");
         // Table F.1 – Decomposition level nb for sub-band b
         int n_b = r == 0 ? N_L : (N_L + 1 - r);
         auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, data.component, n_b, sub_band);
-        (void)rect;
+        rect = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
+
+        auto codeblock_x_count = rect.width() / (1 << packet_context.xcb_prime);
+        auto codeblock_y_count = rect.height() / (1 << packet_context.ycb_prime);
+
+        header.codeblock_x_count = codeblock_x_count;
+        header.codeblock_y_count = codeblock_y_count;
+    dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
 
         // FIXME: codeblock_x_count and codeblock_y_count are per sub-band, so need to compute them in here.
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
@@ -1660,15 +1684,11 @@ dbgln("ll_rect: {}", ll_rect);
     int precinct_y_index = progression_data.precinct / num_precincts_wide;
 
     auto precinct_rect = IntRect({ precinct_x_index * (1 << PPx), precinct_y_index * (1 << PPy), 1 << PPx, 1 << PPy });
-    precinct_rect = aligned_enclosing_rect(precinct_rect, ll_rect, 1 << xcb_prime, 1 << ycb_prime);
-    dbgln("precinct rect: {}", precinct_rect);
 
-    // auto codeblock_x_count = (1 << PPx) / (1 << xcb_prime);
-    // auto codeblock_y_count = (1 << PPy) / (1 << ycb_prime);
-    auto codeblock_x_count = precinct_rect.width() / (1 << xcb_prime);
-    auto codeblock_y_count = precinct_rect.height() / (1 << ycb_prime);
-
-    dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
+    PacketContext packet_context;
+    packet_context.xcb_prime = xcb_prime;
+    packet_context.ycb_prime = ycb_prime;
+    packet_context.precinct_rect = precinct_rect;
 
     auto data = context.tiles[0].tile_parts[0].data;
     if (data.is_empty())
@@ -1678,7 +1698,7 @@ dbgln("ll_rect: {}", ll_rect);
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
-    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count, tile, coding_parameters, progression_data));
+    auto header = TRY(read_packet_header(context, bitstream, packet_context, tile, coding_parameters, progression_data));
     (void)header;
 
 dbgln("header was {} bytes long", TRY(stream.tell()));
@@ -1722,8 +1742,8 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     //        be in a later packet.
 
     int codeblock_index = 0;
-    int codeblock_2d_index_x = codeblock_index % codeblock_x_count;
-    int codeblock_2d_index_y = codeblock_index / codeblock_x_count;
+    int codeblock_2d_index_x = codeblock_index % header.codeblock_x_count;
+    int codeblock_2d_index_y = codeblock_index / header.codeblock_x_count;
     int codeblock_x = codeblock_2d_index_x * (1 << xcb_prime);
     int codeblock_y = codeblock_2d_index_y * (1 << ycb_prime);
     int codeblock_width = 1 << xcb_prime;
