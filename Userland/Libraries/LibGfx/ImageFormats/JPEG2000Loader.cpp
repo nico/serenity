@@ -572,24 +572,26 @@ public:
 // B.12.1.1 Layer-resolution level-component-position progression
 class LayerResolutionLevelComponentPositionProgressionIterator : public ProgressionIterator {
 public:
-    // XXX number_of_decomposition_levels can be component-dependent, need to pass in a map instead.
-    // XXX number of precincts can be resolution-level-dependent and component-dependent
-    // XXX Supporting POC packets will probably require changes to this too.
-    LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int number_of_decomposition_levels, int component_count, int number_of_precincts);
+    // XXX Supporting POC packets will probably require changes to this
+    LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts);
     virtual bool has_next() const override;
     virtual ProgressionData next() override;
 
 private:
+    Function<int(int resolution_level, int component)> m_number_of_precincts;
     ProgressionData m_current {};
     ProgressionData m_end {};
 };
 
-LayerResolutionLevelComponentPositionProgressionIterator::LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int number_of_decomposition_levels, int component_count, int number_of_precincts)
+LayerResolutionLevelComponentPositionProgressionIterator::LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts)
+    : m_number_of_precincts(move(number_of_precincts))
 {
     m_end.layer = number_of_layers;
-    m_end.resolution_level = number_of_decomposition_levels + 1;
+    m_end.resolution_level = max_number_of_decomposition_levels + 1;
     m_end.component = component_count;
-    m_end.precinct = number_of_precincts;
+    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
+
+    m_current.precinct = -1;
 }
 
 bool LayerResolutionLevelComponentPositionProgressionIterator::has_next() const
@@ -599,58 +601,58 @@ bool LayerResolutionLevelComponentPositionProgressionIterator::has_next() const
 
 ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
 {
+    // B.12.1.1 Layer-resolution level-component-position progression
+    // "for each l = 0,..., L – 1
+    //      for each r = 0,..., Nmax
+    //          for each i = 0,..., Csiz – 1
+    //              for each k = 0,..., numprecincts – 1
+    //                  packet for component i, resolution level r, layer l, and precinct k.
+    //  Here, L is the number of layers and Nmax is the maximum number of decomposition levels, N_L, used in any component of the tile."
+    // FIXME: This always iterates up to Nmax, instead of just N_l of each component. That means several of the iteration results will be invalid and skipped.
+    // (This is a performance issue, not a correctness issue.)
+
     ++m_current.precinct;
     if (m_current.precinct < m_end.precinct)
         return m_current;
 
     m_current.precinct = 0;
     ++m_current.component;
-    if (m_current.component < m_end.component)
+    if (m_current.component < m_end.component) {
+        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
         return m_current;
+    }
 
     m_current.component = 0;
     ++m_current.resolution_level;
-    if (m_current.resolution_level < m_end.resolution_level)
+    if (m_current.resolution_level < m_end.resolution_level) {
+        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
         return m_current;
+    }
 
     m_current.resolution_level = 0;
+    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
+
     ++m_current.layer;
     VERIFY(m_current.layer < m_end.layer);
     return m_current;
-}
-
-static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(CodingStyleDefault::ProgressionOrder progression_order, int number_of_layers)
-{
-    (void)number_of_layers;
-    switch (progression_order) {
-    case CodingStyleDefault::ProgressionOrder::LayerResolutionComponentPosition:
-//        return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers);
-        return Error::from_string_literal("JPEG200Loader: LayerResolutionComponentPosition progression order not yet supported");
-    case CodingStyleDefault::ResolutionLayerComponentPosition:
-        return Error::from_string_literal("JPEG200Loader: ResolutionLayerComponentPosition progression order not yet supported");
-    case CodingStyleDefault::ResolutionPositionComponentLayer:
-        return Error::from_string_literal("JPEG200Loader: ResolutionPositionComponentLayer progression order not yet supported");
-    case CodingStyleDefault::PositionComponentResolutionLayer:
-        return Error::from_string_literal("JPEG200Loader: PositionComponentResolutionLayer progression order not yet supported");
-    case CodingStyleDefault::ComponentPositionResolutionLayer:
-        return Error::from_string_literal("JPEG200Loader: ComponentPositionResolutionLayer progression order not yet supported");
-    }
 }
 
 struct TilePartData {
     StartOfTilePart sot;
     Vector<Comment> coms;
     ReadonlyBytes data;
-
-    OwnPtr<ProgressionIterator> progression_iterator;
 };
 
 struct TileData {
+    size_t index { 0 };
     Optional<CodingStyleDefault> cod;
     Vector<CodingStyleComponent> cocs;
     Optional<QuantizationDefault> qcd;
     Vector<QuantizationComponent> qccs;
     Vector<TilePartData> tile_parts;
+
+    // FIXME: This will have to move and be reorganized come POC support.
+    OwnPtr<ProgressionIterator> progression_iterator;
 };
 
 struct JPEG2000LoadingContext {
@@ -677,6 +679,81 @@ struct JPEG2000LoadingContext {
     Vector<Comment> coms;
     Vector<TileData> tiles;
 };
+
+static CodingStyleParameters const& coding_style_parameters_for_component(JPEG2000LoadingContext const& context, TileData const& tile, size_t component_index)
+{
+    // Tile-part COC > Tile-part COD > Main COC > Main COD
+    for (auto const& coc : tile.cocs) {
+        if (coc.component_index == component_index)
+            return coc.parameters;
+    }
+
+    if (tile.cod.has_value())
+        return tile.cod->parameters;
+
+    for (auto const& coc : context.cocs) {
+        if (coc.component_index == component_index)
+            return coc.parameters;
+    }
+
+    return context.cod.parameters;
+}
+
+static int number_of_decomposition_levels_for_component(JPEG2000LoadingContext const& context, TileData const& tile, size_t component_index)
+{
+    return coding_style_parameters_for_component(context, tile, component_index).number_of_decomposition_levels;
+}
+
+static int compute_max_number_of_decomposition_levels(JPEG2000LoadingContext const& context, TileData const& tile)
+{
+    int max_number_of_decomposition_levels = 0;
+    for (size_t c = 0; c < context.siz.components.size(); ++c)
+        max_number_of_decomposition_levels = max(max_number_of_decomposition_levels, number_of_decomposition_levels_for_component(context, tile, c));
+    return max_number_of_decomposition_levels;
+}
+
+static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000LoadingContext const& context, TileData const& tile)
+{
+    auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
+    switch (tile.cod.value_or(context.cod).progression_order) {
+    case CodingStyleDefault::ProgressionOrder::LayerResolutionComponentPosition:
+        return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), [&](int r, int component_index) {
+            auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
+
+            auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
+            int denominator = 1 << (number_of_decomposition_levels_for_component(context, tile, component_index) - r);
+            int trx0 = ceil_div(component_rect.left(), denominator);
+            int try0 = ceil_div(component_rect.top(), denominator);
+            int trx1 = ceil_div(component_rect.right(), denominator);
+            int try1 = ceil_div(component_rect.bottom(), denominator);
+
+        dbgln("component rect: {}", component_rect);
+        dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
+
+            // B.6
+            // (B-16)
+            int num_precincts_wide = 0;
+            int num_precincts_high = 0;
+            int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx;
+            if (trx1 != trx0)
+                num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
+            int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy;
+            if (try1 != try0)
+                num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
+            dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
+            return num_precincts_wide * num_precincts_high;
+        });
+    case CodingStyleDefault::ResolutionLayerComponentPosition:
+        return Error::from_string_literal("JPEG200Loader: ResolutionLayerComponentPosition progression order not yet supported");
+    case CodingStyleDefault::ResolutionPositionComponentLayer:
+        return Error::from_string_literal("JPEG200Loader: ResolutionPositionComponentLayer progression order not yet supported");
+    case CodingStyleDefault::PositionComponentResolutionLayer:
+        return Error::from_string_literal("JPEG200Loader: PositionComponentResolutionLayer progression order not yet supported");
+    case CodingStyleDefault::ComponentPositionResolutionLayer:
+        return Error::from_string_literal("JPEG200Loader: ComponentPositionResolutionLayer progression order not yet supported");
+    }
+}
+
 
 struct MarkerSegment {
     u16 marker;
@@ -816,6 +893,7 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
 
     context.tiles.resize(max(context.tiles.size(), (size_t)start_of_tile.tile_index + 1));
     auto& tile = context.tiles[start_of_tile.tile_index];
+    tile.index = start_of_tile.tile_index;
 
     if (tile.tile_parts.size() != start_of_tile.tile_part_index)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Tile part index out of order");
@@ -823,10 +901,8 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     auto& tile_part = tile.tile_parts.last();
     tile_part.sot = start_of_tile;
 
-    // XXX do i need to look at COC too?
-    auto progression_order = tile.cod.value_or(context.cod).progression_order;
-    auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
-    tile_part.progression_iterator = TRY(make_progression_iterator(progression_order, number_of_layers));
+    if (start_of_tile.tile_part_index == 0)
+        tile.progression_iterator = TRY(make_progression_iterator(context, tile));
 
     bool found_start_of_data = false;
     while (!found_start_of_data) {
@@ -1368,7 +1444,6 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
     auto& tile = context.tiles[tile_index];
     auto const& cod = tile.cod.value_or(context.cod);
 
-    // FIXME: Look at tile COC, image COC too
     if (cod.may_use_SOP_marker)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: SOP marker not yet implemented");
     if (cod.may_use_EPH_marker)
@@ -1377,7 +1452,6 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
     if (cod.number_of_layers != 1)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
 
-    // FIXME: Check progression_order
     // FIXME: Read more data than just the first tile-part
 
     // Guaranteed by parse_codestream_tile_header.
@@ -1385,15 +1459,25 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
 
     auto pq = context.siz.tile_2d_index_from_1d_index(tile_index);
 
+
+    ProgressionData progression_data;
+    do {
+        if (!tile.progression_iterator->has_next())
+            return Error::from_string_literal("JPEG2000ImageDecoderPlugin: No more progression orders but packets left");
+        // XXX also check converse: the progression iterator is done once packets are done
+        progression_data = tile.progression_iterator->next();
+    } while (progression_data.resolution_level > number_of_decomposition_levels_for_component(context, tile, progression_data.component));
+
+    dbgln("progression order: layer {}, resolution level: {}, component: {}, precinct {}", progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
+
     // Compute tile size at resolution level r.
-    int r = 0;
-    int component_index = 0;
+    int r = progression_data.resolution_level;
+    int component_index = progression_data.component;
 
     // B.5
     // (B-14)
     auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
-    // FIXME: Look at context.cocs too.
-    int denominator = 1 << (cod.parameters.number_of_decomposition_levels - r);
+    int denominator = 1 << (number_of_decomposition_levels_for_component(context, tile, component_index) - r);
     int trx0 = ceil_div(component_rect.left(), denominator);
     int try0 = ceil_div(component_rect.top(), denominator);
     int trx1 = ceil_div(component_rect.right(), denominator);
@@ -1406,13 +1490,11 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
     // (B-16)
     int num_precincts_wide = 0;
     int num_precincts_high = 0;
-    // FIXME: Look at context.cocs too.
-    int PPx = cod.parameters.precinct_sizes[r].PPx; // XXX could be from tile header
+    int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx; // XXX could be from tile header
     if (trx1 != trx0) {
         num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
     }
-    // FIXME: Look at context.cocs too.
-    int PPy = cod.parameters.precinct_sizes[r].PPy; // XXX could be from tile header
+    int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy; // XXX could be from tile header
     if (try1 != try0) {
         num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
     }
@@ -1420,16 +1502,12 @@ dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
 
     // B.7
     // (B-17)
-    // FIXME: Look at context.cocs too.
-    int xcb_prime = min(cod.parameters.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
+    int xcb_prime = min(coding_style_parameters_for_component(context, tile, component_index).code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
 
     // (B-18)
-    // FIXME: Look at context.cocs too.
-    int ycb_prime = min(cod.parameters.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
+    int ycb_prime = min(coding_style_parameters_for_component(context, tile, component_index).code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
 
-    // FIXME: Look at context.cocs too.
-    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, cod.parameters.code_block_width_exponent, cod.parameters.code_block_height_exponent, xcb_prime, ycb_prime);
-
+    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, coding_style_parameters_for_component(context, tile, component_index).code_block_width_exponent, coding_style_parameters_for_component(context, tile, component_index).code_block_height_exponent, xcb_prime, ycb_prime);
 
     // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
     // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
@@ -1497,9 +1575,8 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // "The first bit-plane within the current block with a non-zero element has a cleanup pass only.
     //  The remaining bit-planes are decoded in three coding passes."
 
-    // FIXME: Look at context.cocs too.
     // FIXME: Relax. Will need implementing D.5, D.6, D.7, and probably more.
-    if (cod.parameters.code_block_style != 0)
+    if (coding_style_parameters_for_component(context, tile, component_index).code_block_style != 0)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
 
     // FIXME: Actually decode image :)
@@ -1916,7 +1993,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
             auto sign = get_sign(x, y);
             auto magnitude = magnitudes[y * w + x];
             auto value = magnitude * (sign ? -1 : 1);
-            value = (value + 256) / 2;
+            //value = (value + 256) / 2;
             dbgln("x {} y {} value {}", x, y, value);
             Color pixel;
             pixel.set_red(value);
