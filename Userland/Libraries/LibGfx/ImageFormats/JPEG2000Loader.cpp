@@ -1382,6 +1382,12 @@ struct CodeBlock {
     u8 number_of_coding_passes { 0 };
 
     u32 length_of_data { 0 };
+
+    IntRect rect; // clipped to subband rect
+};
+
+struct PacketSubBandData {
+    Vector<CodeBlock> code_blocks;
 };
 
 struct PacketHeader {
@@ -1391,7 +1397,10 @@ struct PacketHeader {
     int codeblock_y_count { 0 };
 
     // XXX eeeehhhh
-    CodeBlock block;
+//    CodeBlock block;
+
+    // Only the first element is valid for r == 0 where we have LL. Else it's HL, LH, HH.
+    Array<PacketSubBandData, 3> sub_bands;
 
     // Instead: 2d-grid of code-blocks for reach subband in packet
 };
@@ -1493,14 +1502,15 @@ dbgln("reading stuff bit");
     static constexpr Array other_sub_bands { SubBand::HorizontalHighpassVerticalLowpass, SubBand::HorizontalLowpassVerticalHighpass, SubBand::HorizontalHighpassVerticalHighpass };
     auto sub_bands = r == 0 ? level_0_sub_bands.span() : other_sub_bands.span();
 
-    for (auto sub_band : sub_bands) {
+    for (auto [sub_band_index, sub_band] : enumerate(sub_bands)) {
         dbgln("reading header info for sub-band {}", (int)sub_band);
-
-        CodeBlock current_block {}; // FIXME: Get from somewhere
 
         // Table F.1 – Decomposition level nb for sub-band b
         int n_b = r == 0 ? N_L : (N_L + 1 - r);
         auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, data.component, n_b, sub_band);
+
+        // XXX store `rect` in output
+
         rect = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
 
         auto codeblock_x_count = rect.width() / (1 << packet_context.xcb_prime);
@@ -1510,105 +1520,109 @@ dbgln("reading stuff bit");
         header.codeblock_y_count = codeblock_y_count;
     dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
 
-        // FIXME: codeblock_x_count and codeblock_y_count are per sub-band, so need to compute them in here.
+        header.sub_bands[sub_band_index].code_blocks.resize(codeblock_x_count * codeblock_y_count);
+        // auto& current_block = header.sub_bands[sub_band_index].code_blocks[0];
+
+        // XXX store this somewhere and reuse it across packets (...maybe? definitely across bitplanes in this packet.)
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
-
-        // B.10.4 Code-block inclusion
-        bool is_included;
-        if (current_block.has_been_included_in_previous_packet) {
-            // "For code-blocks that have been included in a previous packet, a single bit is used to represent the information, where
-            //  a 1 means that the code-block is included in this layer and a 0 means that it is not."
-            is_included = TRY(read_bit());
-        } else {
-            // "For code-blocks that have not been previously included in any packet, this information is signalled with a separate tag
-            //  tree code for each precinct as confined to a sub-band. The values in this tag tree are the number of the layer in which the
-            //  current code-block is first included."
-            is_included = TRY(code_block_inclusion_tree.read_value(0, 0, read_bit, current_layer_index + 1)) <= current_layer_index;
-        }
-        dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
-        current_block.is_included = is_included;
-
-        // B.10.5 Zero bit-plane information
-        // "If a code-block is included for the first time,
-        //  [...] the number of actual bit-planes for which coding passes are generated is Mb – P
-        //  [...] these missing bit-planes are all taken to be zero
-        //  [...] The value of P is coded in the packet header with a separate tag tree for every precinct"
-        // And Annex E, E.1 Inverse quantization procedure:
-        // "Mb = G + exp_b - 1       (E-2)
-        //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
         auto p_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
-        bool is_included_for_the_first_time = is_included && !current_block.has_been_included_in_previous_packet;
-        if (is_included_for_the_first_time) {
-            u32 p = TRY(p_tree.read_value(0, 0, read_bit));
-            dbgln("zero bit-plane information: {}", p);
-            current_block.p = p;
-            current_block.has_been_included_in_previous_packet = true;
+
+        for (auto& current_block : header.sub_bands[sub_band_index].code_blocks) {
+
+            // B.10.4 Code-block inclusion
+            bool is_included;
+            if (current_block.has_been_included_in_previous_packet) {
+                // "For code-blocks that have been included in a previous packet, a single bit is used to represent the information, where
+                //  a 1 means that the code-block is included in this layer and a 0 means that it is not."
+                is_included = TRY(read_bit());
+            } else {
+                // "For code-blocks that have not been previously included in any packet, this information is signalled with a separate tag
+                //  tree code for each precinct as confined to a sub-band. The values in this tag tree are the number of the layer in which the
+                //  current code-block is first included."
+                is_included = TRY(code_block_inclusion_tree.read_value(0, 0, read_bit, current_layer_index + 1)) <= current_layer_index;
+            }
+            dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
+            current_block.is_included = is_included;
+
+            // B.10.5 Zero bit-plane information
+            // "If a code-block is included for the first time,
+            //  [...] the number of actual bit-planes for which coding passes are generated is Mb – P
+            //  [...] these missing bit-planes are all taken to be zero
+            //  [...] The value of P is coded in the packet header with a separate tag tree for every precinct"
+            // And Annex E, E.1 Inverse quantization procedure:
+            // "Mb = G + exp_b - 1       (E-2)
+            //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
+            bool is_included_for_the_first_time = is_included && !current_block.has_been_included_in_previous_packet;
+            if (is_included_for_the_first_time) {
+                u32 p = TRY(p_tree.read_value(0, 0, read_bit));
+                dbgln("zero bit-plane information: {}", p);
+                current_block.p = p;
+                current_block.has_been_included_in_previous_packet = true;
+            }
+
+            // B.10.6 Number of coding passes
+            // Table B.4 – Codewords for the number of coding passes for each code-block
+            u8 number_of_coding_passes = TRY([&]() -> ErrorOr<u8> {
+                if (!TRY(read_bit()))
+                    return 1;
+                if (!TRY(read_bit()))
+                    return 2;
+
+                u8 bits = TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                if (bits != 3)
+                    return 3 + bits;
+
+                bits = TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                if (bits != 31)
+                    return 6 + bits;
+
+                bits = TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                bits = (bits << 1) | TRY(read_bit());
+                return 37 + bits;
+            }());
+            dbgln("number of coding passes: {}", number_of_coding_passes);
+            current_block.number_of_coding_passes = number_of_coding_passes;
+
+            // B.10.7 Length of the compressed image data from a given code-block
+            // XXX unclear to me to decide if we're dealing with B.10.7.1 or B.10.7.2.
+            // FIXME: Figure out. For now, always B.10.7.1, but that won't always be right.
+
+            // B.10.7.1 Single codeword segment
+            // "The length of a codeword segment is represented by a binary number of length:
+            //      bits = Lblock + ⌊log2(number_of_coding_passes)⌋
+            //  where Lblock is a code-block state variable. A separate Lblock is used for each code-block in the precinct.
+            //  The value of Lblock is initially set to three. The number of bytes contributed by each code-block is preceded by signalling
+            //  bits that increase the value of Lblock, as needed. A signalling bit of zero indicates the current value of Lblock is sufficient.
+            //  If there are k ones followed by a zero, the value of Lblock is incremented by k."
+            u32 k = 0;
+            while (TRY(read_bit()))
+                k++;
+            current_block.Lblock += k;
+            u32 bits = current_block.Lblock + (u32)floor(log2(number_of_coding_passes));
+            dbgln("bits for length of codeword segment: {} bits", bits);
+            if (bits > 32)
+                return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Too many bits for length of codeword segment");
+            u32 length = 0;
+            for (u32 i = 0; i < bits; ++i) {
+                bool bit = TRY(read_bit());
+                length = (length << 1) | bit;
+            }
+            dbgln("length of codeword segment: {} bytes", length);
+            current_block.length_of_data = length;
+
+            // B.10.7.2 Multiple codeword segments
+            // FIXME: Implement.
         }
-
-        // B.10.6 Number of coding passes
-        // Table B.4 – Codewords for the number of coding passes for each code-block
-        u8 number_of_coding_passes = TRY([&]() -> ErrorOr<u8> {
-            if (!TRY(read_bit()))
-                return 1;
-            if (!TRY(read_bit()))
-                return 2;
-
-            u8 bits = TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            if (bits != 3)
-                return 3 + bits;
-
-            bits = TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            if (bits != 31)
-                return 6 + bits;
-
-            bits = TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            bits = (bits << 1) | TRY(read_bit());
-            return 37 + bits;
-        }());
-        dbgln("number of coding passes: {}", number_of_coding_passes);
-        current_block.number_of_coding_passes = number_of_coding_passes;
-
-        // B.10.7 Length of the compressed image data from a given code-block
-        // XXX unclear to me to decide if we're dealing with B.10.7.1 or B.10.7.2.
-        // FIXME: Figure out. For now, always B.10.7.1, but that won't always be right.
-
-        // B.10.7.1 Single codeword segment
-        // "The length of a codeword segment is represented by a binary number of length:
-        //      bits = Lblock + ⌊log2(number_of_coding_passes)⌋
-        //  where Lblock is a code-block state variable. A separate Lblock is used for each code-block in the precinct.
-        //  The value of Lblock is initially set to three. The number of bytes contributed by each code-block is preceded by signalling
-        //  bits that increase the value of Lblock, as needed. A signalling bit of zero indicates the current value of Lblock is sufficient.
-        //  If there are k ones followed by a zero, the value of Lblock is incremented by k."
-        u32 k = 0;
-        while (TRY(read_bit()))
-            k++;
-        current_block.Lblock += k;
-        u32 bits = current_block.Lblock + (u32)floor(log2(number_of_coding_passes));
-        dbgln("bits for length of codeword segment: {} bits", bits);
-        if (bits > 32)
-            return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Too many bits for length of codeword segment");
-        u32 length = 0;
-        for (u32 i = 0; i < bits; ++i) {
-            bool bit = TRY(read_bit());
-            length = (length << 1) | bit;
-        }
-        dbgln("length of codeword segment: {} bytes", length);
-        current_block.length_of_data = length;
-
-        // B.10.7.2 Multiple codeword segments
-        // FIXME: Implement.
-
-        header.block = current_block;
     }
 
 //    return Error::from_string_literal("cannot decode packet headers yet");
@@ -1725,12 +1739,14 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
     // FIXME: Actually decode image :)
 
-    auto packet_data = data.slice(stream.offset(), header.block.length_of_data);
-    // FIXME: Loop to next header after this, I suppose.
+    auto& current_block = header.sub_bands[0].code_blocks[0];
+    auto packet_data = data.slice(stream.offset(), current_block.length_of_data);
+    // FIXME: loop over code-blocks, and loop over sub-bands in code-block.
+    // FIXME: Loop to next header after all bitplanes of all code-blocks in this packet.
 
     auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
 
-    // Strips of four vertical coefficents at a time.
+    // Strips of four vertical coefficients at a time.
     // State per coefficient:
     // - significance
     // - sign
@@ -1877,11 +1893,11 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     Vector<u8> became_significant_in_pass;
     became_significant_in_pass.resize(w * h);
 
-    int num_bits = (header.block.number_of_coding_passes - 1) / 3; // /shruggie
+    int num_bits = (current_block.number_of_coding_passes - 1) / 3; // /shruggie
     dbgln("num_bits: {}", num_bits);
 
     // XXX don't start current_bitplane at 0, start at the first bitplane that's in this packet.
-    for (int pass = 0, current_bitplane = 0; pass < header.block.number_of_coding_passes; ++pass, ++current_bitplane) {
+    for (int pass = 0, current_bitplane = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
         dbgln();
         dbgln("current bitplane: {}", current_bitplane);
 
@@ -1944,7 +1960,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                 }
             }
             ++pass;
-            if (pass >= header.block.number_of_coding_passes)
+            if (pass >= current_block.number_of_coding_passes)
                 break;
 
             // D.3.3 Magnitude refinement pass
@@ -1984,7 +2000,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
                 }
             }
             ++pass;
-            if (pass >= header.block.number_of_coding_passes)
+            if (pass >= current_block.number_of_coding_passes)
                 break;
         }
 
