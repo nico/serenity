@@ -206,24 +206,27 @@ struct ImageAndTileSize {
         return { tx0, ty0, tx1 - tx0, ty1 - ty0 }; // (B-11)
     }
 
-    IntRect reference_grid_coordinates_for_tile_component(IntPoint tile_2d_index, int component_index) const
+    IntRect reference_grid_coordinates_for_tile_component(IntRect tile_rect, int component_index) const
     {
-        auto tile_rect = reference_grid_coordinates_for_tile(tile_2d_index);
-
         // (B-12)
         int tcx0 = ceil_div(tile_rect.left(), static_cast<int>(components[component_index].horizontal_separation));
         int tcx1 = ceil_div(tile_rect.right(), static_cast<int>(components[component_index].horizontal_separation));
         int tcy0 = ceil_div(tile_rect.top(), static_cast<int>(components[component_index].vertical_separation));
         int tcy1 = ceil_div(tile_rect.bottom(), static_cast<int>(components[component_index].vertical_separation));
-
         return { tcx0, tcy0, tcx1 - tcx0, tcy1 - tcy0 }; // (B-13)
     }
 
-    IntRect reference_grid_coordinates_for_ll_band(IntPoint tile_2d_index, int component_index, int r, int N_L) const
+    IntRect reference_grid_coordinates_for_tile_component(IntPoint tile_2d_index, int component_index) const
+    {
+        auto tile_rect = reference_grid_coordinates_for_tile(tile_2d_index);
+        return reference_grid_coordinates_for_tile_component(tile_rect, component_index);
+    }
+
+    IntRect reference_grid_coordinates_for_ll_band(IntRect tile_rect, int component_index, int r, int N_L) const
     {
         // B.5
         // (B-14)
-        auto component_rect = reference_grid_coordinates_for_tile_component(tile_2d_index, component_index);
+        auto component_rect = reference_grid_coordinates_for_tile_component(tile_rect, component_index);
         int denominator = 1 << (N_L - r);
         int trx0 = ceil_div(component_rect.left(), denominator);
         int try0 = ceil_div(component_rect.top(), denominator);
@@ -233,7 +236,7 @@ struct ImageAndTileSize {
         return { trx0, try0, trx1 - trx0, try1 - try0 };
     }
 
-    IntRect reference_grid_coordinates_for_sub_band(IntPoint tile_2d_index, int component_index, int n_b, SubBand sub_band) const
+    IntRect reference_grid_coordinates_for_sub_band(IntRect tile_rect, int component_index, int n_b, SubBand sub_band) const
     {
         // B.5
         // Table B.1 – Quantities (xob, yob) for sub-band b
@@ -246,7 +249,7 @@ struct ImageAndTileSize {
         int o_scale = 1 << (n_b - 1);
 
         // (B-15)
-        auto component_rect = reference_grid_coordinates_for_tile_component(tile_2d_index, component_index);
+        auto component_rect = reference_grid_coordinates_for_tile_component(tile_rect, component_index);
         int denominator = 1 << n_b;
         int trx0 = ceil_div(component_rect.left() - o_scale * xob, denominator);
         int try0 = ceil_div(component_rect.top() - o_scale * yob, denominator);
@@ -254,6 +257,13 @@ struct ImageAndTileSize {
         int try1 = ceil_div(component_rect.bottom() - o_scale * yob, denominator);
 
         return { trx0, try0, trx1 - trx0, try1 - try0 };
+
+    }
+
+    IntRect reference_grid_coordinates_for_sub_band(IntPoint tile_2d_index, int component_index, int n_b, SubBand sub_band) const
+    {
+        auto tile_rect = reference_grid_coordinates_for_tile(tile_2d_index);
+        return reference_grid_coordinates_for_sub_band(tile_rect, component_index, n_b, sub_band);
     }
 
 };
@@ -789,6 +799,8 @@ struct TileData {
 
     // FIXME: This will have to move and be reorganized come POC support.
     OwnPtr<ProgressionIterator> progression_iterator;
+
+    IntRect rect;
 };
 
 struct JPEG2000LoadingContext {
@@ -853,9 +865,7 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
     auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
 
     auto number_of_precincts_from_resolution_level_and_component = [&](int r, int component_index) {
-        auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
-
-        auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
+        auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
         int denominator = 1 << (number_of_decomposition_levels_for_component(context, tile, component_index) - r);
         int trx0 = ceil_div(component_rect.left(), denominator);
         int try0 = ceil_div(component_rect.top(), denominator);
@@ -1040,8 +1050,11 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     auto& tile_part = tile.tile_parts.last();
     tile_part.sot = start_of_tile;
 
-    if (start_of_tile.tile_part_index == 0)
+    if (start_of_tile.tile_part_index == 0) {
+        auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
+        tile.rect = context.siz.reference_grid_coordinates_for_tile(pq);
         tile.progression_iterator = TRY(make_progression_iterator(context, tile));
+    }
 
     bool found_start_of_data = false;
     while (!found_start_of_data) {
@@ -1366,7 +1379,7 @@ struct PacketHeader {
     CodeBlock block;
 };
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
 {
     int N_L = coding_parameters.number_of_decomposition_levels;
     int r = data.resolution_level;
@@ -1461,9 +1474,8 @@ dbgln("reading stuff bit");
 
         // Table F.1 – Decomposition level nb for sub-band b
         int n_b = r == 0 ? N_L : (N_L + 1 - r);
-        (void)n_b;
-    //    IntRect reference_grid_coordinates_for_sub_band(IntPoint tile_2d_index, int component_index, int n_b, SubBand sub_band) const
-
+        auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, data.component, n_b, sub_band);
+        (void)rect;
 
         // FIXME: codeblock_x_count and codeblock_y_count are per sub-band, so need to compute them in here.
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
@@ -1587,9 +1599,6 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
 
-    auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
-
-
     ProgressionData progression_data;
     do {
         if (!tile.progression_iterator->has_next())
@@ -1605,7 +1614,7 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     int component_index = progression_data.component;
     auto const coding_parameters = coding_style_parameters_for_component(context, tile, component_index);
 
-    auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(pq, component_index, r, coding_parameters.number_of_decomposition_levels);
+    auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component_index, r, coding_parameters.number_of_decomposition_levels);
 
 dbgln("ll_rect: {}", ll_rect);
 
@@ -1638,7 +1647,10 @@ dbgln("ll_rect: {}", ll_rect);
     // XXX where does the spec say that?
     // XXX also, if precincts are way larger than the image, then this here produces
     //     oodles of codeblocks outside the subband. Need to clip somewhere, but ideally the spec would say that somewhere.
-    auto precinct_rect = IntRect({ 0, 0, 1 << PPx, 1 << PPy });
+    int precinct_x_index = progression_data.precinct % num_precincts_wide;
+    int precinct_y_index = progression_data.precinct / num_precincts_wide;
+
+    auto precinct_rect = IntRect({ precinct_x_index * (1 << PPx), precinct_y_index * (1 << PPy), 1 << PPx, 1 << PPy });
     precinct_rect.intersect(ll_rect);
     if (precinct_rect.x() % (1 << xcb_prime) != 0) {
         int new_x = (precinct_rect.x() / (1 << xcb_prime)) * (1 << xcb_prime);
@@ -1677,7 +1689,7 @@ dbgln("ll_rect: {}", ll_rect);
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
-    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count, coding_parameters, progression_data));
+    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count, tile, coding_parameters, progression_data));
     (void)header;
 
 dbgln("header was {} bytes long", TRY(stream.tell()));
