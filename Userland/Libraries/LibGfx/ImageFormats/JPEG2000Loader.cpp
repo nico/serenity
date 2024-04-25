@@ -267,6 +267,7 @@ struct ImageAndTileSize {
 
         return { trx0, try0, trx1 - trx0, try1 - try0 };
     }
+<<<<<<< HEAD
 
     IntRect reference_grid_coordinates_for_sub_band(IntRect tile_rect, int component_index, int n_b, SubBand sub_band) const
     {
@@ -297,6 +298,33 @@ struct ImageAndTileSize {
         auto tile_rect = reference_grid_coordinates_for_tile(tile_2d_index);
         return reference_grid_coordinates_for_sub_band(tile_rect, component_index, n_b, sub_band);
     }
+||||||| parent of 96a459873a9 (tweaks (reference_grid_coordinates_for_sub_band(); pass coding params and progression data to read_packet_header)
+=======
+
+    IntRect reference_grid_coordinates_for_sub_band(IntPoint tile_2d_index, int component_index, int n_b, SubBand sub_band) const
+    {
+        // B.5
+        // Table B.1 – Quantities (xob, yob) for sub-band b
+        int xob = 0;
+        int yob = 0;
+        if (sub_band == SubBand::HorizontalHighpassVerticalLowpass || sub_band == SubBand::HorizontalHighpassVerticalHighpass)
+            xob = 1;
+        if (sub_band == SubBand::HorizontalLowpassVerticalHighpass || sub_band == SubBand::HorizontalHighpassVerticalHighpass)
+            yob = 1;
+        int o_scale = 1 << (n_b - 1);
+
+        // (B-15)
+        auto component_rect = reference_grid_coordinates_for_tile_component(tile_2d_index, component_index);
+        int denominator = 1 << n_b;
+        int trx0 = ceil_div(component_rect.left() - o_scale * xob, denominator);
+        int try0 = ceil_div(component_rect.top() - o_scale * yob, denominator);
+        int trx1 = ceil_div(component_rect.right() - o_scale * xob, denominator);
+        int try1 = ceil_div(component_rect.bottom() - o_scale * yob, denominator);
+
+        return { trx0, try0, trx1 - trx0, try1 - try0 };
+    }
+
+>>>>>>> 96a459873a9 (tweaks (reference_grid_coordinates_for_sub_band(); pass coding params and progression data to read_packet_header)
 };
 
 static ErrorOr<ImageAndTileSize> read_image_and_tile_size(ReadonlyBytes data)
@@ -1376,35 +1404,6 @@ ErrorOr<u32> TagTree::read_value(u32 x, u32 y, Function<ErrorOr<bool>()> const& 
 
 }
 
-// XXX say that this is per component-tile. Image first divided into tiles, then those into component tiles.
-//
-// XXX words (DWT, a single LL at r=0, HL/LH/HH at r > 0, etc)
-//
-// +-----+-----+----------+
-// | LL0 | HL1 |          |
-// +-----+-----+   HL2    |
-// | LH1 | HH1 |          |
-// +-----+-----+----------+
-// |           |          |
-// |    LH2    |    HH2   |
-// |           |          |
-// +-----------+----------+
-//
-// Subbands can be subdivided into precincts. A precinct is a rect in the same location in all subbands of a resolution level.
-// In practice, precincts are often 512k pixels x 512k pixels, so most images have only a single precinct.
-// The part of a precinct that covers only a single subband is called a "precinct limited to a subband".
-// A precinct limited to a subband is subdivided into codeblocks. These are in practice often 64x64 pixels.
-// (XXX Maybe it's a rectangle before DWT and so reaches across resolution levels, and what I wrote is a precinct limited to a resolution level?)
-// Codeblocks store bitplanes of the coefficients that are the result of wavelet-transforming the input image.
-// Codeblocks have independent arithmetic decoder context state, so coefficients in several codeblocks can be decoded in parallel.
-// Not all bitplanes of the coefficients have to be stored together. This allows incrementally refining the image's color resolution.
-// A set of bitplanes coded at a time is called a layer.
-enum class SubBand {
-    HorizontalLowpassVerticalLowpass,   // "LL" in spec
-    HorizontalHighpassVerticalLowpass,  // "HL" in spec
-    HorizontalLowpassVerticalHighpass,  // "LH" in spec
-    HorizontalHighpassVerticalHighpass, // "HH" in spec
-};
 
 struct CodeBlock {
     SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
@@ -1436,8 +1435,12 @@ struct PacketHeader {
     CodeBlock block;
 };
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, int r, u32 current_layer_index)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const&, BigEndianInputBitStream& bitstream, int codeblock_x_count, int codeblock_y_count, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
 {
+    int N_L = coding_parameters.number_of_decomposition_levels;
+    int r = data.resolution_level;
+    u32 current_layer_index = data.layer;
+
     // B.9 Packets
     // "All compressed image data representing a specific tile, layer, component, resolution level and precinct appears in the
     //  codestream in a contiguous segment called a packet. Packet data is aligned at 8-bit (one byte) boundaries."
@@ -1524,6 +1527,12 @@ dbgln("reading stuff bit");
         dbgln("reading header info for sub-band {}", (int)sub_band);
 
         CodeBlock current_block {}; // FIXME: Get from somewhere
+
+        // Table F.1 – Decomposition level nb for sub-band b
+        int n_b = r == 0 ? N_L : (N_L + 1 - r);
+        (void)n_b;
+    //    IntRect reference_grid_coordinates_for_sub_band(IntPoint tile_2d_index, int component_index, int n_b, SubBand sub_band) const
+
 
         // FIXME: codeblock_x_count and codeblock_y_count are per sub-band, so need to compute them in here.
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
@@ -1630,9 +1639,8 @@ dbgln("reading stuff bit");
     return header;
 }
 
-ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
+ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
-    auto& tile = context.tiles[tile_index];
     auto const& cod = tile.cod.value_or(context.cod);
 
     if (cod.may_use_SOP_marker)
@@ -1648,7 +1656,7 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
 
-    auto pq = context.siz.tile_2d_index_from_1d_index(tile_index);
+    auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
 
 
     ProgressionData progression_data;
@@ -1664,8 +1672,9 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, int tile_index)
     // Compute tile size at resolution level r.
     int r = progression_data.resolution_level;
     int component_index = progression_data.component;
+    auto const coding_parameters = coding_style_parameters_for_component(context, tile, component_index);
 
-    auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(pq, component_index, r, number_of_decomposition_levels_for_component(context, tile, component_index));
+    auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(pq, component_index, r, coding_parameters.number_of_decomposition_levels);
 
 dbgln("ll_rect: {}", ll_rect);
 
@@ -1673,11 +1682,11 @@ dbgln("ll_rect: {}", ll_rect);
     // (B-16)
     int num_precincts_wide = 0;
     int num_precincts_high = 0;
-    int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx; // XXX could be from tile header
+    int PPx = coding_parameters.precinct_sizes[r].PPx; // XXX could be from tile header
     if (ll_rect.width() != 0) {
         num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.left() / (1 << PPx));
     }
-    int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy; // XXX could be from tile header
+    int PPy = coding_parameters.precinct_sizes[r].PPy; // XXX could be from tile header
     if (ll_rect.height() != 0) {
         num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
     }
@@ -1685,12 +1694,12 @@ dbgln("ll_rect: {}", ll_rect);
 
     // B.7
     // (B-17)
-    int xcb_prime = min(coding_style_parameters_for_component(context, tile, component_index).code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
+    int xcb_prime = min(coding_parameters.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
 
     // (B-18)
-    int ycb_prime = min(coding_style_parameters_for_component(context, tile, component_index).code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
+    int ycb_prime = min(coding_parameters.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
 
-    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, coding_style_parameters_for_component(context, tile, component_index).code_block_width_exponent, coding_style_parameters_for_component(context, tile, component_index).code_block_height_exponent, xcb_prime, ycb_prime);
+    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, coding_parameters.code_block_width_exponent, coding_parameters.code_block_height_exponent, xcb_prime, ycb_prime);
 
     // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
     // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
@@ -1737,7 +1746,7 @@ dbgln("ll_rect: {}", ll_rect);
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
-    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count, r, progression_data.layer));
+    auto header = TRY(read_packet_header(context, bitstream, codeblock_x_count, codeblock_y_count, coding_parameters, progression_data));
     (void)header;
 
 dbgln("header was {} bytes long", TRY(stream.tell()));
@@ -1759,7 +1768,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     //  The remaining bit-planes are decoded in three coding passes."
 
     // FIXME: Relax. Will need implementing D.5, D.6, D.7, and probably more.
-    if (coding_style_parameters_for_component(context, tile, component_index).code_block_style != 0)
+    if (coding_parameters.code_block_style != 0)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
 
     // FIXME: Actually decode image :)
@@ -2202,8 +2211,8 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 {
     TRY(parse_codestream_tile_headers(context));
 
-    for (size_t i = 0; i < context.tiles.size(); ++i)
-        TRY(decode_tile(context, i));
+    for (auto& tile : context.tiles)
+        TRY(decode_tile(context, tile));
 
     return {};
 }
