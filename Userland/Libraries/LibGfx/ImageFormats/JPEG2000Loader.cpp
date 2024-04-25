@@ -579,7 +579,7 @@ public:
 
 private:
     Function<int(int resolution_level, int component)> m_number_of_precincts;
-    ProgressionData m_current {};
+    ProgressionData m_next {};
     ProgressionData m_end {};
 };
 
@@ -589,18 +589,18 @@ LayerResolutionLevelComponentPositionProgressionIterator::LayerResolutionLevelCo
     m_end.layer = number_of_layers;
     m_end.resolution_level = max_number_of_decomposition_levels + 1;
     m_end.component = component_count;
-    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
-
-    m_current.precinct = -1;
+    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
 }
 
 bool LayerResolutionLevelComponentPositionProgressionIterator::has_next() const
 {
-    return m_current != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
+    return m_next != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
 }
 
 ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
 {
+    ProgressionData current_data = m_next;
+
     // B.12.1.1 Layer-resolution level-component-position progression
     // "for each l = 0,..., L – 1
     //      for each r = 0,..., Nmax
@@ -611,30 +611,30 @@ ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
     // FIXME: This always iterates up to Nmax, instead of just N_l of each component. That means several of the iteration results will be invalid and skipped.
     // (This is a performance issue, not a correctness issue.)
 
-    ++m_current.precinct;
-    if (m_current.precinct < m_end.precinct)
-        return m_current;
+    ++m_next.precinct;
+    if (m_next.precinct < m_end.precinct)
+        return current_data;
 
-    m_current.precinct = 0;
-    ++m_current.component;
-    if (m_current.component < m_end.component) {
-        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
-        return m_current;
+    m_next.precinct = 0;
+    ++m_next.component;
+    if (m_next.component < m_end.component) {
+        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
+        return current_data;
     }
 
-    m_current.component = 0;
-    ++m_current.resolution_level;
-    if (m_current.resolution_level < m_end.resolution_level) {
-        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
-        return m_current;
+    m_next.component = 0;
+    ++m_next.resolution_level;
+    if (m_next.resolution_level < m_end.resolution_level) {
+        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
+        return current_data;
     }
 
-    m_current.resolution_level = 0;
-    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
+    m_next.resolution_level = 0;
+    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
 
-    ++m_current.layer;
-    VERIFY(m_current.layer < m_end.layer);
-    return m_current;
+    ++m_next.layer;
+    VERIFY(m_next.layer < m_end.layer);
+    return current_data;
 }
 
 // B.12.1.2 Resolution level-layer-component-position progression
@@ -647,7 +647,7 @@ public:
 
 private:
     Function<int(int resolution_level, int component)> m_number_of_precincts;
-    ProgressionData m_current {};
+    ProgressionData m_next {};
     ProgressionData m_end {};
 };
 
@@ -657,18 +657,18 @@ ResolutionLevelLayerComponentPositionProgressionIterator::ResolutionLevelLayerCo
     m_end.layer = number_of_layers;
     m_end.resolution_level = max_number_of_decomposition_levels + 1;
     m_end.component = component_count;
-    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
-
-    m_current.precinct = -1;
+    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
 }
 
 bool ResolutionLevelLayerComponentPositionProgressionIterator::has_next() const
 {
-    return m_current != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
+    return m_next != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
 }
 
 ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
 {
+    ProgressionData current_data = m_next;
+
     // B.12.1.2 Resolution level-layer-component-position progression
     // "for each r = 0,..., Nmax
     //      for each l = 0,..., L – 1
@@ -678,31 +678,31 @@ ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
     // FIXME: This always iterates up to Nmax, instead of just N_l of each component. That means several of the iteration results will be invalid and skipped.
     // (This is a performance issue, not a correctness issue.)
 
-    ++m_current.precinct;
-    if (m_current.precinct < m_end.precinct)
-        return m_current;
+    ++m_next.precinct;
+    if (m_next.precinct < m_end.precinct)
+        return current_data;
 
-    m_current.precinct = 0;
-    ++m_current.component;
-    if (m_current.component < m_end.component) {
-        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
-        return m_current;
+    m_next.precinct = 0;
+    ++m_next.component;
+    if (m_next.component < m_end.component) {
+        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
+        return current_data;
     }
 
-    m_current.component = 0;
-    ++m_current.layer;
-    if (m_current.layer < m_end.layer) {
-        m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
-        return m_current;
+    m_next.component = 0;
+    ++m_next.layer;
+    if (m_next.layer < m_end.layer) {
+        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
+        return current_data;
     }
 
-    m_current.layer = 0;
+    m_next.layer = 0;
 
-    ++m_current.resolution_level;
-    m_end.precinct = m_number_of_precincts(m_current.resolution_level, m_current.component);
-    VERIFY(m_current.resolution_level < m_end.resolution_level);
+    ++m_next.resolution_level;
+    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
+    VERIFY(m_next.resolution_level < m_end.resolution_level);
 
-    return m_current;
+    return current_data;
 }
 
 
