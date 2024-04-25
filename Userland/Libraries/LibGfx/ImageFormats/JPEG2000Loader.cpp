@@ -1509,12 +1509,10 @@ dbgln("reading stuff bit");
         int n_b = r == 0 ? N_L : (N_L + 1 - r);
         auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, data.component, n_b, sub_band);
 
-        // XXX store `rect` in output
+        auto rect_covered_by_codeblocks = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
 
-        rect = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
-
-        auto codeblock_x_count = rect.width() / (1 << packet_context.xcb_prime);
-        auto codeblock_y_count = rect.height() / (1 << packet_context.ycb_prime);
+        auto codeblock_x_count = rect_covered_by_codeblocks.width() / (1 << packet_context.xcb_prime);
+        auto codeblock_y_count = rect_covered_by_codeblocks.height() / (1 << packet_context.ycb_prime);
 
         header.codeblock_x_count = codeblock_x_count;
         header.codeblock_y_count = codeblock_y_count;
@@ -1527,7 +1525,10 @@ dbgln("reading stuff bit");
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
         auto p_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
 
-        for (auto& current_block : header.sub_bands[sub_band_index].code_blocks) {
+        for (auto [code_block_index, current_block] : enumerate(header.sub_bands[sub_band_index].code_blocks)) {
+
+            auto code_block_rect = IntRect { rect_covered_by_codeblocks.top_left(), { 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime } };
+            current_block.rect = code_block_rect.intersected(rect);
 
             // B.10.4 Code-block inclusion
             bool is_included;
@@ -1713,7 +1714,6 @@ dbgln("ll_rect: {}", ll_rect);
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
     auto header = TRY(read_packet_header(context, bitstream, packet_context, tile, coding_parameters, progression_data));
-    (void)header;
 
 dbgln("header was {} bytes long", TRY(stream.tell()));
 
@@ -1757,22 +1757,13 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // FIXME: Store this external to this function since some bitplanes could
     //        be in a later packet.
 
-    int codeblock_index = 0;
-    int codeblock_2d_index_x = codeblock_index % header.codeblock_x_count;
-    int codeblock_2d_index_y = codeblock_index / header.codeblock_x_count;
-    int codeblock_x = codeblock_2d_index_x * (1 << xcb_prime);
-    int codeblock_y = codeblock_2d_index_y * (1 << ycb_prime);
-    int codeblock_width = 1 << xcb_prime;
-    int codeblock_height = 1 << ycb_prime;
-
     // B.7 Division of the sub-bands into code-blocks
     // "NOTE – Code-blocks in the partition may extend beyond the boundaries of the sub-band coefficients. When this happens, only the
     //  coefficients lying within the sub-band are coded using the method described in Annex D. The first stripe coded using this method
     //  corresponds to the first four rows of sub-band coefficients in the code-block or to as many such rows as are present."
-    auto resolution_level_rect = ll_rect; // XXX use (B-15) once this handles bands other than LL
-    int w = resolution_level_rect.intersected({ codeblock_x, codeblock_y, codeblock_width, codeblock_height }).width();
-    int h = resolution_level_rect.intersected({ codeblock_x, codeblock_y, codeblock_width, codeblock_height }).height();
-    dbgln("code-block size: {}x{}", w, h);
+    int w = current_block.rect.width();
+    int h = current_block.rect.height();
+    dbgln("code-block rect: {}", current_block.rect);
 
     int num_strips = ceil_div(h, 4);
 
