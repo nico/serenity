@@ -715,34 +715,37 @@ static int compute_max_number_of_decomposition_levels(JPEG2000LoadingContext con
 static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000LoadingContext const& context, TileData const& tile)
 {
     auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
+
+    auto number_of_precincts_from_resolution_level_and_component = [&](int r, int component_index) {
+        auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
+
+        auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
+        int denominator = 1 << (number_of_decomposition_levels_for_component(context, tile, component_index) - r);
+        int trx0 = ceil_div(component_rect.left(), denominator);
+        int try0 = ceil_div(component_rect.top(), denominator);
+        int trx1 = ceil_div(component_rect.right(), denominator);
+        int try1 = ceil_div(component_rect.bottom(), denominator);
+
+    dbgln("component rect: {}", component_rect);
+    dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
+
+        // B.6
+        // (B-16)
+        int num_precincts_wide = 0;
+        int num_precincts_high = 0;
+        int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx;
+        if (trx1 != trx0)
+            num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
+        int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy;
+        if (try1 != try0)
+            num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
+        dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
+        return num_precincts_wide * num_precincts_high;
+    };
+
     switch (tile.cod.value_or(context.cod).progression_order) {
     case CodingStyleDefault::ProgressionOrder::LayerResolutionComponentPosition:
-        return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), [&](int r, int component_index) {
-            auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
-
-            auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(pq, component_index);
-            int denominator = 1 << (number_of_decomposition_levels_for_component(context, tile, component_index) - r);
-            int trx0 = ceil_div(component_rect.left(), denominator);
-            int try0 = ceil_div(component_rect.top(), denominator);
-            int trx1 = ceil_div(component_rect.right(), denominator);
-            int try1 = ceil_div(component_rect.bottom(), denominator);
-
-        dbgln("component rect: {}", component_rect);
-        dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
-
-            // B.6
-            // (B-16)
-            int num_precincts_wide = 0;
-            int num_precincts_high = 0;
-            int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx;
-            if (trx1 != trx0)
-                num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
-            int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy;
-            if (try1 != try0)
-                num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
-            dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
-            return num_precincts_wide * num_precincts_high;
-        });
+        return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
     case CodingStyleDefault::ResolutionLayerComponentPosition:
         return Error::from_string_literal("JPEG200Loader: ResolutionLayerComponentPosition progression order not yet supported");
     case CodingStyleDefault::ResolutionPositionComponentLayer:
