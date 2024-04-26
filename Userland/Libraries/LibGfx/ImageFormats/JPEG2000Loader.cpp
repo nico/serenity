@@ -1533,7 +1533,10 @@ dbgln("reading stuff bit");
 
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[sub_band_index].code_blocks)) {
 
-            auto code_block_rect = IntRect { rect_covered_by_codeblocks.top_left(), { 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime } };
+            size_t code_block_x = code_block_index % codeblock_x_count;
+            size_t code_block_y = code_block_index / codeblock_x_count;
+
+            auto code_block_rect = IntRect { { rect_covered_by_codeblocks.x() + code_block_x * (1 << packet_context.xcb_prime), rect_covered_by_codeblocks.y() + code_block_y * (1 << packet_context.ycb_prime) }, { 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime } };
             current_block.rect = code_block_rect.intersected(rect);
 
             // B.10.4 Code-block inclusion
@@ -1546,7 +1549,7 @@ dbgln("reading stuff bit");
                 // "For code-blocks that have not been previously included in any packet, this information is signalled with a separate tag
                 //  tree code for each precinct as confined to a sub-band. The values in this tag tree are the number of the layer in which the
                 //  current code-block is first included."
-                is_included = TRY(code_block_inclusion_tree.read_value(0, 0, read_bit, current_layer_index + 1)) <= current_layer_index;
+                is_included = TRY(code_block_inclusion_tree.read_value(code_block_x, code_block_y, read_bit, current_layer_index + 1)) <= current_layer_index;
             }
             dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
             current_block.is_included = is_included;
@@ -1561,7 +1564,7 @@ dbgln("reading stuff bit");
             //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
             bool is_included_for_the_first_time = is_included && !current_block.has_been_included_in_previous_packet;
             if (is_included_for_the_first_time) {
-                u32 p = TRY(p_tree.read_value(0, 0, read_bit));
+                u32 p = TRY(p_tree.read_value(code_block_x, code_block_y, read_bit));
                 dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
                 current_block.has_been_included_in_previous_packet = true;
