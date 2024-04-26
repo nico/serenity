@@ -1106,6 +1106,7 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
 
     u32 tile_bitstream_length;
     if (start_of_tile.tile_part_length == 0) {
+        // "If the Psot is 0, this tile-part is assumed to contain all data until the EOC marker."
         // Leave room for EOC marker.
         if (context.codestream_data.size() - context.codestream_cursor < 2)
             return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Not enough data for EOC marker");
@@ -1505,6 +1506,10 @@ dbgln("reading stuff bit");
     for (auto [sub_band_index, sub_band] : enumerate(sub_bands)) {
         dbgln("reading header info for sub-band {}", (int)sub_band);
 
+        // B.9: "Only those code-blocks that contain samples from the relevant sub-band, confined to the precinct, have any representation in the packet."
+        // Could loop over all codeblocks in precinct and skip those that don't intersect with the subband rect.
+        // For now, does math instead, but probably want to do the stupid and simple thing before upstreaming.
+
         // Table F.1 – Decomposition level nb for sub-band b
         int n_b = r == 0 ? N_L : (N_L + 1 - r);
         auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, data.component, n_b, sub_band);
@@ -1521,7 +1526,8 @@ dbgln("reading stuff bit");
         header.sub_bands[sub_band_index].code_blocks.resize(codeblock_x_count * codeblock_y_count);
         // auto& current_block = header.sub_bands[sub_band_index].code_blocks[0];
 
-        // XXX store this somewhere and reuse it across packets (...maybe? definitely across bitplanes in this packet.)
+        // XXX store this somewhere and reuse it across packets (...maybe? definitely across bitplanes in this packet;
+        // almost certainly across bitplanes for same precinct/resolution level/component in other layers)
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
         auto p_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
 
@@ -1866,7 +1872,8 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     // FIXME: Loop over all bitplanes in packet
 
     // header.block.number_of_coding_passes is probably number of bitplanes in this packet (?)
-    // XXX optionally reinitialize contexts between bitplanes
+    // XXX optionally reinitialize contexts between bitplanes, depending on uses_termination_on_each_coding_pass().
+    // Currently, we reinitialize after every code-block (which is what we usually want).
 
     // D.4 Initializing and terminating
     // Table D.7 – Initial states for all contexts
