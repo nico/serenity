@@ -1399,13 +1399,8 @@ struct PacketHeader {
     int codeblock_x_count { 0 };
     int codeblock_y_count { 0 };
 
-    // XXX eeeehhhh
-//    CodeBlock block;
-
     // Only the first element is valid for r == 0 where we have LL. Else it's HL, LH, HH.
     Array<PacketSubBandData, 3> sub_bands;
-
-    // Instead: 2d-grid of code-blocks for reach subband in packet
 };
 
 IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width_increment, int height_increment)
