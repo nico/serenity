@@ -1573,6 +1573,7 @@ dbgln("reading stuff bit");
                 dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
                 current_block.has_been_included_in_previous_packet = true;
+                current_block.sub_band = sub_band;
             }
 
             // B.10.6 Number of coding passes
@@ -1811,7 +1812,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
     //  corresponds to the first four rows of sub-band coefficients in the code-block or to as many such rows as are present."
     int w = current_block.rect.width();
     int h = current_block.rect.height();
-    dbgln("code-block rect: {}", current_block.rect);
+    dbgln("code-block rect: {}, sub-band {}", current_block.rect, (int)current_block.sub_band);
 
     int num_strips = ceil_div(h, 4);
 
@@ -1891,6 +1892,80 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
         return 0;
     };
 
+    // Like compute_context_ll_lh but with sum_h and sum_v swapped
+    auto compute_context_hl = [&](int x, int y) -> unsigned {
+        // Table D.1 – Contexts for the significance propagation and cleanup coding passes
+        u8 sum_h = is_significant(x - 1, y) + is_significant(x + 1, y);
+        u8 sum_v = is_significant(x, y - 1) + is_significant(x, y + 1);
+        u8 sum_d = is_significant(x - 1, y - 1) + is_significant(x - 1, y + 1) + is_significant(x + 1, y - 1) + is_significant(x + 1, y + 1);
+
+        if (sum_v == 2)
+            return 8;
+
+        if (sum_v == 1) {
+            if (sum_h >= 1)
+                return 7;
+            if (sum_d >= 1)
+                return 6;
+            return 5;
+        }
+
+        if (sum_h == 2)
+            return 4;
+        if (sum_h == 1)
+            return 3;
+        if (sum_d >= 2)
+            return 2;
+        if (sum_d == 1)
+            return 1;
+
+        return 0;
+    };
+
+    auto compute_context_hh = [&](int x, int y) -> unsigned {
+        // Table D.1 – Contexts for the significance propagation and cleanup coding passes
+        u8 sum_h = is_significant(x - 1, y) + is_significant(x + 1, y);
+        u8 sum_v = is_significant(x, y - 1) + is_significant(x, y + 1);
+        u8 sum_h_v = sum_h + sum_v;
+        u8 sum_d = is_significant(x - 1, y - 1) + is_significant(x - 1, y + 1) + is_significant(x + 1, y - 1) + is_significant(x + 1, y + 1);
+
+        if (sum_d >= 3)
+            return 8;
+
+        if (sum_d == 2) {
+            if (sum_h_v >= 1)
+                return 7;
+            return 6;
+        }
+
+        if (sum_d == 1) {
+            if (sum_h_v >= 2)
+                return 5;
+            if (sum_h_v == 1)
+                return 4;
+            return 3;
+        }
+
+        if (sum_h_v >= 2)
+            return 2;
+        if (sum_h_v == 1)
+            return 1;
+
+        return 0;
+    };
+
+    auto compute_context = [&](int x, int y) -> unsigned {
+        switch (current_block.sub_band) {
+        case SubBand::HorizontalLowpassVerticalLowpass:
+        case SubBand::HorizontalLowpassVerticalHighpass:
+            return compute_context_ll_lh(x, y);
+        case SubBand::HorizontalHighpassVerticalLowpass:
+            return compute_context_hl(x, y);
+        case SubBand::HorizontalHighpassVerticalHighpass:
+            return compute_context_hh(x, y);
+        }
+    };
+
     auto v_or_h_contribution = [&](IntPoint p, IntPoint d0, IntPoint d1) -> i8 {
         auto p0 = p + d0;
         auto p1 = p + d1;
@@ -1962,11 +2037,10 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                         // D1, Is the current coefficient already significant?
                         if (!is_significant(x, y + coefficient_index)) {
                             // D2, Is the context bin zero? (see Table D.1)
-                            u8 context = compute_context_ll_lh(x, y + coefficient_index);
+                            u8 context = compute_context(x, y + coefficient_index);
                             if (context != 0) {
                                 // C1, Decode significance bit of current coefficient (See D.3.1)
-                                // XXX make sub-band dependent. assumes LL atm.
-                                // u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
+                                // u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                                 bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                                 dbgln("sigprop is_newly_significant: {}", is_newly_significant);
                                 // is_current_coefficient_significant = is_newly_significant;
@@ -2060,7 +2134,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
 
                 Array<u8, 4> contexts {};
                 for (int i = 0; i < 4; ++i) {
-                    contexts[i] = compute_context_ll_lh(x, y + i);
+                    contexts[i] = compute_context(x, y + i);
                     // dbgln("context[{}]: {}", i, contexts[i]);
                 }
 
@@ -2092,8 +2166,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                                 ++coefficient_index;
 
                                 // C1, Decode significance bit of current coefficient (See D.3.1)
-                                // XXX make sub-band dependent. assumes LL atm.
-                                u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
+                                u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                                 bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                                 dbgln("cleanup is_newly_significant: {}", is_newly_significant);
                                 is_current_coefficient_significant = is_newly_significant;
@@ -2146,9 +2219,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                         bool has_already_been_coded = pass > 0 && was_coded_in_pass[(y + coefficient_index) * w + x] == pass - 2;
                         if (!is_significant_or_coded && !has_already_been_coded) {
                             // C1, Decode significance bit of current coefficient
-                            // XXX make sub-band dependent. assumes LL atm.
-                            u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
-                            dbgln("alt cleanup context: {}", context);
+                            u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                             // dbgln("alt context {}", context);
                             bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                             dbgln("cleanup alt is_newly_significant: {}", is_newly_significant);
