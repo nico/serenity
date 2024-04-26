@@ -1645,7 +1645,7 @@ dbgln("reading stuff bit");
 }
 
 static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_deocder, CodeBlock& current_block);
-static ErrorOr<void> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
+static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1659,18 +1659,27 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     if (cod.number_of_layers != 1)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
 
-    // FIXME: Read more data than just the first tile-part
 
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
 
+    // FIXME: Read more data than just the first tile-part
     auto data = tile.tile_parts[0].data;
-    TRY(decode_packet(context, tile, data));
 
-    return {};
+    while (!data.is_empty()) {
+        auto length =  TRY(decode_packet(context, tile, data));
+dbgln("data size {}, read {}", data.size(), length);
+        data = data.slice(length);
+dbgln("data size {} after slice", data.size());
+    }
+
+    if (tile.progression_iterator->has_next())
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Not all progression orders were decoded");
+
+    return Error::from_string_literal("cannot decode tile yet");
 }
 
-static ErrorOr<void> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
+static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
 {
     ProgressionData progression_data;
     do {
@@ -1763,19 +1772,23 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
     // FIXME: loop over subbands too.
     u32 offset = stream.offset();
-    for (auto& current_block : header.sub_bands[0].code_blocks) {
-        // FIXME: Are codeblocks on byte boundaries?
-        auto packet_data = data.slice(offset, current_block.length_of_data);
-        offset += current_block.length_of_data;
+    int number_of_sub_bands = r == 0 ? 1 : 3;
+    for (int i = 0; i < number_of_sub_bands; ++i) {
+        for (auto& current_block : header.sub_bands[i].code_blocks) {
+            // FIXME: Are codeblocks on byte boundaries? => Looks like it. Find spec ref.
+            // XXX Make read_packed_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
+            auto packet_data = data.slice(offset, current_block.length_of_data);
+            offset += current_block.length_of_data;
 
-        auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
+            auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
 
-        TRY(decode_code_block(arithmetic_decoder, current_block));
+            TRY(decode_code_block(arithmetic_decoder, current_block));
+        }
     }
 
-    // FIXME: Loop to next header after all bitplanes of all code-blocks in this packet.
-
-    return Error::from_string_literal("cannot decode tile yet");
+    // XXX could just read the packet header here and decode the code blocks later, in parallel.
+    // (...since the header stores the length of the data, it's easy to skip over it.)
+    return offset;
 }
 
 static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block)
