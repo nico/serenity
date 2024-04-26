@@ -738,7 +738,7 @@ LayerResolutionLevelComponentPositionProgressionIterator::LayerResolutionLevelCo
 
 bool LayerResolutionLevelComponentPositionProgressionIterator::has_next() const
 {
-    return m_next != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
+    return m_next != ProgressionData { m_end.layer, 0, 0, 0 };
 }
 
 ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
@@ -777,7 +777,8 @@ ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
     m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
 
     ++m_next.layer;
-    VERIFY(m_next.layer < m_end.layer);
+    VERIFY(m_next.layer < m_end.layer || !has_next());
+
     return current_data;
 }
 
@@ -806,7 +807,7 @@ ResolutionLevelLayerComponentPositionProgressionIterator::ResolutionLevelLayerCo
 
 bool ResolutionLevelLayerComponentPositionProgressionIterator::has_next() const
 {
-    return m_next != ProgressionData { m_end.layer - 1, m_end.resolution_level - 1, m_end.component - 1, m_end.precinct - 1 };
+    return m_next != ProgressionData { 0, m_end.resolution_level, 0, 0 };
 }
 
 ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
@@ -844,7 +845,7 @@ ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
 
     ++m_next.resolution_level;
     m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-    VERIFY(m_next.resolution_level < m_end.resolution_level);
+    VERIFY(m_next.resolution_level < m_end.resolution_level || !has_next());
 
     return current_data;
 }
