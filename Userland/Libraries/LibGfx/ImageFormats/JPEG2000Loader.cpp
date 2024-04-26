@@ -2004,9 +2004,9 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                             // Table D.4 – Contexts for the magnitude refinement coding passes
                             u8 context;
                             if (became_significant_in_pass[(y + coefficient_index) * w + x] == current_bitplane - 1) {
-                                u8 sum_h = is_significant(x - 1, y) + is_significant(x + 1, y);
-                                u8 sum_v = is_significant(x, y - 1) + is_significant(x, y + 1);
-                                u8 sum_d = is_significant(x - 1, y - 1) + is_significant(x - 1, y + 1) + is_significant(x + 1, y - 1) + is_significant(x + 1, y + 1);
+                                u8 sum_h = is_significant(x - 1, y + coefficient_index) + is_significant(x + 1, y + coefficient_index);
+                                u8 sum_v = is_significant(x, y + coefficient_index - 1) + is_significant(x, y + coefficient_index + 1);
+                                u8 sum_d = is_significant(x - 1, y + coefficient_index - 1) + is_significant(x - 1, y + coefficient_index + 1) + is_significant(x + 1, y + coefficient_index - 1) + is_significant(x + 1, y + coefficient_index + 1);
                                 context = (sum_h + sum_v + sum_d) >= 1 ? 15 : 14;
                             } else {
                                 context = 16;
