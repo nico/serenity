@@ -1644,8 +1644,9 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
     return header;
 }
 
-static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_deocder, CodeBlock& current_block);
+static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
+static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_deocder, CodeBlock& current_block);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1663,8 +1664,18 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
 
-    // FIXME: Read more data than just the first tile-part
-    auto data = tile.tile_parts[0].data;
+    for (auto& tile_part : tile.tile_parts)
+        TRY(decode_tile_part(context, tile, tile_part));
+
+    if (tile.progression_iterator->has_next())
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Not all progression orders were decoded");
+
+    return Error::from_string_literal("cannot decode tile yet");
+}
+
+static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part)
+{
+    auto data = tile_part.data;
 
     while (!data.is_empty()) {
         auto length =  TRY(decode_packet(context, tile, data));
@@ -1673,10 +1684,7 @@ dbgln("data size {}, read {}", data.size(), length);
 dbgln("data size {} after slice", data.size());
     }
 
-    if (tile.progression_iterator->has_next())
-        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Not all progression orders were decoded");
-
-    return Error::from_string_literal("cannot decode tile yet");
+    return {};
 }
 
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
