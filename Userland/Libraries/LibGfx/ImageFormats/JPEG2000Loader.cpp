@@ -867,26 +867,18 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
     auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
 
     auto number_of_precincts_from_resolution_level_and_component = [&](int r, int component_index) {
-        auto component_rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
-        int denominator = 1 << (number_of_decomposition_levels_for_component(context, tile, component_index) - r);
-        int trx0 = ceil_div(component_rect.left(), denominator);
-        int try0 = ceil_div(component_rect.top(), denominator);
-        int trx1 = ceil_div(component_rect.right(), denominator);
-        int try1 = ceil_div(component_rect.bottom(), denominator);
-
-    dbgln("component rect: {}", component_rect);
-    dbgln("trx0: {}, try0: {}, trx1: {}, try1: {}", trx0, try0, trx1, try1);
+        auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component_index, r, number_of_decomposition_levels_for_component(context, tile, component_index));
 
         // B.6
         // (B-16)
         int num_precincts_wide = 0;
         int num_precincts_high = 0;
         int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx;
-        if (trx1 != trx0)
-            num_precincts_wide = ceil_div(trx1, 1 << PPx) - (trx0 / (1 << PPx));
+        if (ll_rect.width() > 0)
+            num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.x() / (1 << PPx));
         int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy;
-        if (try1 != try0)
-            num_precincts_high = ceil_div(try1, 1 << PPy) - (try0 / (1 << PPy));
+        if (ll_rect.height() > 0)
+            num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.y() / (1 << PPy));
         dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
         return num_precincts_wide * num_precincts_high;
     };
