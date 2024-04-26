@@ -1525,6 +1525,9 @@ dbgln("reading stuff bit");
         header.codeblock_y_count = codeblock_y_count;
     dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
 
+        if (codeblock_x_count == 0 || codeblock_y_count == 0)
+            continue;
+
         header.sub_bands[sub_band_index].code_blocks.resize(codeblock_x_count * codeblock_y_count);
         // auto& current_block = header.sub_bands[sub_band_index].code_blocks[0];
 
