@@ -1984,9 +1984,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
             return get_sign(p0.x(), p0.y()) == false ? 1 : -1;
         return 0;
     };
-    // FIXME: loop over all code-blocks in packet
     // FIXME: If code-block not included, continue to next code-block
-    // FIXME: Loop over all bitplanes in packet
 
     // header.block.number_of_coding_passes is probably number of bitplanes in this packet (?)
     // XXX optionally reinitialize contexts between bitplanes, depending on uses_termination_on_each_coding_pass().
