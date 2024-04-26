@@ -246,7 +246,7 @@ struct ImageAndTileSize {
             xob = 1;
         if (sub_band == SubBand::HorizontalLowpassVerticalHighpass || sub_band == SubBand::HorizontalHighpassVerticalHighpass)
             yob = 1;
-        VERIFY(n_b >= 1);
+        VERIFY(n_b >= 1 || (n_b == 0 && sub_band == SubBand::HorizontalLowpassVerticalLowpass));
         int o_scale = 1 << (n_b - 1);
 
         // (B-15)
@@ -1500,6 +1500,7 @@ dbgln("reading stuff bit");
         // For now, does math instead, but probably want to do the stupid and simple thing before upstreaming.
 
         // Table F.1 – Decomposition level nb for sub-band b
+        // XXX: Spec suggests that this ends with n_b = 1, but if N_L is 0, we have 0LL and nothing else.
         int n_b = r == 0 ? N_L : (N_L + 1 - r);
         auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, data.component, n_b, sub_band);
 
