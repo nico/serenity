@@ -1801,6 +1801,9 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
 
 static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block)
 {
+    // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
+    if (!current_block.is_included)
+        return Error::from_string_literal("Cannot handle non-included codeblocks yet");
 
     // Strips of four vertical coefficients at a time.
     // State per coefficient:
@@ -1991,7 +1994,6 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
             return get_sign(p0.x(), p0.y()) == false ? 1 : -1;
         return 0;
     };
-    // FIXME: If code-block not included, continue to next code-block
 
     // header.block.number_of_coding_passes is probably number of bitplanes in this packet (?)
     // XXX optionally reinitialize contexts between bitplanes, depending on uses_termination_on_each_coding_pass().
