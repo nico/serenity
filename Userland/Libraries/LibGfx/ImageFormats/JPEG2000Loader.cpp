@@ -778,7 +778,8 @@ ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
     m_next.layer = 0;
 
     ++m_next.resolution_level;
-    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
+    if (has_next())
+        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
     VERIFY(m_next.resolution_level < m_end.resolution_level || !has_next());
 
     return current_data;
