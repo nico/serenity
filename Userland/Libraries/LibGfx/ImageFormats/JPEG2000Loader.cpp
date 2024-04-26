@@ -1998,6 +1998,27 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
     Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
     all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
 
+    auto read_sign_bit = [&](int x, int y) {
+        // C2, Decode sign bit of current coefficient
+        // Sign bit
+        // D.3.2 Sign bit decoding
+        // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
+        i8 v_contribution = v_or_h_contribution({ x, y }, { 0, -1 }, { 0, 1 });
+        i8 h_contribution = v_or_h_contribution({ x, y }, { -1, 0 }, { 1, 0 });
+        // Table D.3 – Sign contexts from the vertical and horizontal contributions
+        u8 context_label = 9;
+        if (h_contribution == 0)
+            context_label += abs(v_contribution);
+        else
+            context_label += 3 + h_contribution * v_contribution;
+        u8 xor_bit = 0;
+        if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
+            xor_bit = 1;
+        bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
+        dbgln("sigprop sign_bit: {} (context {})", sign_bit, context_label);
+        return sign_bit;
+    };
+
     // Figure D.3 – Flow chart for all coding passes on a code-block bit-plane
     // Table D.10 – Decisions in the context model flow chart
     // Table D.11 – Decoding in the context model flow chart
@@ -2051,23 +2072,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
 
                                 // D3, Did the current coefficient just become significant?
                                 if (is_newly_significant) {
-                                    // C2, Decode sign bit of current coefficient
-                                    // Sign bit
-                                    // D.3.2 Sign bit decoding
-                                    // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
-                                    i8 v_contribution = v_or_h_contribution({ x, y + coefficient_index }, { 0, -1 }, { 0, 1 });
-                                    i8 h_contribution = v_or_h_contribution({ x, y + coefficient_index }, { -1, 0 }, { 1, 0 });
-                                    // Table D.3 – Sign contexts from the vertical and horizontal contributions
-                                    u8 context_label = 9;
-                                    if (h_contribution == 0)
-                                        context_label += abs(v_contribution);
-                                    else
-                                        context_label += 3 + h_contribution * v_contribution;
-                                    u8 xor_bit = 0;
-                                    if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
-                                        xor_bit = 1;
-                                    bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
-                                    dbgln("sigprop sign_bit: {} (context {})", sign_bit, context_label);
+                                    bool sign_bit = read_sign_bit(x, y + coefficient_index);
                                     set_sign(x, y + coefficient_index, sign_bit);
                                 }
                             }
@@ -2178,23 +2183,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
 
                             // D3, Did the current coefficient just become significant?
                             if (is_current_coefficient_significant) {
-                                // C2, Decode sign bit of current coefficient
-                                // Sign bit
-                                // D.3.2 Sign bit decoding
-                                // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
-                                i8 v_contribution = v_or_h_contribution({ x, y + coefficient_index }, { 0, -1 }, { 0, 1 });
-                                i8 h_contribution = v_or_h_contribution({ x, y + coefficient_index }, { -1, 0 }, { 1, 0 });
-                                // Table D.3 – Sign contexts from the vertical and horizontal contributions
-                                u8 context_label = 9;
-                                if (h_contribution == 0)
-                                    context_label += abs(v_contribution);
-                                else
-                                    context_label += 3 + h_contribution * v_contribution;
-                                u8 xor_bit = 0;
-                                if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
-                                    xor_bit = 1;
-                                bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
-                                dbgln("cleanup sign_bit: {} (context {})", sign_bit, context_label);
+                                bool sign_bit = read_sign_bit(x, y + coefficient_index);
                                 set_sign(x, y + coefficient_index, sign_bit);
                             }
 
@@ -2229,23 +2218,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
 
                             // D3, Did the current coefficient just become significant?
                             if (is_newly_significant) {
-                                // C2, Decode sign bit of current coefficient
-                                // Sign bit
-                                // D.3.2 Sign bit decoding
-                                // Table D.2 – Contributions of the vertical (and the horizontal) neighbours to the sign context
-                                i8 v_contribution = v_or_h_contribution({ x, y + coefficient_index }, { 0, -1 }, { 0, 1 });
-                                i8 h_contribution = v_or_h_contribution({ x, y + coefficient_index }, { -1, 0 }, { 1, 0 });
-                                // Table D.3 – Sign contexts from the vertical and horizontal contributions
-                                u8 context_label = 9;
-                                if (h_contribution == 0)
-                                    context_label += abs(v_contribution);
-                                else
-                                    context_label += 3 + h_contribution * v_contribution;
-                                u8 xor_bit = 0;
-                                if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
-                                    xor_bit = 1;
-                                bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
-                                dbgln("cleanup other sign_bit: {} (context {})", sign_bit, context_label);
+                                bool sign_bit = read_sign_bit(x, y + coefficient_index);
                                 set_sign(x, y + coefficient_index, sign_bit);
                             }
                         }
