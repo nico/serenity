@@ -246,17 +246,18 @@ struct ImageAndTileSize {
             xob = 1;
         if (sub_band == SubBand::HorizontalLowpassVerticalHighpass || sub_band == SubBand::HorizontalHighpassVerticalHighpass)
             yob = 1;
+        VERIFY(n_b >= 1);
         int o_scale = 1 << (n_b - 1);
 
         // (B-15)
         auto component_rect = reference_grid_coordinates_for_tile_component(tile_rect, component_index);
         int denominator = 1 << n_b;
-        int trx0 = ceil_div(component_rect.left() - o_scale * xob, denominator);
-        int try0 = ceil_div(component_rect.top() - o_scale * yob, denominator);
-        int trx1 = ceil_div(component_rect.right() - o_scale * xob, denominator);
-        int try1 = ceil_div(component_rect.bottom() - o_scale * yob, denominator);
+        int tbx0 = ceil_div(component_rect.left() - o_scale * xob, denominator);
+        int tby0 = ceil_div(component_rect.top() - o_scale * yob, denominator);
+        int tbx1 = ceil_div(component_rect.right() - o_scale * xob, denominator);
+        int tby1 = ceil_div(component_rect.bottom() - o_scale * yob, denominator);
 
-        return { trx0, try0, trx1 - trx0, try1 - try0 };
+        return { tbx0, tby0, tbx1 - tbx0, tby1 - tby0 };
 
     }
 
