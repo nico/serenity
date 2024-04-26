@@ -1513,6 +1513,10 @@ dbgln("reading stuff bit");
 
         auto rect_covered_by_codeblocks = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
 
+dbgln("n_b: {}", n_b);
+dbgln("sub-band rect: {}", rect);
+dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
+
         auto codeblock_x_count = rect_covered_by_codeblocks.width() / (1 << packet_context.xcb_prime);
         auto codeblock_y_count = rect_covered_by_codeblocks.height() / (1 << packet_context.ycb_prime);
 
