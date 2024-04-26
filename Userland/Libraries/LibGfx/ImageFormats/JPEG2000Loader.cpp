@@ -1639,6 +1639,8 @@ dbgln("reading stuff bit");
     return header;
 }
 
+static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_deocder, CodeBlock& current_block);
+
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
     auto const& cod = tile.cod.value_or(context.cod);
@@ -1746,14 +1748,25 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     if (coding_parameters.code_block_style != 0)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
 
-    // FIXME: Actually decode image :)
+    // FIXME: loop over subbands too.
+    u32 offset = stream.offset();
+    for (auto& current_block : header.sub_bands[0].code_blocks) {
+        // FIXME: Are codeblocks on byte boundaries?
+        auto packet_data = data.slice(offset, current_block.length_of_data);
+        offset += current_block.length_of_data;
 
-    auto& current_block = header.sub_bands[0].code_blocks[0];
-    auto packet_data = data.slice(stream.offset(), current_block.length_of_data);
-    // FIXME: loop over code-blocks, and loop over sub-bands in code-block.
+        auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
+
+        TRY(decode_code_block(arithmetic_decoder, current_block));
+    }
+
     // FIXME: Loop to next header after all bitplanes of all code-blocks in this packet.
 
-    auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
+    return Error::from_string_literal("cannot decode tile yet");
+}
+
+static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block)
+{
 
     // Strips of four vertical coefficients at a time.
     // State per coefficient:
@@ -2173,7 +2186,7 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     TRY(file->write_until_depleted(bytes));
 }
 
-    return Error::from_string_literal("cannot decode tile yet");
+    return {};
 }
 
 ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
