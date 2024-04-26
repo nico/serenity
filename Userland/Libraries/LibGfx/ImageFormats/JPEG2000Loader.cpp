@@ -1915,6 +1915,11 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
     Vector<u8> became_significant_in_pass;
     became_significant_in_pass.resize(w * h);
 
+    // Set even for coefficients that are not significant, if they had an explicit "not significant" bit.
+    // XXX probably have to sotre this elsewhere too? Can layers start at a different pass?
+    Vector<u8> was_coded_in_pass;
+    was_coded_in_pass.resize(w * h);
+
     int num_bits = (current_block.number_of_coding_passes - 1) / 3; // /shruggie
     dbgln("num_bits: {}", num_bits);
 
@@ -1952,6 +1957,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                                     became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
                                     magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
                                 }
+                                was_coded_in_pass[(y + coefficient_index) * w + x] = pass;
 
                                 // D3, Did the current coefficient just become significant?
                                 if (is_newly_significant) {
@@ -2117,10 +2123,10 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                         is_first_coefficient = false;
 
                         // D9, Is the coefficient significant or has the bit already been coded during the Significance Propagation coding pass?
-                        // FIXME: Update once we have a significance propagation pass
                         // Note: The significance propagation pass is pretty similar to this loop here.
                         bool is_significant_or_coded = is_significant(x, y + coefficient_index);
-                        if (!is_significant_or_coded) {
+                        bool has_already_been_coded = pass > 0 && was_coded_in_pass[(y + coefficient_index) * w + x] == pass - 2;
+                        if (!is_significant_or_coded && !has_already_been_coded) {
                             // C1, Decode significance bit of current coefficient
                             // XXX make sub-band dependent. assumes LL atm.
                             u8 context = compute_context_ll_lh(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
