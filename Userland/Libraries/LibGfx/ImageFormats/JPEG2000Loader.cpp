@@ -1640,6 +1640,7 @@ dbgln("reading stuff bit");
 }
 
 static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_deocder, CodeBlock& current_block);
+static ErrorOr<void> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1658,6 +1659,14 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
 
+    auto data = tile.tile_parts[0].data;
+    TRY(decode_packet(context, tile, data));
+
+    return {};
+}
+
+static ErrorOr<void> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
+{
     ProgressionData progression_data;
     do {
         if (!tile.progression_iterator->has_next())
@@ -1716,7 +1725,6 @@ dbgln("ll_rect: {}", ll_rect);
     packet_context.ycb_prime = ycb_prime;
     packet_context.precinct_rect = precinct_rect;
 
-    auto data = context.tiles[0].tile_parts[0].data;
     if (data.is_empty())
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot handle tile-parts without any packets yet");
 // dbgln("first byte: {:#x}", data[0]);
