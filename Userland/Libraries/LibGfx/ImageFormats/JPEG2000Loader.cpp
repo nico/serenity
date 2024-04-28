@@ -1634,13 +1634,12 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
         }
     }
 
-//    return Error::from_string_literal("cannot decode packet headers yet");
     return header;
 }
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_deocder, CodeBlock& current_block);
+static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1673,9 +1672,7 @@ static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData&
 
     while (!data.is_empty()) {
         auto length =  TRY(decode_packet(context, tile, data));
-dbgln("data size {}, read {}", data.size(), length);
         data = data.slice(length);
-dbgln("data size {} after slice", data.size());
     }
 
     return {};
@@ -1687,7 +1684,6 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
     do {
         if (!tile.progression_iterator->has_next())
             return Error::from_string_literal("JPEG2000ImageDecoderPlugin: No more progression orders but packets left");
-        // XXX also check converse: the progression iterator is done once packets are done
         progression_data = tile.progression_iterator->next();
     } while (progression_data.resolution_level > number_of_decomposition_levels_for_component(context, tile, progression_data.component));
 
@@ -1743,15 +1739,11 @@ dbgln("ll_rect: {}", ll_rect);
 
     if (data.is_empty())
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot handle tile-parts without any packets yet");
-// dbgln("first byte: {:#x}", data[0]);
-// dbgln("second byte: {:#x}", data[1]);
+
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
     auto header = TRY(read_packet_header(context, bitstream, packet_context, tile, coding_parameters, progression_data));
-
-dbgln("header was {} bytes long", TRY(stream.tell()));
-
 
     // FIXME: Read actual packet data too
     // That's Annex D.
@@ -1772,7 +1764,6 @@ dbgln("header was {} bytes long", TRY(stream.tell()));
     if (coding_parameters.code_block_style != 0)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
 
-    // FIXME: loop over subbands too.
     u32 offset = stream.offset();
     int number_of_sub_bands = r == 0 ? 1 : 3;
     for (int i = 0; i < number_of_sub_bands; ++i) {
@@ -2031,7 +2022,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
     became_significant_in_pass.resize(w * h);
 
     // Set even for coefficients that are not significant, if they had an explicit "not significant" bit.
-    // XXX probably have to sotre this elsewhere too? Can layers start at a different pass?
+    // XXX probably have to store this elsewhere too? Can layers start at a different pass?
     Vector<u8> was_coded_in_pass;
     was_coded_in_pass.resize(w * h);
 
@@ -2234,7 +2225,6 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
             }
         }
     }
-
 
 {
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
