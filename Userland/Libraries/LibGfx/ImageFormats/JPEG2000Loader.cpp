@@ -1384,6 +1384,9 @@ struct CodeBlock {
 
 struct PacketSubBandData {
     Vector<CodeBlock> code_blocks;
+
+    Vector<i16> coefficients;
+    IntRect subband_rect;
 };
 
 struct PacketHeader {
@@ -1504,6 +1507,8 @@ dbgln("reading stuff bit");
         // XXX: Spec suggests that this ends with n_b = 1, but if N_L is 0, we have 0LL and nothing else.
         int n_b = r == 0 ? N_L : (N_L + 1 - r);
         auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, data.component, n_b, sub_band);
+
+        header.sub_bands[sub_band_index].subband_rect = rect;
 
         auto rect_covered_by_codeblocks = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
 
@@ -1639,7 +1644,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block);
+static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1767,6 +1772,9 @@ dbgln("ll_rect: {}", ll_rect);
     u32 offset = stream.offset();
     int number_of_sub_bands = r == 0 ? 1 : 3;
     for (int i = 0; i < number_of_sub_bands; ++i) {
+
+        header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
+
         for (auto& current_block : header.sub_bands[i].code_blocks) {
             // FIXME: Are codeblocks on byte boundaries? => Looks like it. Find spec ref.
             // XXX Make read_packed_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
@@ -1775,8 +1783,38 @@ dbgln("ll_rect: {}", ll_rect);
 
             auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
 
-            TRY(decode_code_block(arithmetic_decoder, current_block));
+            TRY(decode_code_block(arithmetic_decoder, current_block, header.sub_bands[i]));
         }
+
+#if 1
+{
+    auto rect = header.sub_bands[i].subband_rect;
+    int w = rect.width();
+    int h = rect.height();
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            auto value = header.sub_bands[i].coefficients[y * w + x];
+            //value = (value + 256) / 2;
+            // dbgln("x {} y {} value {}", x, y, value);
+            Color pixel;
+            pixel.set_red(value);
+            pixel.set_green(value);
+            pixel.set_blue(value);
+            pixel.set_alpha(255);
+            bitmap->set_pixel(x, y, pixel);
+        }
+    }
+
+    static int n_images = 0;
+    auto name = TRY(String::formatted("image-{}.png", n_images++));
+    auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
+    auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
+    auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
+    TRY(file->write_until_depleted(bytes));
+}
+#endif
+
     }
 
     // XXX could just read the packet header here and decode the code blocks later, in parallel.
@@ -1784,7 +1822,7 @@ dbgln("ll_rect: {}", ll_rect);
     return offset;
 }
 
-static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block)
+static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     if (!current_block.is_included)
@@ -2226,6 +2264,17 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
         }
     }
 
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            //auto pixel = bitmap->scanline(y)[x];
+            auto sign = get_sign(x, y);
+            auto magnitude = magnitudes[y * w + x];
+            auto value = magnitude * (sign ? -1 : 1);
+            output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
+        }
+    }
+
+#if 0
 {
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
@@ -2252,6 +2301,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
     auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
     TRY(file->write_until_depleted(bytes));
 }
+#endif
 
     return {};
 }
