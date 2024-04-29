@@ -1859,12 +1859,41 @@ dbgln("ll_rect: {}", ll_rect);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             auto value = header.sub_bands[i].coefficients[y * w + x];
+
+            // E.1 Inverse quantization procedure
+            // We coefficients stores qbar_b.
+            if (quantization_parameters.quantization_style != QuantizationDefault::QuantizationStyle::NoQuantization) {
+                // E.1.1 Irreversible transformation
+                auto R_I = context.siz.components[progression_data.component].bit_depth();
+
+                // Table E.1 – Sub-band gains
+                auto log_2_gain_b = sub_band == SubBand::HorizontalLowpassVerticalLowpass ? 0 : (sub_band == SubBand::HorizontalHighpassVerticalLowpass || sub_band == SubBand::HorizontalLowpassVerticalHighpass ? 1 : 2);
+                auto R_b = R_I + log_2_gain_b;
+
+                u16 mantissa;
+                if (quantization_parameters.quantization_style == QuantizationDefault::QuantizationStyle::ScalarDerived) {
+                    // (E-5)
+                    mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[0].mantissa;
+                } else {
+                    mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[3 * r + (int)sub_band].mantissa;
+                }
+
+                // (E-3)
+                float step_size = powf(2.0f, R_b - exponent) * (1.0f + mantissa / powf(2.0f, 11.0f));
+                if (i == 0) dbgln("step size: {}", step_size);
+                value *= step_size; // XXX round and clamp
+
+                // XXX this is incomplete: if bitplanes are missing, need to scale up
+            }
+
             if (i == 0) dbgln("x {} y {} value {}", x, y, value);
 
-            value >>= (M_b - 8);
+            // value >>= (M_b - 8);
 
+            // XXX this should happen after IDWT and after component transformation
             // G.1.2 Inverse DC level shifting of tile-components
             // (G-2)
+            // XXX - 1 or not here? -1 looks better and matches spec text in G.1.2 but maybe not Table A.11 in A.5.1 (?)
             if (!context.siz.components[progression_data.component].is_signed())
                 value += 1u << (context.siz.components[progression_data.component].bit_depth() - 1);
 
