@@ -1604,7 +1604,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
                 bits = (bits << 1) | TRY(read_bit());
                 return 37 + bits;
             }());
-            dbgln("number of coding passes: {}", number_of_coding_passes);
+            dbgln("number of coding passes: {} ({} bitplanes)", number_of_coding_passes, (number_of_coding_passes - 1) / 3 + 1);
             current_block.number_of_coding_passes = number_of_coding_passes;
 
             // B.10.7 Length of the compressed image data from a given code-block
@@ -1644,7 +1644,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output);
+static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1681,6 +1681,51 @@ static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData&
     }
 
     return {};
+}
+
+static QuantizationDefault const& quantization_parameters_for_component(JPEG2000LoadingContext const& context, TileData const& tile, size_t component_index)
+{
+    // Tile-part QCC > Tile-part QCD > Main QCC > Main QCD
+    for (auto const& qcc : tile.qccs) {
+        if (qcc.component_index == component_index)
+            return qcc.qcd;
+    }
+
+    if (tile.qcd.has_value())
+        return tile.qcd.value();
+
+    for (auto const& qcc : context.qccs) {
+        if (qcc.component_index == component_index)
+            return qcc.qcd;
+    }
+
+    return context.qcd;
+}
+
+static u8 get_exponent(QuantizationDefault const& quantization_parameters, SubBand sub_band, int resolution_level)
+{
+    switch (quantization_parameters.quantization_style) {
+    case QuantizationDefault::QuantizationStyle::NoQuantization: {
+        auto const& steps = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::ReversibleStepSize>>();
+        if (sub_band == SubBand::HorizontalLowpassVerticalLowpass)
+            return steps[0].exponent;
+        return steps[1 + resolution_level * 3 + (int)sub_band - 1].exponent;
+    }
+    case QuantizationDefault::QuantizationStyle::ScalarDerived:
+    case QuantizationDefault::QuantizationStyle::ScalarExpounded: {
+        auto const& steps = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>();
+
+        if (quantization_parameters.quantization_style == QuantizationDefault::QuantizationStyle::ScalarDerived) {
+            // Callers must use (E-5).
+            return steps[0].exponent;
+        }
+
+        if (sub_band == SubBand::HorizontalLowpassVerticalLowpass)
+            return steps[0].exponent;
+        return steps[1 + resolution_level * 3 + (int)sub_band - 1].exponent;
+    }
+    }
+    VERIFY_NOT_REACHED();
 }
 
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
@@ -1773,6 +1818,25 @@ dbgln("ll_rect: {}", ll_rect);
     int number_of_sub_bands = r == 0 ? 1 : 3;
     for (int i = 0; i < number_of_sub_bands; ++i) {
 
+        // Annex E, E.1 Inverse quantization procedure:
+        // "Mb = G + exp_b - 1       (E-2)
+        //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
+        auto quantization_parameters = quantization_parameters_for_component(context, tile, progression_data.component);
+        auto sub_band = i == 0 ? SubBand::HorizontalLowpassVerticalLowpass : (SubBand)(i + 1); // XXX store on SubBand?
+        auto exponent = get_exponent(quantization_parameters, sub_band, r);
+
+        if (quantization_parameters.quantization_style == QuantizationDefault::QuantizationStyle::ScalarDerived) {
+            int N_L = coding_parameters.number_of_decomposition_levels;
+            // Table F.1 – Decomposition level nb for sub-band b
+            // XXX: Spec suggests that this ends with n_b = 1, but if N_L is 0, we have 0LL and nothing else.
+            int n_b = r == 0 ? N_L : (N_L + 1 - r);
+            // (E-5)
+            exponent = exponent - N_L + n_b;
+            // same as `if (r != 0) exponent = exponent - (r - 1);`
+        }
+
+        int M_b = quantization_parameters.number_of_guard_bits + exponent - 1;
+
         header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
 
         for (auto& current_block : header.sub_bands[i].code_blocks) {
@@ -1783,7 +1847,7 @@ dbgln("ll_rect: {}", ll_rect);
 
             auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
 
-            TRY(decode_code_block(arithmetic_decoder, current_block, header.sub_bands[i]));
+            TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i]));
         }
 
 #if 1
@@ -1795,6 +1859,15 @@ dbgln("ll_rect: {}", ll_rect);
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             auto value = header.sub_bands[i].coefficients[y * w + x];
+            if (i == 0) dbgln("x {} y {} value {}", x, y, value);
+
+            value >>= (M_b - 8);
+
+            // G.1.2 Inverse DC level shifting of tile-components
+            // (G-2)
+            if (!context.siz.components[progression_data.component].is_signed())
+                value += 1u << (context.siz.components[progression_data.component].bit_depth() - 1);
+
             //value = (value + 256) / 2;
             // dbgln("x {} y {} value {}", x, y, value);
             Color pixel;
@@ -1822,7 +1895,7 @@ dbgln("ll_rect: {}", ll_rect);
     return offset;
 }
 
-static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output)
+static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     if (!current_block.is_included)
@@ -2064,16 +2137,28 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
     Vector<u8> was_coded_in_pass;
     was_coded_in_pass.resize(w * h);
 
-    int num_bits = (current_block.number_of_coding_passes - 1) / 3; // /shruggie
-    dbgln("num_bits: {}", num_bits);
+    // D.2.1
+    // "The number Nb(u, v) of decoded MSBs includes the number of all zero most significant bit-planes signalled in the packet header (see B.10.5)."
+    // B.10.5 Zero bit-plane information
+    // "the number of missing most significant bit-planes, P, may vary from code-block to code-block; these missing bit-planes are all taken to be zero."
+    // (E-1) has value computation.
+
+    // E.1
+    // "Due to the nature of the three coding passes (see D.3), Nb(u, v) may be different for different coefficients within the same code-block."
+    // ?? what why
+    // Am I supposed to keep track when each coefficient becomes significant? Does Nb(u, v) include that information?
+
+    // int num_bits = (current_block.number_of_coding_passes - 1) / 3 + 1; // /shruggie
+    int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
+    dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
     // XXX don't start current_bitplane at 0, start at the first bitplane that's in this packet.
-    for (int pass = 0, current_bitplane = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
+    for (int pass = 0, current_bitplane = current_block.p; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
         // dbgln();
         // dbgln("current bitplane: {}", current_bitplane);
 
         // D0, Is this the first bit-plane for the code-block?
-        bool is_first_bitplane_for_code_block = current_bitplane == 0;
+        bool is_first_bitplane_for_code_block = (u32)current_bitplane == current_block.p;
         if (!is_first_bitplane_for_code_block) {
             // XXX can probably store this more intelligently
 
