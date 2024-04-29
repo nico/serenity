@@ -2509,9 +2509,28 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 
             if (context.cod.parameters.transformation == CodingStyleParameters::Reversible_5_3_Filter) {
                 // G.2 Reversible multiple component transformation (RCT)
-                TODO();
                 // "The three components input into the RCT shall have the same separation on the reference grid and the same bit-depth."
                 // XXX check
+                auto& c0 = decoded_tile.components[0].idwt_result;
+                auto& c1 = decoded_tile.components[1].idwt_result;
+                auto& c2 = decoded_tile.components[2].idwt_result;
+                int w = c0.size.width();
+                // XXX verify components have same dimensions
+                for (int y = 0; y < c0.size.height(); ++y) {
+                    for (int x = 0; x < w; ++x) {
+                        float Y = c0.coefficients[y * w + x];
+                        float Cb = c1.coefficients[y * w + x];
+                        float Cr = c2.coefficients[y * w + x];
+
+                        float G = Y - floorf((Cb + Cr) / 4); // (G-6)
+                        float R = Cr + G; // (G-7)
+                        float B = Cb + G; // (G-8)
+
+                        c0.coefficients[y * w + x] = R;
+                        c1.coefficients[y * w + x] = G;
+                        c2.coefficients[y * w + x] = B;
+                    }
+                }
             } else {
                 VERIFY(context.cod.parameters.transformation == CodingStyleParameters::Irreversible_9_7_Filter);
                 // G.3 Irreversible multiple component transformation (ICT)
@@ -2524,7 +2543,6 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
                 // XXX verify components have same dimensions
                 for (int y = 0; y < c0.size.height(); ++y) {
                     for (int x = 0; x < w; ++x) {
-
                         float Y = c0.coefficients[y * w + x];
                         float Cb = c1.coefficients[y * w + x];
                         float Cr = c2.coefficients[y * w + x];
