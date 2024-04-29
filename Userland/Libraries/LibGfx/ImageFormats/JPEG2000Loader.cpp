@@ -806,6 +806,23 @@ struct TileData {
     IntRect rect;
 };
 
+struct DecodedCoefficients {
+    IntSize size;
+    Vector<float> coefficients;
+};
+
+struct DecodedComponent {
+    IntSize size;
+    DecodedCoefficients nLL;
+    Vector<Array<DecodedCoefficients, 3>> sub_bands;
+
+    DecodedCoefficients idwt_result;
+};
+
+struct DecodedTile {
+    Vector<DecodedComponent> components;
+};
+
 struct JPEG2000LoadingContext {
     enum class State {
         NotDecoded = 0,
@@ -829,6 +846,8 @@ struct JPEG2000LoadingContext {
     Vector<QuantizationComponent> qccs;
     Vector<Comment> coms;
     Vector<TileData> tiles;
+
+    Vector<DecodedTile> decoded_tiles;
 };
 
 static CodingStyleParameters const& coding_style_parameters_for_component(JPEG2000LoadingContext const& context, TileData const& tile, size_t component_index)
@@ -1036,6 +1055,8 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     // FIXME: Store start_of_tile on context somewhere.
 
     context.tiles.resize(max(context.tiles.size(), (size_t)start_of_tile.tile_index + 1));
+    context.decoded_tiles.resize(max(context.decoded_tiles.size(), (size_t)start_of_tile.tile_index + 1));
+
     auto& tile = context.tiles[start_of_tile.tile_index];
     tile.index = start_of_tile.tile_index;
 
@@ -1658,24 +1679,30 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     if (cod.number_of_layers != 1)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
 
-
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
 
     for (auto& tile_part : tile.tile_parts)
         TRY(decode_tile_part(context, tile, tile_part));
 
-    if (tile.progression_iterator->has_next())
-        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Not all progression orders were decoded");
+    // if (tile.progression_iterator->has_next())
+        // return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Not all progression orders were decoded");
 
-    return Error::from_string_literal("cannot decode tile yet");
+    // return Error::from_string_literal("cannot decode tile yet");
+    return {};
 }
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part)
 {
     auto data = tile_part.data;
 
+int n = 0;
+
     while (!data.is_empty()) {
+        if (n++ > 4) break; // XXX hacks
+
+        // XXX make this return combined codeblock data
+        // XXX read headers first and do decoding in separate loop
         auto length =  TRY(decode_packet(context, tile, data));
         data = data.slice(length);
     }
@@ -1794,6 +1821,12 @@ dbgln("ll_rect: {}", ll_rect);
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
     auto header = TRY(read_packet_header(context, bitstream, packet_context, tile, coding_parameters, progression_data));
+    if (header.is_empty)
+        return stream.offset();
+
+// XXX hack
+if (r > 2) return stream.offset();
+
 
     // FIXME: Read actual packet data too
     // That's Annex D.
@@ -1822,7 +1855,7 @@ dbgln("ll_rect: {}", ll_rect);
         // "Mb = G + exp_b - 1       (E-2)
         //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
         auto quantization_parameters = quantization_parameters_for_component(context, tile, progression_data.component);
-        auto sub_band = i == 0 ? SubBand::HorizontalLowpassVerticalLowpass : (SubBand)(i + 1); // XXX store on SubBand?
+        auto sub_band = r == 0 ? SubBand::HorizontalLowpassVerticalLowpass : (SubBand)(i + 1); // XXX store on SubBand?
         auto exponent = get_exponent(quantization_parameters, sub_band, r);
 
         if (quantization_parameters.quantization_style == QuantizationDefault::QuantizationStyle::ScalarDerived) {
@@ -1852,13 +1885,35 @@ dbgln("ll_rect: {}", ll_rect);
 
 #if 1
 {
+    // context.decoded_tiles.resize(max(context.tiles.size(), (size_t)tile.index));
+    auto& decoded_tile = context.decoded_tiles[tile.index];
+    if (decoded_tile.components.is_empty()) {
+        dbgln("making {} componennts", context.siz.components.size());
+        decoded_tile.components.resize(context.siz.components.size());
+        for (auto [component_index, component] : enumerate(decoded_tile.components)) {
+            int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
+            coding_style_parameters_for_component(context, tile, component_index);
+            dbgln("making {} sub-bands", num_decomposition_levels);
+            component.sub_bands.resize(num_decomposition_levels);
+        }
+    }
+
+dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
+    DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
+    if (coefficients.coefficients.is_empty()) {
+        coefficients.size = header.sub_bands[i].subband_rect.size();
+
+dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
+        coefficients.coefficients.resize(coefficients.size.width() * coefficients.size.height());
+    }
+
     auto rect = header.sub_bands[i].subband_rect;
     int w = rect.width();
     int h = rect.height();
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            auto value = header.sub_bands[i].coefficients[y * w + x];
+            float value = header.sub_bands[i].coefficients[y * w + x];
 
             // E.1 Inverse quantization procedure
             // We coefficients stores qbar_b.
@@ -1880,15 +1935,15 @@ dbgln("ll_rect: {}", ll_rect);
 
                 // (E-3)
                 float step_size = powf(2.0f, R_b - exponent) * (1.0f + mantissa / powf(2.0f, 11.0f));
-                if (i == 0) dbgln("step size: {}", step_size);
+                // if (i == 0) dbgln("step size: {}", step_size);
                 value *= step_size; // XXX round and clamp
 
                 // XXX this is incomplete: if bitplanes are missing, need to scale up
             }
 
             if (i == 0) dbgln("x {} y {} value {}", x, y, value);
-
-            // value >>= (M_b - 8);
+            // if (i == 0) dbgln("index {} bounds {} / {}", y * w + h, coefficients.size, coefficients.coefficients.size());
+            coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
 
             // XXX this should happen after IDWT and after component transformation
             // G.1.2 Inverse DC level shifting of tile-components
@@ -1897,12 +1952,13 @@ dbgln("ll_rect: {}", ll_rect);
             if (!context.siz.components[progression_data.component].is_signed())
                 value += 1u << (context.siz.components[progression_data.component].bit_depth() - 1);
 
+            u8 byte_value = (u8)clamp(value, 0.0f, 255.0f);
             //value = (value + 256) / 2;
             // dbgln("x {} y {} value {}", x, y, value);
             Color pixel;
-            pixel.set_red(value);
-            pixel.set_green(value);
-            pixel.set_blue(value);
+            pixel.set_red(byte_value);
+            pixel.set_green(byte_value);
+            pixel.set_blue(byte_value);
             pixel.set_alpha(255);
             bitmap->set_pixel(x, y, pixel);
         }
@@ -1927,8 +1983,8 @@ dbgln("ll_rect: {}", ll_rect);
 static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
-    if (!current_block.is_included)
-        return Error::from_string_literal("Cannot handle non-included codeblocks yet");
+    // if (!current_block.is_included)
+        // return Error::from_string_literal("Cannot handle non-included codeblocks yet");
 
     // Strips of four vertical coefficients at a time.
     // State per coefficient:
@@ -2424,10 +2480,130 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 {
     TRY(parse_codestream_tile_headers(context));
 
+// XXX these are component-tiles; rename
     for (auto& tile : context.tiles)
         TRY(decode_tile(context, tile));
 
-    return {};
+    // Per component:
+    // - combined code-block images at each resolution level, storing all sub-bands
+    // - bits from all layers combined
+   // Maybe do this per-tile and then combine tiles after the fact?
+   // Also, precincts.
+
+    // IDWT
+    for (auto& tile : context.tiles) {
+        for (auto& component : context.decoded_tiles[tile.index].components) {
+            // TODO: Implement IDWT
+            component.idwt_result = component.nLL;
+        }
+    }
+
+    // Figure G.1 – Placement of the DC level shifting with component transformation
+    // XXX does it make sense to set this per-tile? It can be set, but that should probably be ignored?
+    // XXX also, reversible / irreversible depends on wavelet type, which is even per component?!
+    if (context.cod.multiple_component_transformation_type) {
+        for (auto& tile : context.tiles) {
+            auto& decoded_tile = context.decoded_tiles[tile.index];
+            if (decoded_tile.components.size() < 3)
+                return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Multiple component transformation type but fewer than 3 components");
+
+            if (context.cod.parameters.transformation == CodingStyleParameters::Reversible_5_3_Filter) {
+                // G.2 Reversible multiple component transformation (RCT)
+                TODO();
+                // "The three components input into the RCT shall have the same separation on the reference grid and the same bit-depth."
+                // XXX check
+            } else {
+                VERIFY(context.cod.parameters.transformation == CodingStyleParameters::Irreversible_9_7_Filter);
+                // G.3 Irreversible multiple component transformation (ICT)
+                // "The three components input into the ICT shall have the same separation on the reference grid and the same bit-depth."
+                // XXX check
+                auto& c0 = decoded_tile.components[0].idwt_result;
+                auto& c1 = decoded_tile.components[1].idwt_result;
+                auto& c2 = decoded_tile.components[2].idwt_result;
+                int w = c0.size.width();
+                // XXX verify components have same dimensions
+                for (int y = 0; y < c0.size.height(); ++y) {
+                    for (int x = 0; x < w; ++x) {
+
+                        float Y = c0.coefficients[y * w + x];
+                        float Cb = c1.coefficients[y * w + x];
+                        float Cr = c2.coefficients[y * w + x];
+
+                        float R = Y + 1.402f * Cr; // (G-12)
+                        float G = Y - 0.34413f * Cb - 0.7141f * Cr; // (G-13)
+                        float B = Y + 1.772f * Cb; // (G-14)
+
+                        c0.coefficients[y * w + x] = R;
+                        c1.coefficients[y * w + x] = G;
+                        c2.coefficients[y * w + x] = B;
+                    }
+                }
+            }
+        }
+    }
+
+    // DC level shift
+    // G.1.2 Inverse DC level shifting of tile-components
+    // (G-2)
+    // XXX - 1 or not here? -1 looks better and matches spec text in G.1.2 but maybe not Table A.11 in A.5.1 (?)
+    for (auto& tile : context.tiles) {
+        auto& decoded_tile = context.decoded_tiles[tile.index];
+        VERIFY(context.siz.components.size() == decoded_tile.components.size());
+
+        for (auto [component_index, component] : enumerate(decoded_tile.components)) {
+            if (!context.siz.components[component_index].is_signed()) {
+                for (auto& coefficient : component.idwt_result.coefficients)
+                    coefficient += 1u << (context.siz.components[component_index].bit_depth() - 1);
+            }
+        }
+    }
+
+{
+    // XXX more tiles
+    int w = context.decoded_tiles[0].components[0].idwt_result.size.width();
+    int h = context.decoded_tiles[0].components[0].idwt_result.size.height();
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            float value = context.decoded_tiles[0].components[0].idwt_result.coefficients[y * w + x];
+
+            u8 byte_value = round_to<u8>(clamp(value, 0.0f, 255.0f));
+            u8 r = byte_value;
+            u8 g = byte_value;
+            u8 b = byte_value;
+            u8 a = 255;
+
+            // FIXME: look at component configuration
+            if (context.decoded_tiles[0].components.size() == 3) {
+                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
+                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
+            }
+            else if (context.decoded_tiles[0].components.size() == 4) {
+                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
+                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
+                a = round_to<u8>(clamp(context.decoded_tiles[0].components[3].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
+            }
+
+            //value = (value + 256) / 2;
+            // dbgln("x {} y {} value {}", x, y, value);
+            Color pixel;
+            pixel.set_red(r);
+            pixel.set_green(g);
+            pixel.set_blue(b);
+            pixel.set_alpha(a);
+            bitmap->set_pixel(x, y, pixel);
+        }
+    }
+
+    static int n_images = 0;
+    auto name = TRY(String::formatted("colorized-{}.png", n_images++));
+    auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
+    auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
+    auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
+    TRY(file->write_until_depleted(bytes));
+}
+
+    return Error::from_string_literal("cannot decode image yet");
 }
 
 bool JPEG2000ImageDecoderPlugin::sniff(ReadonlyBytes data)
