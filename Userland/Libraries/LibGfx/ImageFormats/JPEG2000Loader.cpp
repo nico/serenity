@@ -1910,7 +1910,7 @@ dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
     auto rect = header.sub_bands[i].subband_rect;
     int w = rect.width();
     int h = rect.height();
-    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             float value = header.sub_bands[i].coefficients[y * w + x];
@@ -2446,7 +2446,7 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
 #if 0
 {
-    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             //auto pixel = bitmap->scanline(y)[x];
@@ -2562,7 +2562,7 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // XXX more tiles
     int w = context.decoded_tiles[0].components[0].idwt_result.size.width();
     int h = context.decoded_tiles[0].components[0].idwt_result.size.height();
-    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::RGBA8888, { w, h }));
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
             float value = context.decoded_tiles[0].components[0].idwt_result.coefficients[y * w + x];
