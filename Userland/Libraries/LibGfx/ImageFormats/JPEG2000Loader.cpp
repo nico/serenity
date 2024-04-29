@@ -2009,7 +2009,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
         if (h_contribution == -1 || (h_contribution == 0 && v_contribution == -1))
             xor_bit = 1;
         bool sign_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context_label]) ^ xor_bit;
-        dbgln("sigprop sign_bit: {} (context {})", sign_bit, context_label);
+        // dbgln("sigprop sign_bit: {} (context {})", sign_bit, context_label);
         return sign_bit;
     };
 
@@ -2031,8 +2031,8 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
 
     // XXX don't start current_bitplane at 0, start at the first bitplane that's in this packet.
     for (int pass = 0, current_bitplane = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
-        dbgln();
-        dbgln("current bitplane: {}", current_bitplane);
+        // dbgln();
+        // dbgln("current bitplane: {}", current_bitplane);
 
         // D0, Is this the first bit-plane for the code-block?
         bool is_first_bitplane_for_code_block = current_bitplane == 0;
@@ -2045,7 +2045,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                 int num_rows = y_end - y;
                 for (int x = 0; x < w; ++x) {
                     for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
-                        dbgln("sigprop x: {}, y: {}", x, y + coefficient_index);
+                        // dbgln("sigprop x: {}, y: {}", x, y + coefficient_index);
 
                         // D1, Is the current coefficient already significant?
                         if (!is_significant(x, y + coefficient_index)) {
@@ -2055,7 +2055,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                                 // C1, Decode significance bit of current coefficient (See D.3.1)
                                 // u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                                 bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                                dbgln("sigprop is_newly_significant: {} (context {})", is_newly_significant, context);
+                                // dbgln("sigprop is_newly_significant: {} (context {})", is_newly_significant, context);
                                 // is_current_coefficient_significant = is_newly_significant;
                                 set_significant(x, y + coefficient_index, is_newly_significant);
                                 if (is_newly_significant) {
@@ -2087,7 +2087,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                 // XXX maybe store a "is any pixel significant in this scanline" flag to skip entire scanlines? measure if that's worth it.
                 for (int x = 0; x < w; ++x) {
                     for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
-                        dbgln("magnitude x: {}, y: {}", x, y + coefficient_index);
+                        // dbgln("magnitude x: {}, y: {}", x, y + coefficient_index);
 
                         // D5, Is the coefficient insignificant?
                         if (!is_significant(x, y + coefficient_index))
@@ -2107,7 +2107,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                                 context = 16;
                             }
                             bool magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                            dbgln("magnitude_bit: {} (context {})", magnitude_bit, context);
+                            // dbgln("magnitude_bit: {} (context {})", magnitude_bit, context);
                             magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << (num_bits - current_bitplane);
                         }
 
@@ -2127,7 +2127,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
             int y_end = min(y + 4, h);
             int num_rows = y_end - y;
             for (int x = 0; x < w; ++x) {
-                dbgln("cleanup x: {}, y: {}", x, y);
+                // dbgln("cleanup x: {}, y: {}", x, y);
 
                 Array<u8, 4> contexts {};
                 for (int i = 0; i < 4; ++i) {
@@ -2140,7 +2140,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                 if (are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context) {
                     // C4, Run-length context label
                     auto not_four_zeros = arithmetic_decoder.get_next_bit(run_length_context);
-                    dbgln("cleanup not_four_zeros: {} (run_length_context)", not_four_zeros);
+                    // dbgln("cleanup not_four_zeros: {} (run_length_context)", not_four_zeros);
 
                     // D11, Are the four contiguous bits all zero?
                     bool are_the_four_contiguous_bits_all_zero = !not_four_zeros;
@@ -2148,7 +2148,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                         // C5
                         u8 first_coefficient_index = arithmetic_decoder.get_next_bit(uniform_context);
                         first_coefficient_index = (first_coefficient_index << 1) | arithmetic_decoder.get_next_bit(uniform_context);
-                        dbgln("cleanup first_coefficient_index: {} (uniform context 2x)", first_coefficient_index);
+                        // dbgln("cleanup first_coefficient_index: {} (uniform context 2x)", first_coefficient_index);
                         u8 coefficient_index = first_coefficient_index;
 
                         bool is_first_coefficient = true;
@@ -2165,7 +2165,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                                 // C1, Decode significance bit of current coefficient (See D.3.1)
                                 u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                                 bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                                dbgln("cleanup is_newly_significant: {} (context: {})", is_newly_significant, context);
+                                // dbgln("cleanup is_newly_significant: {} (context: {})", is_newly_significant, context);
                                 is_current_coefficient_significant = is_newly_significant;
                                 set_significant(x, y + coefficient_index, is_newly_significant);
                                 if (is_newly_significant) {
@@ -2203,7 +2203,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
                             u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                             // dbgln("alt context {}", context);
                             bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                            dbgln("cleanup alt is_newly_significant: {} (context {})", is_newly_significant, context);
+                            // dbgln("cleanup alt is_newly_significant: {} (context {})", is_newly_significant, context);
                             set_significant(x, y + coefficient_index, is_newly_significant);
                             if (is_newly_significant) {
                                 became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
@@ -2235,7 +2235,7 @@ static ErrorOr<void> decode_code_block(QMArithmeticDecoder& arithmetic_decoder, 
             auto magnitude = magnitudes[y * w + x];
             auto value = magnitude * (sign ? -1 : 1);
             //value = (value + 256) / 2;
-            dbgln("x {} y {} value {}", x, y, value);
+            // dbgln("x {} y {} value {}", x, y, value);
             Color pixel;
             pixel.set_red(value);
             pixel.set_green(value);
