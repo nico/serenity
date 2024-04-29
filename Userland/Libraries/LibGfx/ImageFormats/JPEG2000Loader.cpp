@@ -1699,7 +1699,8 @@ static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData&
 int n = 0;
 
     while (!data.is_empty()) {
-        if (n++ > 4) break; // XXX hacks
+        // if (n++ > 4) break; // XXX hacks
+        (void)n;
 
         // XXX make this return combined codeblock data
         // XXX read headers first and do decoding in separate loop
@@ -1734,9 +1735,12 @@ static u8 get_exponent(QuantizationDefault const& quantization_parameters, SubBa
     switch (quantization_parameters.quantization_style) {
     case QuantizationDefault::QuantizationStyle::NoQuantization: {
         auto const& steps = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::ReversibleStepSize>>();
-        if (sub_band == SubBand::HorizontalLowpassVerticalLowpass)
+        if (sub_band == SubBand::HorizontalLowpassVerticalLowpass) {
+            VERIFY(resolution_level == 0);
             return steps[0].exponent;
-        return steps[1 + resolution_level * 3 + (int)sub_band - 1].exponent;
+        }
+        VERIFY(resolution_level > 0);
+        return steps[1 + (resolution_level - 1) * 3 + (int)sub_band - 1].exponent;
     }
     case QuantizationDefault::QuantizationStyle::ScalarDerived:
     case QuantizationDefault::QuantizationStyle::ScalarExpounded: {
@@ -1747,9 +1751,12 @@ static u8 get_exponent(QuantizationDefault const& quantization_parameters, SubBa
             return steps[0].exponent;
         }
 
-        if (sub_band == SubBand::HorizontalLowpassVerticalLowpass)
+        if (sub_band == SubBand::HorizontalLowpassVerticalLowpass) {
+            VERIFY(resolution_level == 0);
             return steps[0].exponent;
-        return steps[1 + resolution_level * 3 + (int)sub_band - 1].exponent;
+        }
+        VERIFY(resolution_level > 0);
+        return steps[1 + (resolution_level - 1) * 3 + (int)sub_band - 1].exponent;
     }
     }
     VERIFY_NOT_REACHED();
@@ -1824,10 +1831,6 @@ dbgln("ll_rect: {}", ll_rect);
     if (header.is_empty)
         return stream.offset();
 
-// XXX hack
-if (r > 2) return stream.offset();
-
-
     // FIXME: Read actual packet data too
     // That's Annex D.
     // D.3 Decoding passes over the bit-planes
@@ -1874,12 +1877,13 @@ if (r > 2) return stream.offset();
 
         for (auto& current_block : header.sub_bands[i].code_blocks) {
             // FIXME: Are codeblocks on byte boundaries? => Looks like it. Find spec ref.
-            // XXX Make read_packed_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
+            // XXX Make read_packet_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
             auto packet_data = data.slice(offset, current_block.length_of_data);
             offset += current_block.length_of_data;
 
-            auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
+            if (r > 2) continue; // XXX hack
 
+            auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
             TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i]));
         }
 
@@ -1930,7 +1934,10 @@ dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
                     // (E-5)
                     mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[0].mantissa;
                 } else {
-                    mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[3 * r + (int)sub_band].mantissa;
+                    if (r == 0)
+                        mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[0].mantissa;
+                    else
+                        mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[3 * (r - 1) + (int)sub_band].mantissa;
                 }
 
                 // (E-3)
@@ -1941,7 +1948,7 @@ dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
                 // XXX this is incomplete: if bitplanes are missing, need to scale up
             }
 
-            if (i == 0) dbgln("x {} y {} value {}", x, y, value);
+            // if (i == 0) dbgln("x {} y {} value {}", x, y, value);
             // if (i == 0) dbgln("index {} bounds {} / {}", y * w + h, coefficients.size, coefficients.coefficients.size());
             coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
 
@@ -1985,6 +1992,8 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
         // return Error::from_string_literal("Cannot handle non-included codeblocks yet");
+    if (!current_block.is_included)
+        return {};
 
     // Strips of four vertical coefficients at a time.
     // State per coefficient:
