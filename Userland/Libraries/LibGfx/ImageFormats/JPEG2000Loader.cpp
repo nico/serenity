@@ -1765,12 +1765,12 @@ static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData&
 int n = 0;
 
     while (!data.is_empty()) {
-        // if (n++ > 4) break; // XXX hacks
+        if (n++ > 15) break; // XXX hacks
         (void)n;
 
         // XXX make this return combined codeblock data
         // XXX read headers first and do decoding in separate loop
-        auto length =  TRY(decode_packet(context, tile, data));
+        auto length = TRY(decode_packet(context, tile, data));
         data = data.slice(length);
     }
 
@@ -1894,8 +1894,10 @@ dbgln("ll_rect: {}", ll_rect);
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
     auto header = TRY(read_packet_header(context, bitstream, packet_context, tile, coding_parameters, progression_data));
-    if (header.is_empty)
+    if (header.is_empty) {
+dbgln("empty packet per header; skipping");
         return stream.offset();
+    }
 
     // FIXME: Read actual packet data too
     // That's Annex D.
@@ -1942,13 +1944,14 @@ dbgln("ll_rect: {}", ll_rect);
         header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
 
         for (auto& current_block : header.sub_bands[i].code_blocks) {
+            auto start_offset = offset;
             // FIXME: Are codeblocks on byte boundaries? => Looks like it. Find spec ref.
             // XXX Make read_packet_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
-            auto packet_data = data.slice(offset, current_block.length_of_data);
             offset += current_block.length_of_data;
 
             if (r > 2) continue; // XXX hack
 
+            auto packet_data = data.slice(start_offset, current_block.length_of_data);
             auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
             TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i]));
         }
@@ -2037,8 +2040,7 @@ dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
         }
     }
 
-    static int n_images = 0;
-    auto name = TRY(String::formatted("image-{}.png", n_images++));
+    auto name = TRY(String::formatted("image-layer-{}-precinct-{}-component-{}-level-{}-subband-{}.png", progression_data.layer, progression_data.precinct, progression_data.component, progression_data.resolution_level, (int)sub_band));
     auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
     auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
     auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
@@ -2509,9 +2511,10 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
         }
     }
 
+    // XXX bitplane to coefficient conversion should be a dedicated step somewhere else.
+    // (...hmm, but this only outputs the bitplanes really, so it's fine? maybe?)
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            //auto pixel = bitmap->scanline(y)[x];
             auto sign = get_sign(x, y);
             auto magnitude = magnitudes[y * w + x];
             auto value = magnitude * (sign ? -1 : 1);
