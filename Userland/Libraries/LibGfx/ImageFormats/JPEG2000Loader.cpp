@@ -2806,7 +2806,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     }
 
     static int n_images = 0;
-    auto name = TRY(String::formatted("colorized-{}.png", n_images++));
+    auto name = TRY(String::formatted("image-colorized-{}.png", n_images++));
     auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
     auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
     auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
