@@ -2492,15 +2492,13 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     return {};
 }
 
- [[maybe_unused]] static ErrorOr<void> save_pyramid(JPEG2000LoadingContext const& context, DecodedTile const& decoded_tile)
+ [[maybe_unused]] static ErrorOr<void> save_pyramid(JPEG2000LoadingContext const& context, DecodedCoefficients const& nLL, DecodedComponent const& t0)
 {
-    int w = decoded_tile.components[0].size.width();
-    int h = decoded_tile.components[0].size.height();
+    int w = t0.size.width();
+    int h = t0.size.height();
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
 
-    auto& t0 = decoded_tile.components[0];
-
-    auto ll_rect = IntRect { {}, t0.nLL.size };
+    auto ll_rect = IntRect { {}, nLL.size };
 
     auto store = [&context](DecodedCoefficients const& coefficients, IntPoint const& location, RefPtr<Gfx::Bitmap> const& bitmap) {
         for (int y = 0; y < coefficients.size.height(); ++y) {
@@ -2516,10 +2514,13 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
         }
     };
 
-    store(t0.nLL, ll_rect.location(), bitmap);
+    store(nLL, ll_rect.location(), bitmap);
 
     for (size_t i = 0; i < t0.sub_bands.size(); ++i) {
         auto& sub_band = t0.sub_bands[i];
+
+        if (sub_band[0].size.height() < ll_rect.height())
+            continue;
 
         VERIFY(sub_band[0].size.height() == ll_rect.height());
         VERIFY(sub_band[1].size.width() == ll_rect.width());
@@ -2559,7 +2560,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Also, precincts.
 
     // XXX more tiles
-    TRY(save_pyramid(context, context.decoded_tiles[0]));
+    TRY(save_pyramid(context, context.decoded_tiles[0].components[0].nLL, context.decoded_tiles[0].components[0]));
 
     // IDWT
     for (auto& tile : context.tiles) {
