@@ -1484,7 +1484,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
     Function<ErrorOr<bool>()> read_bit = [&bitstream, &last_full_byte]() -> ErrorOr<bool> {
         if (bitstream.is_aligned_to_byte_boundary()) {
             if (last_full_byte == 0xFF) {
-dbgln("reading stuff bit");
+// dbgln("reading stuff bit");
                bool stuff_bit = TRY(bitstream.read_bit());
                if (stuff_bit)
                    return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Invalid bit-stuffing");
