@@ -1575,7 +1575,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
                 //  current code-block is first included."
                 is_included = TRY(code_block_inclusion_tree.read_value(code_block_x, code_block_y, read_bit, current_layer_index + 1)) <= current_layer_index;
             }
-            dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
+            // dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
             current_block.is_included = is_included;
 
             if (!is_included)
@@ -1592,7 +1592,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
             bool is_included_for_the_first_time = is_included && !current_block.has_been_included_in_previous_packet;
             if (is_included_for_the_first_time) {
                 u32 p = TRY(p_tree.read_value(code_block_x, code_block_y, read_bit));
-                dbgln("zero bit-plane information: {}", p);
+                // dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
                 current_block.has_been_included_in_previous_packet = true;
                 current_block.sub_band = sub_band;
@@ -1647,7 +1647,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
                 k++;
             current_block.Lblock += k;
             u32 bits = current_block.Lblock + (u32)floor(log2(number_of_coding_passes));
-            dbgln("bits for length of codeword segment: {} bits", bits);
+            // dbgln("bits for length of codeword segment: {} bits", bits);
             if (bits > 32)
                 return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Too many bits for length of codeword segment");
             u32 length = 0;
@@ -1655,7 +1655,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
                 bool bit = TRY(read_bit());
                 length = (length << 1) | bit;
             }
-            dbgln("length of codeword segment: {} bytes", length);
+            // dbgln("length of codeword segment: {} bytes", length);
             current_block.length_of_data = length;
 
             // B.10.7.2 Multiple codeword segments
@@ -1702,7 +1702,7 @@ static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData&
 int n = 0;
 
     while (!data.is_empty()) {
-        if (n++ > 15) break; // XXX hacks
+        // if (n++ > 15) break; // XXX hacks
         (void)n;
 
         // XXX make this return combined codeblock data
@@ -1886,7 +1886,7 @@ dbgln("empty packet per header; skipping");
             // XXX Make read_packet_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
             offset += current_block.length_of_data;
 
-            if (r > 2) continue; // XXX hack
+            // if (r > 2) continue; // XXX hack
 
             auto packet_data = data.slice(start_offset, current_block.length_of_data);
             auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
@@ -2249,7 +2249,7 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
     // int num_bits = (current_block.number_of_coding_passes - 1) / 3 + 1; // /shruggie
     int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
-    dbgln("num_bits: {} (p {})", num_bits, current_block.p);
+    // dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
     // XXX don't start current_bitplane at 0, start at the first bitplane that's in this packet.
     for (int pass = 0, current_bitplane = current_block.p; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
