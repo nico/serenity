@@ -1792,7 +1792,7 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
 
     auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component_index, r, coding_parameters.number_of_decomposition_levels);
 
-dbgln("ll_rect: {}", ll_rect);
+// dbgln("ll_rect: {}", ll_rect);
 
     // B.6
     // (B-16)
@@ -1917,12 +1917,12 @@ dbgln("empty packet per header; skipping");
             }
         }
 
-dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
+// dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
         DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
         if (coefficients.coefficients.is_empty()) {
             coefficients.size = header.sub_bands[i].subband_rect.size();
 
-dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
+// dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
             coefficients.coefficients.resize(coefficients.size.width() * coefficients.size.height());
         }
 
