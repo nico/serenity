@@ -2548,6 +2548,122 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     return {};
 }
 
+// F.3 Inverse discrete wavelet transformation
+
+static ErrorOr<DecodedCoefficients> _2D_SR(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
+static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
+static ErrorOr<DecodedCoefficients> HOR_SR(DecodedCoefficients a);
+static ErrorOr<DecodedCoefficients> VER_SR(DecodedCoefficients a);
+
+// F.3.1 The IDWT procedure
+[[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(DecodedComponent const& component)
+{
+    // Figure F.3 – The IDWT procedure
+    // XXX make look more like spec
+    auto ll = component.nLL;
+
+    for (auto const& sub_band : component.sub_bands) {
+        ll = TRY(_2D_SR(move(ll), sub_band[0], sub_band[1], sub_band[2]));
+        TRY(save_pyramid(ll, component));
+    }
+
+    return ll;
+}
+
+// F.3.2 The 2D_SR procedure
+static ErrorOr<DecodedCoefficients> _2D_SR(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
+{
+    // Figure F.6 – The 2D_SR procedure
+    auto a = TRY(_2D_INTERLEAVE(move(ll), hl, lh, hh));
+    a = TRY(HOR_SR(move(a)));
+    return VER_SR(move(a));
+}
+
+// F.3.3 The 2D_INTERLEAVE procedure
+static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
+{
+    VERIFY(ll.size.height() == hl.size.height());
+    VERIFY(ll.size.width() == lh.size.width());
+    VERIFY(hl.size.width() == hh.size.width());
+    VERIFY(lh.size.height() == hh.size.height());
+
+    // Figure F.8 – The 2D_INTERLEAVE procedure
+    // XXX why are these passed in in the spec
+    int u0 = 0;
+    int v0 = 0;
+    int u1 = ll.size.width() + hl.size.width();
+    int v1 = ll.size.height() + lh.size.height();
+
+    DecodedCoefficients a;
+
+    TRY(a.coefficients.try_resize(u1 * v1));
+    a.size = { u1, v1 };
+
+    {
+        auto const& b = ll;
+        for (int v_b = ceil_div(v0, 2); v_b < ceil_div(v1, 2); ++v_b) {
+            for (int u_b = ceil_div(u0, 2); u_b < ceil_div(u1, 2); ++u_b) {
+                a.coefficients[2 * v_b * u1 + 2 * u_b] = b.coefficients[v_b * b.size.width() + u_b];
+            }
+        }
+    }
+
+    {
+        auto const& b = hl;
+        for (int v_b = ceil_div(v0, 2); v_b < ceil_div(v1, 2); ++v_b) {
+            for (int u_b = floor_div(u0, 2); u_b < floor_div(u1, 2); ++u_b) {
+                a.coefficients[2 * v_b * u1 + 2 * u_b + 1] = b.coefficients[v_b * b.size.width() + u_b];
+            }
+        }
+    }
+
+    {
+        auto const& b = lh;
+        for (int v_b = floor_div(v0, 2); v_b < floor_div(v1, 2); ++v_b) {
+            for (int u_b = ceil_div(u0, 2); u_b < ceil_div(u1, 2); ++u_b) {
+                // dbgln("v_b: {} u1: {} u_b: {}", v_b, u1, u_b);
+                a.coefficients[(2 * v_b + 1) * u1 + 2 * u_b] = b.coefficients[v_b * b.size.width() + u_b];
+            }
+        }
+    }
+
+    {
+        auto const& b = hh;
+        for (int v_b = floor_div(v0, 2); v_b < floor_div(v1, 2); ++v_b) {
+            for (int u_b = floor_div(u0, 2); u_b < floor_div(u1, 2); ++u_b) {
+                a.coefficients[(2 * v_b + 1) * u1 + 2 * u_b + 1] = b.coefficients[v_b * b.size.width() + u_b];
+            }
+        }
+    }
+
+    return a;
+}
+
+// F.3.4 The HOR_SR procedure
+static ErrorOr<DecodedCoefficients> HOR_SR(DecodedCoefficients a)
+{
+    // Figure F.10 – The HOR_SR procedure
+    return a;
+}
+
+// F.3.5 The VER_SR procedure
+static ErrorOr<DecodedCoefficients> VER_SR(DecodedCoefficients a)
+{
+    // Figure F.12 – The VER_SR procedure
+    return a;
+}
+
+// F.3.6 The 1D_SR procedure
+// Figure F.14 – The 1D_SR procedure
+
+// F.3.7 The 1D_EXTR procedure
+
+// F.3.8 The 1D_FILTR procedure
+
+// F.3.8.1 The 1D_FILTR_5-3R procedure
+
+// F.3.8.2 The 1D_FILTR_9-7I procedure
+
 static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 {
     TRY(parse_codestream_tile_headers(context));
@@ -2569,7 +2685,8 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     for (auto& tile : context.tiles) {
         for (auto& component : context.decoded_tiles[tile.index].components) {
             // TODO: Implement IDWT
-            component.idwt_result = component.nLL;
+            // component.idwt_result = component.nLL;
+            component.idwt_result = TRY(IDWT(component));
         }
     }
 
