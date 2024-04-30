@@ -2583,7 +2583,7 @@ static void _1D_FILTR(CodingStyleParameters::Transformation transformation, Deco
 
     for (auto const& sub_band : component.sub_bands) {
         ll = TRY(_2D_SR(transformation, move(ll), sub_band[0], sub_band[1], sub_band[2]));
-        TRY(save_pyramid(ll, component));
+        // TRY(save_pyramid(ll, component));
     }
 
     return ll;
@@ -2828,7 +2828,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Also, precincts.
 
     // XXX more tiles
-    TRY(save_pyramid(context.decoded_tiles[0].components[0].nLL, context.decoded_tiles[0].components[0]));
+    // TRY(save_pyramid(context.decoded_tiles[0].components[0].nLL, context.decoded_tiles[0].components[0]));
 
     // IDWT
     for (auto& tile : context.tiles) {
