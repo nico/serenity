@@ -2491,7 +2491,60 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     return {};
 }
 
-ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
+ [[maybe_unused]] static ErrorOr<void> save_pyramid(JPEG2000LoadingContext const& context, TileData const& tile)
+{
+    int w = tile.rect.width();
+    int h = tile.rect.height();
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
+
+    auto& decoded_tile = context.decoded_tiles[tile.index];
+    auto& t0 = decoded_tile.components[0];
+
+    auto ll_rect = IntRect { {}, t0.nLL.size };
+
+    auto store = [&context](DecodedCoefficients const& coefficients, IntPoint const& location, RefPtr<Gfx::Bitmap> const& bitmap) {
+        for (int y = 0; y < coefficients.size.height(); ++y) {
+            for (int x = 0; x < coefficients.size.width(); ++x) {
+                float value = coefficients.coefficients[y * coefficients.size.width() + x];
+
+                if (!context.siz.components[0].is_signed())
+                    value += 1u << (context.siz.components[0].bit_depth() - 1);
+
+                u8 byte_value = (u8)clamp(value, 0.0f, 255.0f);
+                bitmap->set_pixel(x + location.x(), y + location.y(), Color(byte_value, byte_value, byte_value));
+            }
+        }
+    };
+
+    store(t0.nLL, ll_rect.location(), bitmap);
+
+    for (size_t i = 0; i < t0.sub_bands.size(); ++i) {
+        auto& sub_band = t0.sub_bands[i];
+
+        VERIFY(sub_band[0].size.height() == ll_rect.height());
+        VERIFY(sub_band[1].size.width() == ll_rect.width());
+        VERIFY(sub_band[2].size.width() == sub_band[0].size.width());
+        VERIFY(sub_band[2].size.height() == sub_band[1].size.height());
+
+        store(sub_band[0], { ll_rect.right(), ll_rect.top() }, bitmap);
+        store(sub_band[1], { ll_rect.left(), ll_rect.bottom() }, bitmap);
+        store(sub_band[2], { ll_rect.right(), ll_rect.bottom() }, bitmap);
+
+        ll_rect.set_right(ll_rect.right() + sub_band[0].size.width());
+        ll_rect.set_bottom(ll_rect.bottom() + sub_band[1].size.height());
+    }
+
+    static int n_images = 0;
+    auto name = TRY(String::formatted("image-pyramid-{}.png", n_images++));
+    auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
+    auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
+    auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
+    TRY(file->write_until_depleted(bytes));
+
+    return {};
+}
+
+static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 {
     TRY(parse_codestream_tile_headers(context));
 
@@ -2502,8 +2555,11 @@ ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Per component:
     // - combined code-block images at each resolution level, storing all sub-bands
     // - bits from all layers combined
-   // Maybe do this per-tile and then combine tiles after the fact?
-   // Also, precincts.
+    // Maybe do this per-tile and then combine tiles after the fact?
+    // Also, precincts.
+
+    // XXX more tiles
+    TRY(save_pyramid(context, context.tiles[0]));
 
     // IDWT
     for (auto& tile : context.tiles) {
