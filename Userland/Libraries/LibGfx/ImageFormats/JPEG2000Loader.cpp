@@ -2561,9 +2561,9 @@ static ErrorOr<DecodedCoefficients> _2D_SR(CodingStyleParameters::Transformation
 static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
 static ErrorOr<DecodedCoefficients> HOR_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a);
 static ErrorOr<DecodedCoefficients> VER_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a);
-static void _1D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta);
-static void _1D_EXTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta);
-static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta);
+static void _1D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta);
+static void _1D_EXTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta);
+static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta);
 
 // F.3.1 The IDWT procedure
 [[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(CodingStyleParameters::Transformation transformation, DecodedComponent const& component)
@@ -2692,7 +2692,7 @@ static ErrorOr<DecodedCoefficients> VER_SR(CodingStyleParameters::Transformation
 
 // F.3.6 The 1D_SR procedure
 // Figure F.14 – The 1D_SR procedure
-static void _1D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta)
+static void _1D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta)
 {
     // "For signals of length one (i.e., i0 = il – 1), the 1D_SR procedure sets the value of X(i0) to Y(i0) if i0 is an even integer, and X(i0) to Y(i0)/2 if i0 is an odd integer."
     if (lower == higher - 1) {
@@ -2710,7 +2710,7 @@ static void _1D_SR(CodingStyleParameters::Transformation transformation, Decoded
 
 
 // F.3.7 The 1D_EXTR procedure
-static void _1D_EXTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta)
+static void _1D_EXTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta)
 {
     // Table F.2 – Extension to the left
     int i_left;
@@ -2733,7 +2733,10 @@ static void _1D_EXTR(CodingStyleParameters::Transformation transformation, Decod
     // (F-4)
     // PSE is short for "Period Symmetric Extension".
     auto PSE = [](int i, int i0, int i1) {
-        return i0 + min((i - i0) % (2 * (i1 - i0 - 1)), 2 * (i1 - i0 - 1) - (i - i0) % (2 *(i1 - i0 - 1)));
+        auto mod = [](int a, int b) {
+            return (a % b + b) % b;
+        };
+        return i0 + min(mod(i - i0, 2 * (i1 - i0 - 1)), 2 * (i1 - i0 - 1) - mod(i - i0, 2 *(i1 - i0 - 1)));
     };
 
     for (int l = lower - i_left, i = 0; l < higher + i_right; ++l, ++i) {
@@ -2743,7 +2746,7 @@ static void _1D_EXTR(CodingStyleParameters::Transformation transformation, Decod
 }
 
 // F.3.8 The 1D_FILTR procedure
-static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta)
+static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta)
 {
     int i0 = lower;
     int i1 = higher;
