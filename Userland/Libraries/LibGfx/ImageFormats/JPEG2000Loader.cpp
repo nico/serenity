@@ -816,6 +816,8 @@ struct DecodedComponent {
     DecodedCoefficients nLL;
     Vector<Array<DecodedCoefficients, 3>> sub_bands;
 
+    ImageAndTileSize::ComponentInformation component_info;
+
     DecodedCoefficients idwt_result;
 };
 
@@ -1906,6 +1908,7 @@ dbgln("empty packet per header; skipping");
             dbgln("making {} sub-bands", num_decomposition_levels);
             component.sub_bands.resize(num_decomposition_levels);
             component.size = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index).size();
+            component.component_info = context.siz.components[component_index];
         }
     }
 
@@ -2492,7 +2495,7 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     return {};
 }
 
- [[maybe_unused]] static ErrorOr<void> save_pyramid(JPEG2000LoadingContext const& context, DecodedCoefficients const& nLL, DecodedComponent const& t0)
+ [[maybe_unused]] static ErrorOr<void> save_pyramid(DecodedCoefficients const& nLL, DecodedComponent const& t0)
 {
     int w = t0.size.width();
     int h = t0.size.height();
@@ -2500,13 +2503,13 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
     auto ll_rect = IntRect { {}, nLL.size };
 
-    auto store = [&context](DecodedCoefficients const& coefficients, IntPoint const& location, RefPtr<Gfx::Bitmap> const& bitmap) {
+    auto store = [&t0](DecodedCoefficients const& coefficients, IntPoint const& location, RefPtr<Gfx::Bitmap> const& bitmap) {
         for (int y = 0; y < coefficients.size.height(); ++y) {
             for (int x = 0; x < coefficients.size.width(); ++x) {
                 float value = coefficients.coefficients[y * coefficients.size.width() + x];
 
-                if (!context.siz.components[0].is_signed())
-                    value += 1u << (context.siz.components[0].bit_depth() - 1);
+                if (!t0.component_info.is_signed())
+                    value += 1u << (t0.component_info.bit_depth() - 1);
 
                 u8 byte_value = (u8)clamp(value, 0.0f, 255.0f);
                 bitmap->set_pixel(x + location.x(), y + location.y(), Color(byte_value, byte_value, byte_value));
@@ -2560,7 +2563,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Also, precincts.
 
     // XXX more tiles
-    TRY(save_pyramid(context, context.decoded_tiles[0].components[0].nLL, context.decoded_tiles[0].components[0]));
+    TRY(save_pyramid(context.decoded_tiles[0].components[0].nLL, context.decoded_tiles[0].components[0]));
 
     // IDWT
     for (auto& tile : context.tiles) {
