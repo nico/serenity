@@ -1578,6 +1578,9 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
             dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
             current_block.is_included = is_included;
 
+            if (!is_included)
+                continue;
+
             // B.10.5 Zero bit-plane information
             // "If a code-block is included for the first time,
             //  [...] the number of actual bit-planes for which coding passes are generated is Mb – P
