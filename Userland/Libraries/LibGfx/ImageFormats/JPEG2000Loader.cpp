@@ -1902,72 +1902,79 @@ dbgln("empty packet per header; skipping");
             TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i]));
         }
 
-#if 1
-{
-    // context.decoded_tiles.resize(max(context.tiles.size(), (size_t)tile.index));
-    auto& decoded_tile = context.decoded_tiles[tile.index];
-    if (decoded_tile.components.is_empty()) {
-        dbgln("making {} componennts", context.siz.components.size());
-        decoded_tile.components.resize(context.siz.components.size());
-        for (auto [component_index, component] : enumerate(decoded_tile.components)) {
-            int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
-            coding_style_parameters_for_component(context, tile, component_index);
-            dbgln("making {} sub-bands", num_decomposition_levels);
-            component.sub_bands.resize(num_decomposition_levels);
-            component.size = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index).size();
-            component.component_info = context.siz.components[component_index];
+        // context.decoded_tiles.resize(max(context.tiles.size(), (size_t)tile.index));
+        auto& decoded_tile = context.decoded_tiles[tile.index];
+        if (decoded_tile.components.is_empty()) {
+            dbgln("making {} componennts", context.siz.components.size());
+            decoded_tile.components.resize(context.siz.components.size());
+            for (auto [component_index, component] : enumerate(decoded_tile.components)) {
+                int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
+                coding_style_parameters_for_component(context, tile, component_index);
+                dbgln("making {} sub-bands", num_decomposition_levels);
+                component.sub_bands.resize(num_decomposition_levels);
+                component.size = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index).size();
+                component.component_info = context.siz.components[component_index];
+            }
         }
-    }
 
-// dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
-    DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
-    if (coefficients.coefficients.is_empty()) {
-        coefficients.size = header.sub_bands[i].subband_rect.size();
+dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
+        DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
+        if (coefficients.coefficients.is_empty()) {
+            coefficients.size = header.sub_bands[i].subband_rect.size();
 
-// dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
-        coefficients.coefficients.resize(coefficients.size.width() * coefficients.size.height());
-    }
+dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
+            coefficients.coefficients.resize(coefficients.size.width() * coefficients.size.height());
+        }
 
-    auto rect = header.sub_bands[i].subband_rect;
-    int w = rect.width();
-    int h = rect.height();
+        auto rect = header.sub_bands[i].subband_rect;
+        int w = rect.width();
+        int h = rect.height();
+
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float value = header.sub_bands[i].coefficients[y * w + x];
+
+                // E.1 Inverse quantization procedure
+                // We coefficients stores qbar_b.
+                if (quantization_parameters.quantization_style != QuantizationDefault::QuantizationStyle::NoQuantization) {
+                    // E.1.1 Irreversible transformation
+                    auto R_I = context.siz.components[progression_data.component].bit_depth();
+
+                    // Table E.1 – Sub-band gains
+                    auto log_2_gain_b = sub_band == SubBand::HorizontalLowpassVerticalLowpass ? 0 : (sub_band == SubBand::HorizontalHighpassVerticalLowpass || sub_band == SubBand::HorizontalLowpassVerticalHighpass ? 1 : 2);
+                    auto R_b = R_I + log_2_gain_b;
+
+                    u16 mantissa;
+                    if (quantization_parameters.quantization_style == QuantizationDefault::QuantizationStyle::ScalarDerived) {
+                        // (E-5)
+                        mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[0].mantissa;
+                    } else {
+                        if (r == 0)
+                            mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[0].mantissa;
+                        else
+                            mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[3 * (r - 1) + (int)sub_band].mantissa;
+                    }
+
+                    // (E-3)
+                    float step_size = powf(2.0f, R_b - exponent) * (1.0f + mantissa / powf(2.0f, 11.0f));
+                    // if (i == 0) dbgln("step size: {}", step_size);
+                    value *= step_size; // XXX round and clamp
+
+                    // XXX this is incomplete: if bitplanes are missing, need to scale up
+                }
+
+                // if (i == 0) dbgln("x {} y {} value {}", x, y, value);
+                // if (i == 0) dbgln("index {} bounds {} / {}", y * w + h, coefficients.size, coefficients.coefficients.size());
+                coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
+            }
+        }
+
+#if 0
+{
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            float value = header.sub_bands[i].coefficients[y * w + x];
-
-            // E.1 Inverse quantization procedure
-            // We coefficients stores qbar_b.
-            if (quantization_parameters.quantization_style != QuantizationDefault::QuantizationStyle::NoQuantization) {
-                // E.1.1 Irreversible transformation
-                auto R_I = context.siz.components[progression_data.component].bit_depth();
-
-                // Table E.1 – Sub-band gains
-                auto log_2_gain_b = sub_band == SubBand::HorizontalLowpassVerticalLowpass ? 0 : (sub_band == SubBand::HorizontalHighpassVerticalLowpass || sub_band == SubBand::HorizontalLowpassVerticalHighpass ? 1 : 2);
-                auto R_b = R_I + log_2_gain_b;
-
-                u16 mantissa;
-                if (quantization_parameters.quantization_style == QuantizationDefault::QuantizationStyle::ScalarDerived) {
-                    // (E-5)
-                    mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[0].mantissa;
-                } else {
-                    if (r == 0)
-                        mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[0].mantissa;
-                    else
-                        mantissa = quantization_parameters.step_sizes.get<Vector<QuantizationDefault::IrreversibleStepSize>>()[3 * (r - 1) + (int)sub_band].mantissa;
-                }
-
-                // (E-3)
-                float step_size = powf(2.0f, R_b - exponent) * (1.0f + mantissa / powf(2.0f, 11.0f));
-                // if (i == 0) dbgln("step size: {}", step_size);
-                value *= step_size; // XXX round and clamp
-
-                // XXX this is incomplete: if bitplanes are missing, need to scale up
-            }
-
-            // if (i == 0) dbgln("x {} y {} value {}", x, y, value);
-            // if (i == 0) dbgln("index {} bounds {} / {}", y * w + h, coefficients.size, coefficients.coefficients.size());
-            coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
+            float value = coefficients.coefficients[y * w + x];
 
             // XXX this should happen after IDWT and after component transformation
             // G.1.2 Inverse DC level shifting of tile-components
