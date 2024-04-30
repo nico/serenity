@@ -1525,7 +1525,7 @@ dbgln("reading stuff bit");
     auto sub_bands = r == 0 ? level_0_sub_bands.span() : other_sub_bands.span();
 
     for (auto [sub_band_index, sub_band] : enumerate(sub_bands)) {
-        dbgln("reading header info for sub-band {}", (int)sub_band);
+        // dbgln("reading header info for sub-band {}", (int)sub_band);
 
         // B.9: "Only those code-blocks that contain samples from the relevant sub-band, confined to the precinct, have any representation in the packet."
         // Could loop over all codeblocks in precinct and skip those that don't intersect with the subband rect.
@@ -1540,9 +1540,9 @@ dbgln("reading stuff bit");
 
         auto rect_covered_by_codeblocks = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
 
-dbgln("n_b: {}", n_b);
-dbgln("sub-band rect: {}", rect);
-dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
+// dbgln("n_b: {}", n_b);
+// dbgln("sub-band rect: {}", rect);
+// dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
 
         auto codeblock_x_count = rect_covered_by_codeblocks.width() / (1 << packet_context.xcb_prime);
         auto codeblock_y_count = rect_covered_by_codeblocks.height() / (1 << packet_context.ycb_prime);
@@ -1635,7 +1635,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
                 bits = (bits << 1) | TRY(read_bit());
                 return 37 + bits;
             }());
-            dbgln("number of coding passes: {} ({} bitplanes)", number_of_coding_passes, (number_of_coding_passes - 1) / 3 + 1);
+            // dbgln("number of coding passes: {} ({} bitplanes)", number_of_coding_passes, (number_of_coding_passes - 1) / 3 + 1);
             current_block.number_of_coding_passes = number_of_coding_passes;
 
             // B.10.7 Length of the compressed image data from a given code-block
@@ -1917,12 +1917,12 @@ dbgln("empty packet per header; skipping");
         }
     }
 
-dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
+// dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
     DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
     if (coefficients.coefficients.is_empty()) {
         coefficients.size = header.sub_bands[i].subband_rect.size();
 
-dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
+// dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
         coefficients.coefficients.resize(coefficients.size.width() * coefficients.size.height());
     }
 
@@ -2026,7 +2026,7 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     //  corresponds to the first four rows of sub-band coefficients in the code-block or to as many such rows as are present."
     int w = current_block.rect.width();
     int h = current_block.rect.height();
-    dbgln("code-block rect: {}, sub-band {}", current_block.rect, (int)current_block.sub_band);
+    // dbgln("code-block rect: {}, sub-band {}", current_block.rect, (int)current_block.sub_band);
 
     int num_strips = ceil_div(h, 4);
 
