@@ -1905,6 +1905,7 @@ dbgln("empty packet per header; skipping");
             coding_style_parameters_for_component(context, tile, component_index);
             dbgln("making {} sub-bands", num_decomposition_levels);
             component.sub_bands.resize(num_decomposition_levels);
+            component.size = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index).size();
         }
     }
 
@@ -2491,13 +2492,12 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     return {};
 }
 
- [[maybe_unused]] static ErrorOr<void> save_pyramid(JPEG2000LoadingContext const& context, TileData const& tile)
+ [[maybe_unused]] static ErrorOr<void> save_pyramid(JPEG2000LoadingContext const& context, DecodedTile const& decoded_tile)
 {
-    int w = tile.rect.width();
-    int h = tile.rect.height();
+    int w = decoded_tile.components[0].size.width();
+    int h = decoded_tile.components[0].size.height();
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
 
-    auto& decoded_tile = context.decoded_tiles[tile.index];
     auto& t0 = decoded_tile.components[0];
 
     auto ll_rect = IntRect { {}, t0.nLL.size };
@@ -2559,7 +2559,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Also, precincts.
 
     // XXX more tiles
-    TRY(save_pyramid(context, context.tiles[0]));
+    TRY(save_pyramid(context, context.decoded_tiles[0]));
 
     // IDWT
     for (auto& tile : context.tiles) {
