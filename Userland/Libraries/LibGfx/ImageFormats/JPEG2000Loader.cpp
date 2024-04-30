@@ -855,6 +855,8 @@ struct JPEG2000LoadingContext {
     Vector<TileData> tiles;
 
     Vector<DecodedTile> decoded_tiles;
+
+    RefPtr<Gfx::Bitmap> bitmap;
 };
 
 static CodingStyleParameters const& coding_style_parameters_for_component(JPEG2000LoadingContext const& context, TileData const& tile, size_t component_index)
@@ -2909,7 +2911,6 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
         }
     }
 
-{
     // XXX more tiles
     int w = context.decoded_tiles[0].components[0].idwt_result.size.width();
     int h = context.decoded_tiles[0].components[0].idwt_result.size.height();
@@ -2952,9 +2953,10 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
     auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
     TRY(file->write_until_depleted(bytes));
-}
 
-    return Error::from_string_literal("cannot decode image yet");
+    context.bitmap = move(bitmap);
+
+    return {};
 }
 
 bool JPEG2000ImageDecoderPlugin::sniff(ReadonlyBytes data)
@@ -2994,7 +2996,7 @@ ErrorOr<ImageFrameDescriptor> JPEG2000ImageDecoderPlugin::frame(size_t index, Op
         m_context->state = JPEG2000LoadingContext::State::ImageDecoded;
     }
 
-    return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Draw the rest of the owl");
+    return ImageFrameDescriptor { m_context->bitmap, 0 };
 }
 
 ErrorOr<Optional<ReadonlyBytes>> JPEG2000ImageDecoderPlugin::icc_data()
