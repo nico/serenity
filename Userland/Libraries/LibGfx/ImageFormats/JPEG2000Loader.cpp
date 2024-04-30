@@ -2908,6 +2908,13 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
                 for (auto& coefficient : component.idwt_result.coefficients)
                     coefficient += 1u << (context.siz.components[component_index].bit_depth() - 1);
             }
+
+            // Convert to 8bpp.
+            // XXX: Don't do this for files with palette.
+            if (context.siz.components[component_index].bit_depth() != 8) {
+                for (auto& coefficient : component.idwt_result.coefficients)
+                    coefficient = 255 * coefficient / (1u << context.siz.components[component_index].bit_depth());
+            }
         }
     }
 
