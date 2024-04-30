@@ -2769,7 +2769,7 @@ static void _1D_FILTR(CodingStyleParameters::Transformation transformation, Deco
 
         // (F-6)
         for (int n = floor_div(i0, 2); n < floor_div(i1, 2); ++n)
-            x(2 * n + 1) = y_ext(2 * n + 1) - floorf((x(2 * n) + x(2 * n + 2)) / 2.0f);
+            x(2 * n + 1) = y_ext(2 * n + 1) + floorf((x(2 * n) + x(2 * n + 2)) / 2.0f);
     } else {
         VERIFY(transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
 
