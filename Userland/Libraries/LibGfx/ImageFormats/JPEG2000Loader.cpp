@@ -314,7 +314,7 @@ static ErrorOr<ImageAndTileSize> read_image_and_tile_size(ReadonlyBytes data)
 // Data shared by COD and COC marker segments
 struct CodingStyleParameters {
     // Table A.20 – Transformation for the SPcod and SPcoc parameters
-    enum Transformation {
+    enum class Transformation {
         Irreversible_9_7_Filter = 0,
         Reversible_5_3_Filter = 1,
     };
@@ -325,7 +325,7 @@ struct CodingStyleParameters {
     u8 code_block_width_exponent { 0 };  // "xcb" in spec; 2 already added.
     u8 code_block_height_exponent { 0 }; // "ycb" in spec; 2 already added.
     u8 code_block_style { 0 };
-    Transformation transformation { Irreversible_9_7_Filter };
+    Transformation transformation { Transformation::Irreversible_9_7_Filter };
 
     // Table A.19 – Code-block style for the SPcod and SPcoc parameters
     bool uses_selective_arithmetic_coding_bypass() const { return code_block_style & 1; }
@@ -809,6 +809,11 @@ struct TileData {
 struct DecodedCoefficients {
     IntSize size;
     Vector<float> coefficients;
+
+    // XXX these are used only during IDWT. Not sure they should be in this struct.
+    Vector<float> scanline_buffer;
+    Vector<float> scanline_buffer2;
+    int scanline_start { 0 };
 };
 
 struct DecodedComponent {
@@ -2550,20 +2555,25 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
 // F.3 Inverse discrete wavelet transformation
 
-static ErrorOr<DecodedCoefficients> _2D_SR(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
+
+// "SR" is for "subband reconstruction".
+static ErrorOr<DecodedCoefficients> _2D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
 static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
-static ErrorOr<DecodedCoefficients> HOR_SR(DecodedCoefficients a);
-static ErrorOr<DecodedCoefficients> VER_SR(DecodedCoefficients a);
+static ErrorOr<DecodedCoefficients> HOR_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a);
+static ErrorOr<DecodedCoefficients> VER_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a);
+static void _1D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta);
+static void _1D_EXTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta);
+static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta);
 
 // F.3.1 The IDWT procedure
-[[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(DecodedComponent const& component)
+[[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(CodingStyleParameters::Transformation transformation, DecodedComponent const& component)
 {
     // Figure F.3 – The IDWT procedure
     // XXX make look more like spec
     auto ll = component.nLL;
 
     for (auto const& sub_band : component.sub_bands) {
-        ll = TRY(_2D_SR(move(ll), sub_band[0], sub_band[1], sub_band[2]));
+        ll = TRY(_2D_SR(transformation, move(ll), sub_band[0], sub_band[1], sub_band[2]));
         TRY(save_pyramid(ll, component));
     }
 
@@ -2571,12 +2581,12 @@ static ErrorOr<DecodedCoefficients> VER_SR(DecodedCoefficients a);
 }
 
 // F.3.2 The 2D_SR procedure
-static ErrorOr<DecodedCoefficients> _2D_SR(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
+static ErrorOr<DecodedCoefficients> _2D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
 {
     // Figure F.6 – The 2D_SR procedure
     auto a = TRY(_2D_INTERLEAVE(move(ll), hl, lh, hh));
-    a = TRY(HOR_SR(move(a)));
-    return VER_SR(move(a));
+    a = TRY(HOR_SR(transformation, move(a)));
+    return VER_SR(transformation, move(a));
 }
 
 // F.3.3 The 2D_INTERLEAVE procedure
@@ -2598,6 +2608,10 @@ static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, Decod
 
     TRY(a.coefficients.try_resize(u1 * v1));
     a.size = { u1, v1 };
+
+    // Leave enough room for max expansion in _1D_EXTR.
+    a.scanline_buffer.resize(max(u1, v1) + 8);
+    a.scanline_buffer2.resize(max(u1, v1) + 8);
 
     {
         auto const& b = ll;
@@ -2640,29 +2654,152 @@ static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, Decod
 }
 
 // F.3.4 The HOR_SR procedure
-static ErrorOr<DecodedCoefficients> HOR_SR(DecodedCoefficients a)
+static ErrorOr<DecodedCoefficients> HOR_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a)
 {
+    // XXX why are these passed in in the spec
+    int u0 = 0;
+    int v0 = 0;
+    int u1 = a.size.width();
+    int v1 = a.size.height();
+
     // Figure F.10 – The HOR_SR procedure
+    int i0 = u0;
+    int i1 = u1;
+    for (int v = v0; v < v1; ++v) {
+        _1D_SR(transformation, a, v * u1, i0, i1, 1);
+    }
     return a;
 }
 
 // F.3.5 The VER_SR procedure
-static ErrorOr<DecodedCoefficients> VER_SR(DecodedCoefficients a)
+static ErrorOr<DecodedCoefficients> VER_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a)
 {
+    // XXX why are these passed in in the spec
+    int u0 = 0;
+    int v0 = 0;
+    int u1 = a.size.width();
+    int v1 = a.size.height();
+
     // Figure F.12 – The VER_SR procedure
+    int i0 = v0;
+    int i1 = v1;
+    for (int u = u0; u < u1; ++u) {
+        _1D_SR(transformation, a, u, i0, i1, u1);
+    }
+
     return a;
 }
 
 // F.3.6 The 1D_SR procedure
 // Figure F.14 – The 1D_SR procedure
+static void _1D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta)
+{
+    // "For signals of length one (i.e., i0 = il – 1), the 1D_SR procedure sets the value of X(i0) to Y(i0) if i0 is an even integer, and X(i0) to Y(i0)/2 if i0 is an odd integer."
+    if (lower == higher - 1) {
+        if (lower % 2 == 0)
+            a.coefficients[start + lower] = a.coefficients[start + lower];
+        else
+            a.coefficients[start + lower] = a.coefficients[start + lower] / 2;
+        return;
+    }
+
+    // Figure F.14 – The 1D_SR procedure
+    _1D_EXTR(transformation, a, start, lower, higher, delta);
+    _1D_FILTR(transformation, a, start, lower, higher, delta);
+}
+
 
 // F.3.7 The 1D_EXTR procedure
+static void _1D_EXTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta)
+{
+    // Table F.2 – Extension to the left
+    int i_left;
+    if (transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
+        i_left = lower % 2 ? 1 : 2;
+    } else {
+        VERIFY(transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
+        i_left = lower % 2 ? 3 : 4;
+    }
+
+    // Table F.3 – Extension to the right
+    int i_right;
+    if (transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
+        i_right = higher % 2 ? 1 : 2;
+    } else {
+        VERIFY(transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
+        i_right = higher % 2 ? 3 : 4;
+    }
+
+    // (F-4)
+    // PSE is short for "Period Symmetric Extension".
+    auto PSE = [](int i, int i0, int i1) {
+        return i0 + min((i - i0) % (2 * (i1 - i0 - 1)), 2 * (i1 - i0 - 1) - (i - i0) % (2 *(i1 - i0 - 1)));
+    };
+
+    for (int l = lower - i_left, i = 0; l < higher + i_right; ++l, ++i) {
+        a.scanline_buffer[i] = a.coefficients[start + PSE(l, lower, higher) * delta];
+    }
+    a.scanline_start = i_left;
+}
 
 // F.3.8 The 1D_FILTR procedure
+static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a, int start, int lower, int higher, int delta)
+{
+    int i0 = lower;
+    int i1 = higher;
 
-// F.3.8.1 The 1D_FILTR_5-3R procedure
+    auto y_ext = [&](int i) {
+        return a.scanline_buffer[i + a.scanline_start];
+    };
 
-// F.3.8.2 The 1D_FILTR_9-7I procedure
+    auto x = [&](int i) -> float& {
+        return a.scanline_buffer2[i + a.scanline_start];
+    };
+
+    if (transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
+        // F.3.8.1 The 1D_FILTR_5-3R procedure
+        // (F-5)
+        for (int n = floor_div(i0, 2); n < floor_div(i1, 2) + 1; ++n)
+            x(2 * n) = y_ext(2 * n) - floorf((y_ext(2 * n - 1) + y_ext(2 * n + 1) + 2) / 4.0f);
+
+        // (F-6)
+        for (int n = floor_div(i0, 2); n < floor_div(i1, 2); ++n)
+            x(2 * n + 1) = y_ext(2 * n + 1) - floorf((x(2 * n) + x(2 * n + 2)) / 2.0f);
+    } else {
+        VERIFY(transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
+
+        // Table F.4 – Definition of lifting parameters for the 9-7 irreversible filter
+        constexpr float alpha = -1.586'134'342'059'924f;
+        constexpr float beta = -0.052'980'118'572'961f;
+        constexpr float gamma = 0.882'911'075'530'934f;
+        constexpr float delta = 0.443'506'852'043'971f;
+        constexpr float kappa = 1.230'174'104'914'001f;
+
+        // F.3.8.2 The 1D_FILTR_9-7I procedure
+        // "Firstly, step 1 is performed for all values of n such that..."
+        for (int n = floor_div(i0, 2) - 1; n < floor_div(i1, 2) + 2; ++n)
+            x(2 * n) = kappa * y_ext(2 * n); // [STEP1]
+
+        // "and step 2 is performed for all values of n such that..."
+        for (int n = floor_div(i0, 2) - 2; n < floor_div(i1, 2) + 2; ++n)
+            x(2 * n + 1) = (1 / kappa) * y_ext(2 * n + 1); // [STEP2]
+
+        for (int n = floor_div(i0, 2) - 1; n < floor_div(i1, 2) + 2; ++n)
+            x(2 * n) = x(2 * n) - delta * (x(2 * n - 1) + x(2 * n + 1)); // [STEP3]
+
+        for (int n = floor_div(i0, 2) - 1; n < floor_div(i1, 2) + 1; ++n)
+            x(2 * n + 1) = x(2 * n + 1) - gamma * (x(2 * n) + x(2 * n + 2)); // [STEP4]
+
+        for (int n = floor_div(i0, 2); n < floor_div(i1, 2) + 1; ++n)
+            x(2 * n) = x(2 * n) - beta * (x(2 * n - 1) + x(2 * n + 1)); // [STEP5]
+
+        for (int n = floor_div(i0, 2); n < floor_div(i1, 2); ++n)
+            x(2 * n + 1) = x(2 * n + 1) - alpha * (x(2 * n) + x(2 * n + 2)); // [STEP6]
+    }
+
+    for (int i = lower; i < higher; ++i)
+        a.coefficients[start + i * delta] = x(i);
+}
 
 static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 {
@@ -2683,10 +2820,11 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 
     // IDWT
     for (auto& tile : context.tiles) {
-        for (auto& component : context.decoded_tiles[tile.index].components) {
+        for (auto [component_index, component] : enumerate(context.decoded_tiles[tile.index].components)) {
             // TODO: Implement IDWT
             // component.idwt_result = component.nLL;
-            component.idwt_result = TRY(IDWT(component));
+            auto transformation = coding_style_parameters_for_component(context, tile, component_index).transformation;
+            component.idwt_result = TRY(IDWT(transformation, component));
         }
     }
 
@@ -2699,7 +2837,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
             if (decoded_tile.components.size() < 3)
                 return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Multiple component transformation type but fewer than 3 components");
 
-            if (context.cod.parameters.transformation == CodingStyleParameters::Reversible_5_3_Filter) {
+            if (context.cod.parameters.transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
                 // G.2 Reversible multiple component transformation (RCT)
                 // "The three components input into the RCT shall have the same separation on the reference grid and the same bit-depth."
                 // XXX check
@@ -2724,7 +2862,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
                     }
                 }
             } else {
-                VERIFY(context.cod.parameters.transformation == CodingStyleParameters::Irreversible_9_7_Filter);
+                VERIFY(context.cod.parameters.transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
                 // G.3 Irreversible multiple component transformation (ICT)
                 // "The three components input into the ICT shall have the same separation on the reference grid and the same bit-depth."
                 // XXX check
