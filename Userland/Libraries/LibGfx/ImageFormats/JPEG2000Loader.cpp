@@ -984,6 +984,9 @@ static ErrorOr<void> parse_codestream_main_header(JPEG2000LoadingContext& contex
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Expected SIZ marker");
     context.siz = TRY(read_image_and_tile_size(marker.data.value()));
 
+    context.tiles.resize(context.siz.number_of_x_tiles() * context.siz.number_of_y_tiles());
+    context.decoded_tiles.resize(context.siz.number_of_x_tiles() * context.siz.number_of_y_tiles());
+
     bool saw_COD_marker = false;
     bool saw_QCD_marker = false;
     while (true) {
@@ -1063,8 +1066,8 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     auto start_of_tile = TRY(read_start_of_tile_part(marker.data.value()));
     // FIXME: Store start_of_tile on context somewhere.
 
-    context.tiles.resize(max(context.tiles.size(), (size_t)start_of_tile.tile_index + 1));
-    context.decoded_tiles.resize(max(context.decoded_tiles.size(), (size_t)start_of_tile.tile_index + 1));
+    // context.tiles.resize(max(context.tiles.size(), (size_t)start_of_tile.tile_index + 1));
+    // context.decoded_tiles.resize(max(context.decoded_tiles.size(), (size_t)start_of_tile.tile_index + 1));
 
     auto& tile = context.tiles[start_of_tile.tile_index];
     tile.index = start_of_tile.tile_index;
