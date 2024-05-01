@@ -903,9 +903,18 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
         int num_precincts_wide = 0;
         int num_precincts_high = 0;
         int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx;
+        int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy;
+
+        // XXX this needs this too :/
+        // XXX or maybe it doesn't, because it's for the LL band and below is for subbands? aaarrrhhhhh
+        // => probably don't need this
+        // if (r > 0) {
+            // PPx--;
+            // PPy--;
+        // }
+
         if (ll_rect.width() > 0)
             num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.x() / (1 << PPx));
-        int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy;
         if (ll_rect.height() > 0)
             num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.y() / (1 << PPy));
         dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
@@ -1802,21 +1811,43 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
     int num_precincts_wide = 0;
     int num_precincts_high = 0;
     int PPx = coding_parameters.precinct_sizes[r].PPx;
+    int PPy = coding_parameters.precinct_sizes[r].PPy;
+
+
     if (ll_rect.width() != 0) {
         num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.left() / (1 << PPx));
     }
-    int PPy = coding_parameters.precinct_sizes[r].PPy;
     if (ll_rect.height() != 0) {
         num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
     }
     dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
 
+    // "It can happen that numprecincts is 0 for a particular tile-component and resolution level. When this happens, there are no packets for this tile-component and resolution level."
+    // XXX: handle
+
+
+    // XXX spec says to do this only for computing xcb_prime, but apparently PPx/PPy have to be modified too?
+    // Fixes first precinct size at r=1 in sunset-retro-levels-3-block-64x32-precinct-256x128-tile-699x299.jp2
+    // (line 37-45 in sizes.txt correct with this - the 3 subbands for the first 3 precincts.
+    // fourth precinct needs more tweaks.)
+    // ...aha, if doing this only after computing num_precincts_wide/_high, we get the first 468 right
+
+    auto precinct_origin = IntPoint { ll_rect.x() & ~((1 << PPx) - 1), ll_rect.y() & ~((1 << PPy) - 1) };
+
+    if (r > 0) {
+        PPx--;
+        PPy--;
+        precinct_origin /= 2;
+    }
+
     // B.7
     // (B-17)
-    int xcb_prime = min(coding_parameters.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
+    // int xcb_prime = min(coding_parameters.code_block_width_exponent, r > 0 ? PPx - 1 : PPx);
+    int xcb_prime = min(coding_parameters.code_block_width_exponent, PPx);
 
     // (B-18)
-    int ycb_prime = min(coding_parameters.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
+    // int ycb_prime = min(coding_parameters.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
+    int ycb_prime = min(coding_parameters.code_block_height_exponent, PPy);
 
     dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, coding_parameters.code_block_width_exponent, coding_parameters.code_block_height_exponent, xcb_prime, ycb_prime);
 
@@ -1829,7 +1860,17 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
     int precinct_x_index = progression_data.precinct % num_precincts_wide;
     int precinct_y_index = progression_data.precinct / num_precincts_wide;
 
+// XXX this needs to also add the tile offset
     auto precinct_rect = IntRect({ precinct_x_index * (1 << PPx), precinct_y_index * (1 << PPy), 1 << PPx, 1 << PPy });
+
+    // with this, 492 right, until resolution level 1 of tile 1
+    // ...hmm this here aligns to the not-downscaled ll_rect coordinates.
+    // probably have to do this before downscaling PPx / PPy and then scale down the whole offset?
+    // precinct_rect.set_x(precinct_rect.x() + (ll_rect.x() & ~((1 << PPx) - 1)));
+    // precinct_rect.set_y(precinct_rect.y() + (ll_rect.y() & ~((1 << PPy) - 1)));
+
+    // woohoo with this we get all 2014 codeblock sizes right!
+    precinct_rect.set_location(precinct_rect.location() + precinct_origin);
 
     PacketContext packet_context;
     packet_context.xcb_prime = xcb_prime;
