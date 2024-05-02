@@ -1689,7 +1689,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output);
+static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output, IntRect precinct_rect);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1804,7 +1804,7 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
 
     auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component_index, r, coding_parameters.number_of_decomposition_levels);
 
-// dbgln("ll_rect: {}", ll_rect);
+dbgln("tile_rect: {}, ll_rect: {}", tile.rect, ll_rect);
 
     // B.6
     // (B-16)
@@ -1931,7 +1931,12 @@ dbgln("empty packet per header; skipping");
 
         int M_b = quantization_parameters.number_of_guard_bits + exponent - 1;
 
-        header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
+        // XXX: only do this for the first precinct, so that additional precincts don't clobber earlier precincts
+        // or alternatively, only return one precint's worth of data here adn assemble outside
+        // if (header.sub_bands[i].coefficients.is_empty())
+            // header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
+        auto clipped_precinct_rect = header.sub_bands[i].subband_rect.intersected(precinct_rect);
+        header.sub_bands[i].coefficients.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
 
         for (auto& current_block : header.sub_bands[i].code_blocks) {
             auto start_offset = offset;
@@ -1943,7 +1948,7 @@ dbgln("empty packet per header; skipping");
 
             auto packet_data = data.slice(start_offset, current_block.length_of_data);
             auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
-            TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i]));
+            TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
 
         // context.decoded_tiles.resize(max(context.tiles.size(), (size_t)tile.index));
@@ -1970,7 +1975,8 @@ dbgln("empty packet per header; skipping");
             coefficients.coefficients.resize(coefficients.size.width() * coefficients.size.height());
         }
 
-        auto rect = header.sub_bands[i].subband_rect;
+        // auto rect = header.sub_bands[i].subband_rect;
+        auto rect = clipped_precinct_rect;
         int w = rect.width();
         int h = rect.height();
 
@@ -2009,12 +2015,17 @@ dbgln("empty packet per header; skipping");
 
                 // if (i == 0) dbgln("x {} y {} value {}", x, y, value);
                 // if (i == 0) dbgln("index {} bounds {} / {}", y * w + h, coefficients.size, coefficients.coefficients.size());
-                coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
+                // coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
+
+                auto subband_origin = header.sub_bands[i].subband_rect.location();
+                coefficients.coefficients[(y + clipped_precinct_rect.top() - subband_origin.y()) * header.sub_bands[i].subband_rect.width() + (x + clipped_precinct_rect.left() - subband_origin.x())] = value; // XXX precinct bounds!
             }
         }
 
 #if 0
 {
+    w = header.sub_bands[i].subband_rect.width();
+    h = header.sub_bands[i].subband_rect.height();
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
@@ -2039,7 +2050,7 @@ dbgln("empty packet per header; skipping");
         }
     }
 
-    auto name = TRY(String::formatted("image-layer-{}-precinct-{}-component-{}-level-{}-subband-{}.png", progression_data.layer, progression_data.precinct, progression_data.component, progression_data.resolution_level, (int)sub_band));
+    auto name = TRY(String::formatted("image-tile-{}-layer-{}-precinct-{}-component-{}-level-{}-subband-{}.png", tile.index, progression_data.layer, progression_data.precinct, progression_data.component, progression_data.resolution_level, (int)sub_band));
     auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
     auto file = TRY(Core::OutputBufferedFile::create(move(output_stream)));
     auto bytes = TRY(Gfx::PNGWriter::encode(*bitmap));
@@ -2054,7 +2065,7 @@ dbgln("empty packet per header; skipping");
     return offset;
 }
 
-static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output)
+static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output, IntRect precinct_rect)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
@@ -2517,7 +2528,9 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
             auto sign = get_sign(x, y);
             auto magnitude = magnitudes[y * w + x];
             auto value = magnitude * (sign ? -1 : 1);
-            output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
+            // XXX make relative to subband origin?
+            // output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
+            output.coefficients[(y + current_block.rect.top() - precinct_rect.top()) * precinct_rect.width() + (x + current_block.rect.left() - precinct_rect.left())] = value;
         }
     }
 
