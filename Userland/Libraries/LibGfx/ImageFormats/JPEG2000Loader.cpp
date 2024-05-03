@@ -303,6 +303,8 @@ static ErrorOr<ImageAndTileSize> read_image_and_tile_size(ReadonlyBytes data)
         siz.components.append(component);
     }
 
+    // XXX reject unknown bits in needed_decoder_capabilities (can mean all kinds of exotic things like SSO in T.801)
+
     dbgln_if(JPEG2000_DEBUG, "JPEG2000ImageDecoderPlugin: SIZ marker segment: needed_decoder_capabilities={}, width={}, height={}, x_offset={}, y_offset={}, tile_width={}, tile_height={}, tile_x_offset={}, tile_y_offset={}", siz.needed_decoder_capabilities, siz.width, siz.height, siz.x_offset, siz.y_offset, siz.tile_width, siz.tile_height, siz.tile_x_offset, siz.tile_y_offset);
     dbgln_if(JPEG2000_DEBUG, "JPEG2000ImageDecoderPlugin: SIZ marker segment: {} components:", component_count);
     for (auto [i, component] : enumerate(siz.components))
@@ -807,7 +809,7 @@ struct TileData {
 };
 
 struct DecodedCoefficients {
-    IntSize size;
+    IntRect rect;
     Vector<float> coefficients;
 
     // XXX these are used only during IDWT. Not sure they should be in this struct.
@@ -817,11 +819,17 @@ struct DecodedCoefficients {
 };
 
 struct DecodedComponent {
-    IntSize size;
+    IntRect rect;
     DecodedCoefficients nLL;
+
+    // XXX bad name maybe? each entry are 3 subbands already,
+    // so subbands_bands or something? needs self-consistent names.
     Vector<Array<DecodedCoefficients, 3>> sub_bands;
 
     ImageAndTileSize::ComponentInformation component_info;
+
+    int component_index {};
+    IntRect tile_rect;
 
     DecodedCoefficients idwt_result;
 };
@@ -1961,18 +1969,21 @@ dbgln("empty packet per header; skipping");
                 coding_style_parameters_for_component(context, tile, component_index);
                 dbgln("making {} sub-bands", num_decomposition_levels);
                 component.sub_bands.resize(num_decomposition_levels);
-                component.size = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index).size();
+                component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
                 component.component_info = context.siz.components[component_index];
+                component.component_index = component_index;
+                component.tile_rect = tile.rect;
             }
         }
 
 // dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
         DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
         if (coefficients.coefficients.is_empty()) {
-            coefficients.size = header.sub_bands[i].subband_rect.size();
+            coefficients.rect = header.sub_bands[i].subband_rect;
 
 // dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
-            coefficients.coefficients.resize(coefficients.size.width() * coefficients.size.height());
+dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, r, (int)sub_band, coefficients.rect);
+            coefficients.coefficients.resize(coefficients.rect.width() * coefficients.rect.height());
         }
 
         // auto rect = header.sub_bands[i].subband_rect;
@@ -2568,16 +2579,17 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
  [[maybe_unused]] static ErrorOr<void> save_pyramid(DecodedCoefficients const& nLL, DecodedComponent const& t0)
 {
-    int w = t0.size.width();
-    int h = t0.size.height();
+    int w = t0.rect.width();
+    int h = t0.rect.height();
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
 
-    auto ll_rect = IntRect { {}, nLL.size };
+    auto ll_rect = nLL.rect;
+    ll_rect.set_location({});
 
     auto store = [&t0](DecodedCoefficients const& coefficients, IntPoint const& location, RefPtr<Gfx::Bitmap> const& bitmap) {
-        for (int y = 0; y < coefficients.size.height(); ++y) {
-            for (int x = 0; x < coefficients.size.width(); ++x) {
-                float value = coefficients.coefficients[y * coefficients.size.width() + x];
+        for (int y = 0; y < coefficients.rect.height(); ++y) {
+            for (int x = 0; x < coefficients.rect.width(); ++x) {
+                float value = coefficients.coefficients[y * coefficients.rect.width() + x];
 
                 if (!t0.component_info.is_signed())
                     value += 1u << (t0.component_info.bit_depth() - 1);
@@ -2593,20 +2605,20 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     for (size_t i = 0; i < t0.sub_bands.size(); ++i) {
         auto& sub_band = t0.sub_bands[i];
 
-        if (sub_band[0].size.height() < ll_rect.height())
+        if (sub_band[0].rect.height() < ll_rect.height())
             continue;
 
-        VERIFY(sub_band[0].size.height() == ll_rect.height());
-        VERIFY(sub_band[1].size.width() == ll_rect.width());
-        VERIFY(sub_band[2].size.width() == sub_band[0].size.width());
-        VERIFY(sub_band[2].size.height() == sub_band[1].size.height());
+        VERIFY(sub_band[0].rect.height() == ll_rect.height());
+        VERIFY(sub_band[1].rect.width() == ll_rect.width());
+        VERIFY(sub_band[2].rect.width() == sub_band[0].rect.width());
+        VERIFY(sub_band[2].rect.height() == sub_band[1].rect.height());
 
         store(sub_band[0], { ll_rect.right(), ll_rect.top() }, bitmap);
         store(sub_band[1], { ll_rect.left(), ll_rect.bottom() }, bitmap);
         store(sub_band[2], { ll_rect.right(), ll_rect.bottom() }, bitmap);
 
-        ll_rect.set_right(ll_rect.right() + sub_band[0].size.width());
-        ll_rect.set_bottom(ll_rect.bottom() + sub_band[1].size.height());
+        ll_rect.set_right(ll_rect.right() + sub_band[0].rect.width());
+        ll_rect.set_bottom(ll_rect.bottom() + sub_band[1].rect.height());
     }
 
     static int n_images = 0;
@@ -2623,8 +2635,8 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
 
 // "SR" is for "subband reconstruction".
-static ErrorOr<DecodedCoefficients> _2D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
-static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
+static ErrorOr<DecodedCoefficients> _2D_SR(IntRect, CodingStyleParameters::Transformation transformation, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
+static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(IntRect, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh);
 static ErrorOr<DecodedCoefficients> HOR_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a);
 static ErrorOr<DecodedCoefficients> VER_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a);
 static void _1D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta);
@@ -2632,86 +2644,134 @@ static void _1D_EXTR(CodingStyleParameters::Transformation transformation, Decod
 static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta);
 
 // F.3.1 The IDWT procedure
-[[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(CodingStyleParameters::Transformation transformation, DecodedComponent const& component)
+[[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(JPEG2000LoadingContext const& context, CodingStyleParameters::Transformation transformation, DecodedComponent const& component)
 {
     // Figure F.3 – The IDWT procedure
     // XXX make look more like spec
     auto ll = component.nLL;
 
-    for (auto const& sub_band : component.sub_bands) {
-        ll = TRY(_2D_SR(transformation, move(ll), sub_band[0], sub_band[1], sub_band[2]));
-        // TRY(save_pyramid(ll, component));
+    int N_L = component.sub_bands.size();
+
+    for (auto [r_minus_1, sub_band] : enumerate(component.sub_bands)) {
+        int r = r_minus_1 + 1;
+
+        // " The values of u0, u1, v0, v1 used by the 2D_INTERLEAVE procedure are those of tbx0, tbx1, tby0, tby1
+        //   corresponding to sub-band b = (lev – 1)LL  (see definition in Equation (B-15))"
+        // Uses lev like n in B.5 though, so need +1.
+        ++r; // XXX more comment
+        int n_b = r == 0 ? N_L : (N_L + 1 - r);
+        auto rect = context.siz.reference_grid_coordinates_for_sub_band(component.tile_rect, component.component_index, n_b, SubBand::HorizontalLowpassVerticalLowpass);
+
+        // XXX some VERIFY()s
+        // apparently rect.location() is not necessarily ll.location()?
+        // but check that sizes add up to it
+
+        ll = TRY(_2D_SR(rect, transformation, move(ll), sub_band[0], sub_band[1], sub_band[2]));
+
+        TRY(save_pyramid(ll, component));
     }
 
     return ll;
 }
 
 // F.3.2 The 2D_SR procedure
-static ErrorOr<DecodedCoefficients> _2D_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
+static ErrorOr<DecodedCoefficients> _2D_SR(IntRect rect, CodingStyleParameters::Transformation transformation, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
 {
     // Figure F.6 – The 2D_SR procedure
-    auto a = TRY(_2D_INTERLEAVE(move(ll), hl, lh, hh));
+    auto a = TRY(_2D_INTERLEAVE(rect, move(ll), hl, lh, hh));
     a = TRY(HOR_SR(transformation, move(a)));
     return VER_SR(transformation, move(a));
 }
 
 // F.3.3 The 2D_INTERLEAVE procedure
-static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
+static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(IntRect in_rect, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
 {
-    VERIFY(ll.size.height() == hl.size.height());
-    VERIFY(ll.size.width() == lh.size.width());
-    VERIFY(hl.size.width() == hh.size.width());
-    VERIFY(lh.size.height() == hh.size.height());
+    VERIFY(ll.rect.height() == hl.rect.height());
+    VERIFY(ll.rect.width() == lh.rect.width());
+    VERIFY(hl.rect.width() == hh.rect.width());
+    VERIFY(lh.rect.height() == hh.rect.height());
 
     // Figure F.8 – The 2D_INTERLEAVE procedure
+    // "The values of u0, u1, v0, v1 used by the 2D_INTERLEAVE procedure are those of tbx0, tbx1, tby0, tby1
+    //  corresponding to sub-band b = (lev – 1)LL (see definition in Equation (B-15))."
     // XXX why are these passed in in the spec
-    int u0 = 0;
-    int v0 = 0;
-    int u1 = ll.size.width() + hl.size.width();
-    int v1 = ll.size.height() + lh.size.height();
+    // XXX is this computation even right
+#if 0
+    int u0 = ll.rect.left();
+    int v0 = ll.rect.top();
+    int w = ll.rect.width() + hl.rect.width();
+    int u1 = u0 + w;
+    int v1 = v0 + ll.rect.height() + lh.rect.height();
+#else
+    int u0 = in_rect.left();
+    int v0 = in_rect.top();
+    int w = in_rect.width();
+    int u1 = in_rect.right();
+    int v1 = in_rect.bottom();
+#endif
+
+    VERIFY(in_rect.width() == ll.rect.width() + hl.rect.width());
+    VERIFY(in_rect.height() == ll.rect.height() + lh.rect.height());
 
     DecodedCoefficients a;
 
-    TRY(a.coefficients.try_resize(u1 * v1));
-    a.size = { u1, v1 };
+    a.rect = IntRect { { u0, v0 }, { u1 - u0, v1 - v0 } }; // XXX == in_rect
+    TRY(a.coefficients.try_resize(a.rect.width() * a.rect.height()));
 
     // Leave enough room for max expansion in _1D_EXTR.
-    a.scanline_buffer.resize(max(u1, v1) + 8);
-    a.scanline_buffer2.resize(max(u1, v1) + 8);
+    a.scanline_buffer.resize(max(a.rect.width(), a.rect.height()) + 8);
+    a.scanline_buffer2.resize(max(a.rect.width(), a.rect.height()) + 8);
+
+// XXX urgh origins. need to make everything...uh, u0/v0 relative, yes? ah no, divided by, uh, 2?
 
     {
         auto const& b = ll;
+        VERIFY(ceil_div(u1, 2) - ceil_div(u0, 2) == b.rect.width());
+        VERIFY(ceil_div(v1, 2) - ceil_div(v0, 2) == b.rect.height());
+
         for (int v_b = ceil_div(v0, 2); v_b < ceil_div(v1, 2); ++v_b) {
             for (int u_b = ceil_div(u0, 2); u_b < ceil_div(u1, 2); ++u_b) {
-                a.coefficients[2 * v_b * u1 + 2 * u_b] = b.coefficients[v_b * b.size.width() + u_b];
+                a.coefficients[(2 * v_b - v0) * w + (2 * u_b - u0)] = b.coefficients[(v_b - ceil_div(v0, 2)) * b.rect.width() + (u_b - ceil_div(u0, 2))];
             }
         }
     }
 
     {
         auto const& b = hl;
+        VERIFY(floor_div(u1, 2) - floor_div(u0, 2) == b.rect.width());
+        VERIFY(ceil_div(v1, 2) - ceil_div(v0, 2) == b.rect.height());
+
         for (int v_b = ceil_div(v0, 2); v_b < ceil_div(v1, 2); ++v_b) {
             for (int u_b = floor_div(u0, 2); u_b < floor_div(u1, 2); ++u_b) {
-                a.coefficients[2 * v_b * u1 + 2 * u_b + 1] = b.coefficients[v_b * b.size.width() + u_b];
+                a.coefficients[(2 * v_b - v0) * w + (2 * u_b + 1 - u0)] = b.coefficients[(v_b - ceil_div(v0, 2)) * b.rect.width() + (u_b - floor_div(u0, 2))];
             }
         }
     }
 
     {
         auto const& b = lh;
+        VERIFY(ceil_div(u1, 2) - ceil_div(u0, 2) == b.rect.width());
+        VERIFY(floor_div(v1, 2) - floor_div(v0, 2) == b.rect.height());
+
         for (int v_b = floor_div(v0, 2); v_b < floor_div(v1, 2); ++v_b) {
             for (int u_b = ceil_div(u0, 2); u_b < ceil_div(u1, 2); ++u_b) {
                 // dbgln("v_b: {} u1: {} u_b: {}", v_b, u1, u_b);
-                a.coefficients[(2 * v_b + 1) * u1 + 2 * u_b] = b.coefficients[v_b * b.size.width() + u_b];
+                // a.coefficients[(2 * v_b + 1) * w + 2 * u_b] = b.coefficients[v_b * b.rect.width() + u_b];
+                a.coefficients[(2 * v_b + 1 - v0) * w + (2 * u_b - u0)] = b.coefficients[(v_b - floor_div(v0, 2)) * b.rect.width() + (u_b - ceil_div(u0, 2))];
+
             }
         }
     }
 
     {
         auto const& b = hh;
+        VERIFY(floor_div(u1, 2) - floor_div(u0, 2) == b.rect.width());
+        VERIFY(floor_div(v1, 2) - floor_div(v0, 2) == b.rect.height());
+
         for (int v_b = floor_div(v0, 2); v_b < floor_div(v1, 2); ++v_b) {
             for (int u_b = floor_div(u0, 2); u_b < floor_div(u1, 2); ++u_b) {
-                a.coefficients[(2 * v_b + 1) * u1 + 2 * u_b + 1] = b.coefficients[v_b * b.size.width() + u_b];
+                // a.coefficients[(2 * v_b + 1) * w + 2 * u_b + 1] = b.coefficients[v_b * b.rect.width() + u_b];
+                a.coefficients[(2 * v_b + 1 - v0) * w + (2 * u_b + 1 - u0)] = b.coefficients[(v_b - floor_div(v0, 2)) * b.rect.width() + (u_b - floor_div(u0, 2))];
             }
         }
     }
@@ -2723,16 +2783,16 @@ static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(DecodedCoefficients ll, Decod
 static ErrorOr<DecodedCoefficients> HOR_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a)
 {
     // XXX why are these passed in in the spec
-    int u0 = 0;
-    int v0 = 0;
-    int u1 = a.size.width();
-    int v1 = a.size.height();
+    int u0 = a.rect.left();
+    int v0 = a.rect.top();
+    int u1 = a.rect.right();
+    int v1 = a.rect.bottom();
 
     // Figure F.10 – The HOR_SR procedure
     int i0 = u0;
     int i1 = u1;
     for (int v = v0; v < v1; ++v) {
-        _1D_SR(transformation, a, v * u1, i0, i1, 1);
+        _1D_SR(transformation, a, (v - v0) * a.rect.width(), i0, i1, 1);
     }
     return a;
 }
@@ -2741,16 +2801,16 @@ static ErrorOr<DecodedCoefficients> HOR_SR(CodingStyleParameters::Transformation
 static ErrorOr<DecodedCoefficients> VER_SR(CodingStyleParameters::Transformation transformation, DecodedCoefficients a)
 {
     // XXX why are these passed in in the spec
-    int u0 = 0;
-    int v0 = 0;
-    int u1 = a.size.width();
-    int v1 = a.size.height();
+    int u0 = a.rect.left();
+    int v0 = a.rect.top();;
+    int u1 = a.rect.right();
+    int v1 = a.rect.bottom();
 
     // Figure F.12 – The VER_SR procedure
     int i0 = v0;
     int i1 = v1;
     for (int u = u0; u < u1; ++u) {
-        _1D_SR(transformation, a, u, i0, i1, u1);
+        _1D_SR(transformation, a, (u - u0), i0, i1, a.rect.width());
     }
 
     return a;
@@ -2763,9 +2823,9 @@ static void _1D_SR(CodingStyleParameters::Transformation transformation, Decoded
     // "For signals of length one (i.e., i0 = il – 1), the 1D_SR procedure sets the value of X(i0) to Y(i0) if i0 is an even integer, and X(i0) to Y(i0)/2 if i0 is an odd integer."
     if (lower == higher - 1) {
         if (lower % 2 == 0)
-            a.coefficients[start + lower] = a.coefficients[start + lower];
+            a.coefficients[start] = a.coefficients[start];
         else
-            a.coefficients[start + lower] = a.coefficients[start + lower] / 2;
+            a.coefficients[start] = a.coefficients[start] / 2;
         return;
     }
 
@@ -2781,19 +2841,19 @@ static void _1D_EXTR(CodingStyleParameters::Transformation transformation, Decod
     // Table F.2 – Extension to the left
     int i_left;
     if (transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
-        i_left = lower % 2 ? 1 : 2;
+        i_left = lower % 2 == 0 ? 1 : 2;
     } else {
         VERIFY(transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
-        i_left = lower % 2 ? 3 : 4;
+        i_left = lower % 2 == 0? 3 : 4;
     }
 
     // Table F.3 – Extension to the right
     int i_right;
     if (transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
-        i_right = higher % 2 ? 1 : 2;
+        i_right = higher % 2 == 0 ? 1 : 2;
     } else {
         VERIFY(transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
-        i_right = higher % 2 ? 3 : 4;
+        i_right = higher % 2 == 0 ? 3 : 4;
     }
 
     // (F-4)
@@ -2806,7 +2866,8 @@ static void _1D_EXTR(CodingStyleParameters::Transformation transformation, Decod
     };
 
     for (int l = lower - i_left, i = 0; l < higher + i_right; ++l, ++i) {
-        a.scanline_buffer[i] = a.coefficients[start + PSE(l, lower, higher) * delta];
+        // XXX really `- lower` here? probably?
+        a.scanline_buffer[i] = a.coefficients[start + (PSE(l, lower, higher) - lower) * delta];
     }
     a.scanline_start = i_left;
 }
@@ -2818,11 +2879,11 @@ static void _1D_FILTR(CodingStyleParameters::Transformation transformation, Deco
     int i1 = higher;
 
     auto y_ext = [&](int i) {
-        return a.scanline_buffer[i + a.scanline_start];
+        return a.scanline_buffer[i + a.scanline_start - lower];
     };
 
     auto x = [&](int i) -> float& {
-        return a.scanline_buffer2[i + a.scanline_start];
+        return a.scanline_buffer2[i + a.scanline_start - lower];
     };
 
     if (transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
@@ -2867,7 +2928,7 @@ static void _1D_FILTR(CodingStyleParameters::Transformation transformation, Deco
     }
 
     for (int i = lower; i < higher; ++i)
-        a.coefficients[start + i * delta] = x(i);
+        a.coefficients[start + (i - lower) * delta] = x(i);
 }
 
 static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
@@ -2884,16 +2945,16 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Maybe do this per-tile and then combine tiles after the fact?
     // Also, precincts.
 
-    // XXX more tiles
-    // TRY(save_pyramid(context.decoded_tiles[0].components[0].nLL, context.decoded_tiles[0].components[0]));
-
     // IDWT
     for (auto& tile : context.tiles) {
         for (auto [component_index, component] : enumerate(context.decoded_tiles[tile.index].components)) {
-            // TODO: Implement IDWT
-            // component.idwt_result = component.nLL;
+
+            TRY(save_pyramid(context.decoded_tiles[tile.index].components[component_index].nLL, context.decoded_tiles[tile.index].components[component_index]));
+
+
+dbgln("idwt for tile {} component {}", tile.index, component_index);
             auto transformation = coding_style_parameters_for_component(context, tile, component_index).transformation;
-            component.idwt_result = TRY(IDWT(transformation, component));
+            component.idwt_result = TRY(IDWT(context, transformation, component));
         }
     }
 
@@ -2913,9 +2974,9 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
                 auto& c0 = decoded_tile.components[0].idwt_result;
                 auto& c1 = decoded_tile.components[1].idwt_result;
                 auto& c2 = decoded_tile.components[2].idwt_result;
-                int w = c0.size.width();
+                int w = c0.rect.width();
                 // XXX verify components have same dimensions
-                for (int y = 0; y < c0.size.height(); ++y) {
+                for (int y = 0; y < c0.rect.height(); ++y) {
                     for (int x = 0; x < w; ++x) {
                         float Y = c0.coefficients[y * w + x];
                         float Cb = c1.coefficients[y * w + x];
@@ -2938,9 +2999,9 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
                 auto& c0 = decoded_tile.components[0].idwt_result;
                 auto& c1 = decoded_tile.components[1].idwt_result;
                 auto& c2 = decoded_tile.components[2].idwt_result;
-                int w = c0.size.width();
+                int w = c0.rect.width();
                 // XXX verify components have same dimensions
-                for (int y = 0; y < c0.size.height(); ++y) {
+                for (int y = 0; y < c0.rect.height(); ++y) {
                     for (int x = 0; x < w; ++x) {
                         float Y = c0.coefficients[y * w + x];
                         float Cb = c1.coefficients[y * w + x];
@@ -2983,8 +3044,8 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     }
 
     // XXX more tiles
-    int w = context.decoded_tiles[0].components[0].idwt_result.size.width();
-    int h = context.decoded_tiles[0].components[0].idwt_result.size.height();
+    int w = context.decoded_tiles[0].components[0].idwt_result.rect.width();
+    int h = context.decoded_tiles[0].components[0].idwt_result.rect.height();
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
