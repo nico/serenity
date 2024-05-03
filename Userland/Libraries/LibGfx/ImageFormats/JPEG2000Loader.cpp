@@ -835,7 +835,7 @@ struct DecodedComponent {
     // int component_index {};
     // IntRect tile_rect;
 
-    DecodedCoefficients idwt_result;
+    // DecodedCoefficients idwt_result;
 };
 
 struct DecodedTile {
@@ -2598,50 +2598,57 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     return {};
 }
 
- [[maybe_unused]] static ErrorOr<void> save_pyramid(DecodedCoefficients const& nLL, DecodedComponent const& t0)
+//  [[maybe_unused]] static ErrorOr<void> save_pyramid(DecodedCoefficients const& nLL, DecodedComponent const& t0)
+ [[maybe_unused]] static ErrorOr<void> save_pyramid(JPEG2000LoadingContext const& context, int component_index)
 {
-    int w = t0.rect.width();
-    int h = t0.rect.height();
+    int w = context.siz.width;
+    int h = context.siz.height;
+
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
 
-    auto ll_rect = nLL.rect;
-    ll_rect.set_location({});
+    for (size_t tile_index = 0; tile_index < context.decoded_tiles.size(); ++tile_index) {
+        auto& t0 = context.decoded_tiles[tile_index].components[component_index];
+        auto& nLL = t0.nLL;
 
-    auto store = [&t0](DecodedCoefficients const& coefficients, IntPoint const& location, RefPtr<Gfx::Bitmap> const& bitmap) {
-        for (int y = 0; y < coefficients.rect.height(); ++y) {
-            for (int x = 0; x < coefficients.rect.width(); ++x) {
-                float value = coefficients.coefficients[y * coefficients.rect.width() + x];
+        auto ll_rect = nLL.rect;
+        // ll_rect.set_location({});
+        ll_rect.set_location(t0.rect.location());
 
-                if (!t0.component_info.is_signed())
-                    value += 1u << (t0.component_info.bit_depth() - 1);
+        auto store = [&](DecodedCoefficients const& coefficients, IntPoint const& location, RefPtr<Gfx::Bitmap> const& bitmap) {
+            for (int y = 0; y < coefficients.rect.height(); ++y) {
+                for (int x = 0; x < coefficients.rect.width(); ++x) {
+                    float value = coefficients.coefficients[y * coefficients.rect.width() + x];
 
-                u8 byte_value = (u8)clamp(value, 0.0f, 255.0f);
-                bitmap->set_pixel(x + location.x(), y + location.y(), Color(byte_value, byte_value, byte_value));
+                    if (!context.siz.components[component_index].is_signed())
+                        value += 1u << (context.siz.components[component_index].bit_depth() - 1);
+
+                    u8 byte_value = (u8)clamp(value, 0.0f, 255.0f);
+                    bitmap->set_pixel(x + location.x(), y + location.y(), Color(byte_value, byte_value, byte_value));
+                }
             }
+        };
+
+        store(nLL, ll_rect.location(), bitmap);
+
+        for (size_t i = 0; i < t0.sub_bands.size(); ++i) {
+            auto& sub_band = t0.sub_bands[i];
+
+            if (sub_band[0].rect.height() < ll_rect.height())
+                continue;
+
+            VERIFY(sub_band[0].rect.height() == ll_rect.height());
+            VERIFY(sub_band[1].rect.width() == ll_rect.width());
+            VERIFY(sub_band[2].rect.width() == sub_band[0].rect.width());
+            VERIFY(sub_band[2].rect.height() == sub_band[1].rect.height());
+
+            store(sub_band[0], { ll_rect.right(), ll_rect.top() }, bitmap);
+            store(sub_band[1], { ll_rect.left(), ll_rect.bottom() }, bitmap);
+            store(sub_band[2], { ll_rect.right(), ll_rect.bottom() }, bitmap);
+
+            ll_rect.set_right(ll_rect.right() + sub_band[0].rect.width());
+            ll_rect.set_bottom(ll_rect.bottom() + sub_band[1].rect.height());
         }
-    };
-
-    store(nLL, ll_rect.location(), bitmap);
-
-    for (size_t i = 0; i < t0.sub_bands.size(); ++i) {
-        auto& sub_band = t0.sub_bands[i];
-
-        if (sub_band[0].rect.height() < ll_rect.height())
-            continue;
-
-        VERIFY(sub_band[0].rect.height() == ll_rect.height());
-        VERIFY(sub_band[1].rect.width() == ll_rect.width());
-        VERIFY(sub_band[2].rect.width() == sub_band[0].rect.width());
-        VERIFY(sub_band[2].rect.height() == sub_band[1].rect.height());
-
-        store(sub_band[0], { ll_rect.right(), ll_rect.top() }, bitmap);
-        store(sub_band[1], { ll_rect.left(), ll_rect.bottom() }, bitmap);
-        store(sub_band[2], { ll_rect.right(), ll_rect.bottom() }, bitmap);
-
-        ll_rect.set_right(ll_rect.right() + sub_band[0].rect.width());
-        ll_rect.set_bottom(ll_rect.bottom() + sub_band[1].rect.height());
     }
-
     static int n_images = 0;
     auto name = TRY(String::formatted("image-pyramid-{}.png", n_images++));
     auto output_stream = TRY(Core::File::open(name, Core::File::OpenMode::Write));
@@ -2674,7 +2681,7 @@ static void _1D_FILTR(CodingStyleParameters::Transformation transformation, Deco
     for (auto [r_minus_1, sub_band] : enumerate(component.sub_bands)) {
         auto rect = component.nLL_rects[r_minus_1];
         ll = TRY(_2D_SR(rect, transformation, move(ll), sub_band[0], sub_band[1], sub_band[2]));
-        TRY(save_pyramid(ll, component));
+        // TRY(save_pyramid(ll, component));
     }
 
     return ll;
@@ -2952,6 +2959,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
     // Also, precincts.
 
     // IDWT
+#if 0
     for (auto& tile : context.tiles) {
         for (auto [component_index, component] : enumerate(context.decoded_tiles[tile.index].components)) {
 
@@ -2960,9 +2968,33 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 
 dbgln("idwt for tile {} component {}", tile.index, component_index);
             auto transformation = coding_style_parameters_for_component(context, tile, component_index).transformation;
-            component.idwt_result = TRY(IDWT(transformation, component));
+            component.nLL = TRY(IDWT(transformation, component));
         }
     }
+#else
+    for (size_t component_index = 0; component_index < context.siz.components.size(); ++component_index) {
+        // XXX instead of this, take max over all tile components since this can vary per tile and per component
+        TRY(save_pyramid(context, component_index));
+        for (size_t r_minus_1 = 0; r_minus_1 < context.cod.parameters.number_of_decomposition_levels; ++r_minus_1) {
+            for (size_t tile_index = 0; tile_index < context.tiles.size(); ++tile_index) {
+                auto& tile = context.tiles[tile_index];
+                auto& component = context.decoded_tiles[tile.index].components[component_index];
+
+                if (r_minus_1 >= component.sub_bands.size())
+                    continue;
+
+                auto& sub_band = component.sub_bands[r_minus_1];
+
+dbgln("idwt for tile {} component {}", tile.index, component_index);
+                auto transformation = coding_style_parameters_for_component(context, tile, component_index).transformation;
+
+                auto rect = component.nLL_rects[r_minus_1];
+                component.nLL = TRY(_2D_SR(rect, transformation, move(component.nLL), sub_band[0], sub_band[1], sub_band[2]));
+            }
+            TRY(save_pyramid(context, component_index));
+        }
+    }
+#endif
 
     // Figure G.1 – Placement of the DC level shifting with component transformation
     // XXX does it make sense to set this per-tile? It can be set, but that should probably be ignored?
@@ -2977,9 +3009,9 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
                 // G.2 Reversible multiple component transformation (RCT)
                 // "The three components input into the RCT shall have the same separation on the reference grid and the same bit-depth."
                 // XXX check
-                auto& c0 = decoded_tile.components[0].idwt_result;
-                auto& c1 = decoded_tile.components[1].idwt_result;
-                auto& c2 = decoded_tile.components[2].idwt_result;
+                auto& c0 = decoded_tile.components[0].nLL;
+                auto& c1 = decoded_tile.components[1].nLL;
+                auto& c2 = decoded_tile.components[2].nLL;
                 int w = c0.rect.width();
                 // XXX verify components have same dimensions
                 for (int y = 0; y < c0.rect.height(); ++y) {
@@ -3002,9 +3034,9 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
                 // G.3 Irreversible multiple component transformation (ICT)
                 // "The three components input into the ICT shall have the same separation on the reference grid and the same bit-depth."
                 // XXX check
-                auto& c0 = decoded_tile.components[0].idwt_result;
-                auto& c1 = decoded_tile.components[1].idwt_result;
-                auto& c2 = decoded_tile.components[2].idwt_result;
+                auto& c0 = decoded_tile.components[0].nLL;
+                auto& c1 = decoded_tile.components[1].nLL;
+                auto& c2 = decoded_tile.components[2].nLL;
                 int w = c0.rect.width();
                 // XXX verify components have same dimensions
                 for (int y = 0; y < c0.rect.height(); ++y) {
@@ -3036,26 +3068,26 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
 
         for (auto [component_index, component] : enumerate(decoded_tile.components)) {
             if (!context.siz.components[component_index].is_signed()) {
-                for (auto& coefficient : component.idwt_result.coefficients)
+                for (auto& coefficient : component.nLL.coefficients)
                     coefficient += 1u << (context.siz.components[component_index].bit_depth() - 1);
             }
 
             // Convert to 8bpp.
             // XXX: Don't do this for files with palette.
             if (context.siz.components[component_index].bit_depth() != 8) {
-                for (auto& coefficient : component.idwt_result.coefficients)
+                for (auto& coefficient : component.nLL.coefficients)
                     coefficient = 255 * coefficient / (1u << context.siz.components[component_index].bit_depth());
             }
         }
     }
 
     // XXX more tiles
-    int w = context.decoded_tiles[0].components[0].idwt_result.rect.width();
-    int h = context.decoded_tiles[0].components[0].idwt_result.rect.height();
+    int w = context.decoded_tiles[0].components[0].nLL.rect.width();
+    int h = context.decoded_tiles[0].components[0].nLL.rect.height();
     auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            float value = context.decoded_tiles[0].components[0].idwt_result.coefficients[y * w + x];
+            float value = context.decoded_tiles[0].components[0].nLL.coefficients[y * w + x];
 
             u8 byte_value = round_to<u8>(clamp(value, 0.0f, 255.0f));
             u8 r = byte_value;
@@ -3065,13 +3097,13 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
 
             // FIXME: look at component configuration
             if (context.decoded_tiles[0].components.size() == 3) {
-                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
-                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
+                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].nLL.coefficients[y * w + x], 0.0f, 255.0f));
             }
             else if (context.decoded_tiles[0].components.size() == 4) {
-                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
-                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
-                a = round_to<u8>(clamp(context.decoded_tiles[0].components[3].idwt_result.coefficients[y * w + x], 0.0f, 255.0f));
+                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                a = round_to<u8>(clamp(context.decoded_tiles[0].components[3].nLL.coefficients[y * w + x], 0.0f, 255.0f));
             }
 
             //value = (value + 256) / 2;
