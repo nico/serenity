@@ -906,6 +906,8 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
     auto number_of_precincts_from_resolution_level_and_component = [&](int r, int component_index) {
         auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component_index, r, number_of_decomposition_levels_for_component(context, tile, component_index));
 
+// dbgln("ll_rect: {} for tile rect {} component index {} r {}", ll_rect, tile.rect, component_index, r);
+
         // B.6
         // (B-16)
         int num_precincts_wide = 0;
@@ -925,7 +927,7 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
             num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.x() / (1 << PPx));
         if (ll_rect.height() > 0)
             num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.y() / (1 << PPy));
-        dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
+        // dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
         return num_precincts_wide * num_precincts_high;
     };
 
@@ -1098,6 +1100,7 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     if (start_of_tile.tile_part_index == 0) {
         auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
         tile.rect = context.siz.reference_grid_coordinates_for_tile(pq);
+dbgln("tile {} .rect: {}", tile.index, tile.rect);
         tile.progression_iterator = TRY(make_progression_iterator(context, tile));
     }
 
@@ -1564,6 +1567,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
 
 // dbgln("n_b: {}", n_b);
 // dbgln("sub-band rect: {}", rect);
+// dbgln("precinct rect: {}", packet_context.precinct_rect);
 // dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
 
         auto codeblock_x_count = rect_covered_by_codeblocks.width() / (1 << packet_context.xcb_prime);
@@ -1571,7 +1575,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
 
         header.codeblock_x_count = codeblock_x_count;
         header.codeblock_y_count = codeblock_y_count;
-    dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
+    // dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
 
         if (codeblock_x_count == 0 || codeblock_y_count == 0)
             continue;
@@ -1801,9 +1805,12 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
         if (!tile.progression_iterator->has_next())
             return Error::from_string_literal("JPEG2000ImageDecoderPlugin: No more progression orders but packets left");
         progression_data = tile.progression_iterator->next();
+
+    // dbgln("progression order candidate: tile {} layer {}, resolution level: {}, component: {}, precinct {}", tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
+
     } while (progression_data.resolution_level > number_of_decomposition_levels_for_component(context, tile, progression_data.component));
 
-    dbgln("progression order: layer {}, resolution level: {}, component: {}, precinct {}", progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
+    // dbgln("progression order: layer {}, resolution level: {}, component: {}, precinct {}", progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
 
     // Compute tile size at resolution level r.
     int r = progression_data.resolution_level;
@@ -1812,12 +1819,12 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
 
     auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component_index, r, coding_parameters.number_of_decomposition_levels);
 
-dbgln("tile_rect: {}, ll_rect: {}", tile.rect, ll_rect);
+// dbgln("tile_rect: {}, ll_rect: {}", tile.rect, ll_rect);
 
     // B.6
     // (B-16)
     int num_precincts_wide = 0;
-    int num_precincts_high = 0;
+    // int num_precincts_high = 0;
     int PPx = coding_parameters.precinct_sizes[r].PPx;
     int PPy = coding_parameters.precinct_sizes[r].PPy;
 
@@ -1825,10 +1832,10 @@ dbgln("tile_rect: {}, ll_rect: {}", tile.rect, ll_rect);
     if (ll_rect.width() != 0) {
         num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.left() / (1 << PPx));
     }
-    if (ll_rect.height() != 0) {
-        num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
-    }
-    dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
+    // if (ll_rect.height() != 0) {
+    //     num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
+    // }
+    // dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
 
     // "It can happen that numprecincts is 0 for a particular tile-component and resolution level. When this happens, there are no packets for this tile-component and resolution level."
     // XXX: handle
@@ -1857,7 +1864,7 @@ dbgln("tile_rect: {}, ll_rect: {}", tile.rect, ll_rect);
     // int ycb_prime = min(coding_parameters.code_block_height_exponent, r > 0 ? PPy - 1 : PPy);
     int ycb_prime = min(coding_parameters.code_block_height_exponent, PPy);
 
-    dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, coding_parameters.code_block_width_exponent, coding_parameters.code_block_height_exponent, xcb_prime, ycb_prime);
+    // dbgln("PPX: {}, PPY: {}, xcb: {} , ycb: {}, xcb_prime: {}, ycb_prime: {}", PPx, PPy, coding_parameters.code_block_width_exponent, coding_parameters.code_block_height_exponent, xcb_prime, ycb_prime);
 
     // A precinct has sample size 2^PPx * 2^PPy, and a packet contains all code-blocks in a precinct.
     // A codeblock is a 2^xcb' * 2^ycb' block of samples (bounded by precinct size as described in B.7).
@@ -1962,7 +1969,7 @@ dbgln("empty packet per header; skipping");
         // context.decoded_tiles.resize(max(context.tiles.size(), (size_t)tile.index));
         auto& decoded_tile = context.decoded_tiles[tile.index];
         if (decoded_tile.components.is_empty()) {
-            dbgln("making {} componennts", context.siz.components.size());
+            dbgln("tile {} rect {}, making {} componennts", tile.index, tile.rect, context.siz.components.size());
             decoded_tile.components.resize(context.siz.components.size());
             for (auto [component_index, component] : enumerate(decoded_tile.components)) {
                 int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
