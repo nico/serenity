@@ -2997,15 +2997,14 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
 #endif
 
     // Figure G.1 – Placement of the DC level shifting with component transformation
-    // XXX does it make sense to set this per-tile? It can be set, but that should probably be ignored?
-    // XXX also, reversible / irreversible depends on wavelet type, which is even per component?!
-    if (context.cod.multiple_component_transformation_type) {
-        for (auto& tile : context.tiles) {
+    for (auto& tile : context.tiles) {
+        if (tile.cod.value_or(context.cod).multiple_component_transformation_type == CodingStyleDefault::MultipleComponentTransformationType::MultipleComponentTransformationUsed) {
             auto& decoded_tile = context.decoded_tiles[tile.index];
             if (decoded_tile.components.size() < 3)
                 return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Multiple component transformation type but fewer than 3 components");
 
-            if (context.cod.parameters.transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
+            // XXX reversible / irreversible depends on wavelet type, which is per component?!
+            if (tile.cod.value_or(context.cod).parameters.transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
                 // G.2 Reversible multiple component transformation (RCT)
                 // "The three components input into the RCT shall have the same separation on the reference grid and the same bit-depth."
                 // XXX check
