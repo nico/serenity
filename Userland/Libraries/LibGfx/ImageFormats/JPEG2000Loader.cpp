@@ -820,16 +820,20 @@ struct DecodedCoefficients {
 
 struct DecodedComponent {
     IntRect rect;
-    DecodedCoefficients nLL;
+    DecodedCoefficients nLL; // r == 0 <=> N_L LL
 
     // XXX bad name maybe? each entry are 3 subbands already,
     // so subbands_bands or something? needs self-consistent names.
+    // sub_bands[r] <=> N_L - r HL, LH, HH
     Vector<Array<DecodedCoefficients, 3>> sub_bands;
+
+    // nLL_rects[i] <=> N_L - i + 1 LL rect
+    Vector<IntRect> nLL_rects;
 
     ImageAndTileSize::ComponentInformation component_info;
 
-    int component_index {};
-    IntRect tile_rect;
+    // int component_index {};
+    // IntRect tile_rect;
 
     DecodedCoefficients idwt_result;
 };
@@ -1977,9 +1981,19 @@ dbgln("empty packet per header; skipping");
                 dbgln("making {} sub-bands", num_decomposition_levels);
                 component.sub_bands.resize(num_decomposition_levels);
                 component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
+
                 component.component_info = context.siz.components[component_index];
-                component.component_index = component_index;
-                component.tile_rect = tile.rect;
+                // component.component_index = component_index;
+                // component.tile_rect = tile.rect;
+
+                int N_L = coding_parameters.number_of_decomposition_levels;
+                for (int r = 2; r <= num_decomposition_levels + 1; ++r) {
+                    int n_b = r == 0 ? N_L : (N_L + 1 - r); // always right branch
+                    auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, component_index, n_b, SubBand::HorizontalLowpassVerticalLowpass);
+dbgln("r {} llrect {}", r, rect);
+                    component.nLL_rects.append(rect);
+                }
+
             }
         }
 
@@ -2651,30 +2665,15 @@ static void _1D_EXTR(CodingStyleParameters::Transformation transformation, Decod
 static void _1D_FILTR(CodingStyleParameters::Transformation transformation, DecodedCoefficients& a, int start, int lower, int higher, int delta);
 
 // F.3.1 The IDWT procedure
-[[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(JPEG2000LoadingContext const& context, CodingStyleParameters::Transformation transformation, DecodedComponent const& component)
+[[maybe_unused]] static ErrorOr<DecodedCoefficients> IDWT(CodingStyleParameters::Transformation transformation, DecodedComponent const& component)
 {
     // Figure F.3 – The IDWT procedure
     // XXX make look more like spec
     auto ll = component.nLL;
 
-    int N_L = component.sub_bands.size();
-
     for (auto [r_minus_1, sub_band] : enumerate(component.sub_bands)) {
-        int r = r_minus_1 + 1;
-
-        // " The values of u0, u1, v0, v1 used by the 2D_INTERLEAVE procedure are those of tbx0, tbx1, tby0, tby1
-        //   corresponding to sub-band b = (lev – 1)LL  (see definition in Equation (B-15))"
-        // Uses lev like n in B.5 though, so need +1.
-        ++r; // XXX more comment
-        int n_b = r == 0 ? N_L : (N_L + 1 - r);
-        auto rect = context.siz.reference_grid_coordinates_for_sub_band(component.tile_rect, component.component_index, n_b, SubBand::HorizontalLowpassVerticalLowpass);
-
-        // XXX some VERIFY()s
-        // apparently rect.location() is not necessarily ll.location()?
-        // but check that sizes add up to it
-
+        auto rect = component.nLL_rects[r_minus_1];
         ll = TRY(_2D_SR(rect, transformation, move(ll), sub_band[0], sub_band[1], sub_band[2]));
-
         TRY(save_pyramid(ll, component));
     }
 
@@ -2961,7 +2960,7 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 
 dbgln("idwt for tile {} component {}", tile.index, component_index);
             auto transformation = coding_style_parameters_for_component(context, tile, component_index).transformation;
-            component.idwt_result = TRY(IDWT(context, transformation, component));
+            component.idwt_result = TRY(IDWT(transformation, component));
         }
     }
 
