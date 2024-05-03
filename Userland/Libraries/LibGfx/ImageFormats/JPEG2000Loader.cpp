@@ -2012,6 +2012,9 @@ dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, 
         int w = rect.width();
         int h = rect.height();
 
+        // XXX here, append() a PrecinctInfo with rect clipped_precinct_rect, and with a Vector<IntRect> code_block rects.
+        // want to do this per sub-band.
+
         for (int y = 0; y < h; ++y) {
             for (int x = 0; x < w; ++x) {
                 float value = header.sub_bands[i].coefficients[y * w + x];
