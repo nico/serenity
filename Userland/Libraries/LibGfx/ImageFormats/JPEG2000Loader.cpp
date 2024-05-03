@@ -3081,39 +3081,43 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
         }
     }
 
-    // XXX more tiles
-    int w = context.decoded_tiles[0].components[0].nLL.rect.width();
-    int h = context.decoded_tiles[0].components[0].nLL.rect.height();
-    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { w, h }));
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            float value = context.decoded_tiles[0].components[0].nLL.coefficients[y * w + x];
+    auto bitmap = TRY(Gfx::Bitmap::create(Gfx::BitmapFormat::BGRA8888, { context.siz.width, context.siz.height }));
+    for (size_t tile_index = 0; tile_index < context.decoded_tiles.size(); ++tile_index) {
+        auto& decoded_tile = context.decoded_tiles[tile_index];
 
-            u8 byte_value = round_to<u8>(clamp(value, 0.0f, 255.0f));
-            u8 r = byte_value;
-            u8 g = byte_value;
-            u8 b = byte_value;
-            u8 a = 255;
+        // XXX per-component subsampling
+        int w = decoded_tile.components[0].nLL.rect.width();
+        int h = decoded_tile.components[0].nLL.rect.height();
+        for (int y = 0; y < h; ++y) {
+            for (int x = 0; x < w; ++x) {
+                float value = decoded_tile.components[0].nLL.coefficients[y * w + x];
 
-            // FIXME: look at component configuration
-            if (context.decoded_tiles[0].components.size() == 3) {
-                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].nLL.coefficients[y * w + x], 0.0f, 255.0f));
-                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                u8 byte_value = round_to<u8>(clamp(value, 0.0f, 255.0f));
+                u8 r = byte_value;
+                u8 g = byte_value;
+                u8 b = byte_value;
+                u8 a = 255;
+
+                // FIXME: look at component configuration
+                if (context.decoded_tiles[0].components.size() == 3) {
+                    g = round_to<u8>(clamp(decoded_tile.components[1].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                    b = round_to<u8>(clamp(decoded_tile.components[2].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                }
+                else if (context.decoded_tiles[0].components.size() == 4) {
+                    g = round_to<u8>(clamp(decoded_tile.components[1].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                    b = round_to<u8>(clamp(decoded_tile.components[2].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                    a = round_to<u8>(clamp(decoded_tile.components[3].nLL.coefficients[y * w + x], 0.0f, 255.0f));
+                }
+
+                //value = (value + 256) / 2;
+                // dbgln("x {} y {} value {}", x, y, value);
+                Color pixel;
+                pixel.set_red(r);
+                pixel.set_green(g);
+                pixel.set_blue(b);
+                pixel.set_alpha(a);
+                bitmap->set_pixel(x + decoded_tile.components[0].rect.left(), y + decoded_tile.components[0].rect.top(), pixel);
             }
-            else if (context.decoded_tiles[0].components.size() == 4) {
-                g = round_to<u8>(clamp(context.decoded_tiles[0].components[1].nLL.coefficients[y * w + x], 0.0f, 255.0f));
-                b = round_to<u8>(clamp(context.decoded_tiles[0].components[2].nLL.coefficients[y * w + x], 0.0f, 255.0f));
-                a = round_to<u8>(clamp(context.decoded_tiles[0].components[3].nLL.coefficients[y * w + x], 0.0f, 255.0f));
-            }
-
-            //value = (value + 256) / 2;
-            // dbgln("x {} y {} value {}", x, y, value);
-            Color pixel;
-            pixel.set_red(r);
-            pixel.set_green(g);
-            pixel.set_blue(b);
-            pixel.set_alpha(a);
-            bitmap->set_pixel(x, y, pixel);
         }
     }
 
