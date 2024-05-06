@@ -566,6 +566,7 @@ if (BUILD_LAGOM)
 
         lagom_utility(icc SOURCES ../../Userland/Utilities/icc.cpp LIBS LibGfx LibMain LibURL)
         lagom_utility(image SOURCES ../../Userland/Utilities/image.cpp LIBS LibGfx LibMain)
+        lagom_utility(make-webp SOURCES ../../Userland/Utilities/make-webp.cpp LIBS LibGfx LibMain)
         lagom_utility(isobmff SOURCES ../../Userland/Utilities/isobmff.cpp LIBS LibGfx LibMain)
         lagom_utility(ttfdisasm SOURCES ../../Userland/Utilities/ttfdisasm.cpp LIBS LibGfx LibMain)
         lagom_utility(js SOURCES ../../Userland/Utilities/js.cpp LIBS LibCrypto LibJS LibLine LibLocale LibMain LibTextCodec Threads::Threads)
