@@ -8,6 +8,7 @@
 // Lossless format: https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification
 
 #include <AK/Endian.h>
+#include <AK/Hex.h>
 #include <AK/BitStream.h>
 #include <LibCore/ArgsParser.h>
 #include <LibCore/MappedFile.h>
@@ -19,6 +20,8 @@ struct Options {
     StringView out_path;
     int width { 512 };
     int height { 512 };
+    Gfx::Color color { Color::Red };
+    int predictor { -1 }; // -1 means none; valid values are 0-13.
 };
 
 // https://developers.google.com/speed/webp/docs/riff_container#webp_file_header
@@ -70,12 +73,43 @@ static ErrorOr<void> write_VP8L_header(Stream& stream, unsigned width, unsigned 
     return {};
 }
 
-static ErrorOr<void> write_VP8L_image_data(Stream& stream)
+static ErrorOr<void> write_VP8L_image_data(Stream& stream, Options const& options)
 {
     LittleEndianOutputBitStream bit_stream { MaybeOwned<Stream>(stream) };
 
     // optional-transform   =  (%b1 transform optional-transform) / %b0
-    TRY(bit_stream.write_bits(0u, 1u)); // No transform for now.
+
+    bool write_predictor_transform = options.predictor != -1;
+    if (write_predictor_transform) {
+        TRY(bit_stream.write_bits(1u, 1u)); // Transform present.
+        TRY(bit_stream.write_bits(0u, 2u)); // PREDICTOR_TRANSFORM
+
+        // int size_bits = ReadBits(3) + 2;
+        TRY(bit_stream.write_bits(7u, 3u)); // PREDICTOR_TRANSFORM
+
+        TRY(bit_stream.write_bits(0u, 1u)); // No color cache.
+
+        // Meta prefix presence is only stored for spatially-coded images (i.e. the main image), not for entropy images (e.g. the predictor image).
+
+        // G stores the predictor image.
+        TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
+        TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
+        TRY(bit_stream.write_bits(1u, 1u)); // is_first_8bits
+        TRY(bit_stream.write_bits((unsigned)options.predictor, 8u)); // symbol0
+
+        for (int i = 0; i < 4; ++i) {
+            // The other 4 channels are unused.
+            TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
+            TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
+            TRY(bit_stream.write_bits(0u, 1u)); // is_first_8bits
+            TRY(bit_stream.write_bits(0u, 1u)); // symbol0
+        }
+
+        // No actual data to store since it's 0 bits per entry again.
+    }
+
+
+    TRY(bit_stream.write_bits(0u, 1u)); // No further transforms.
 
     // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#5_image_data
     // spatially-coded-image =  color-cache-info meta-prefix data
@@ -87,34 +121,29 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream)
     // meta-prefix           =  %b0 / (%b1 entropy-image)
     TRY(bit_stream.write_bits(0u, 1u)); // No meta prefix for now.
 
-    u8 r = 255;
-    u8 g = 0;
-    u8 b = 0;
-    u8 a = 255;
-
     // G
     TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
     TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
     TRY(bit_stream.write_bits(1u, 1u)); // is_first_8bits
-    TRY(bit_stream.write_bits(g, 8u)); // symbol0
+    TRY(bit_stream.write_bits(options.color.green(), 8u)); // symbol0
 
     // R
     TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
     TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
     TRY(bit_stream.write_bits(1u, 1u)); // is_first_8bits
-    TRY(bit_stream.write_bits(r, 8u)); // symbol0
+    TRY(bit_stream.write_bits(options.color.red(), 8u)); // symbol0
 
     // B
     TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
     TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
     TRY(bit_stream.write_bits(1u, 1u)); // is_first_8bits
-    TRY(bit_stream.write_bits(b, 8u)); // symbol0
+    TRY(bit_stream.write_bits(options.color.blue(), 8u)); // symbol0
 
     // A
     TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
     TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
     TRY(bit_stream.write_bits(1u, 1u)); // is_first_8bits
-    TRY(bit_stream.write_bits(a, 8u)); // symbol0
+    TRY(bit_stream.write_bits(options.color.alpha(), 8u)); // symbol0
 
     // Distance codes (unused).
     TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
@@ -148,7 +177,7 @@ ErrorOr<void> write_webp(Stream& stream, Options const& options)
     auto vp8l_header_bytes = TRY(vp8l_header_stream.read_until_eof());
 
     AllocatingMemoryStream vp8l_data_stream;
-    TRY(write_VP8L_image_data(vp8l_data_stream));
+    TRY(write_VP8L_image_data(vp8l_data_stream, options));
     auto vp8l_data_bytes = TRY(vp8l_data_stream.read_until_eof());
 
     AllocatingMemoryStream vp8l_chunk_stream;
@@ -163,15 +192,45 @@ ErrorOr<void> write_webp(Stream& stream, Options const& options)
     return {};
 }
 
+#if 0
+// Let's use Color::from_string() instead, thanks Mr Flynn!
+static ErrorOr<Gfx::Color> parse_hex_color(StringView color_string)
+{
+    if (color_string.length() != 7 && color_string.length() != 9)
+        return Error::from_string_view("Color must be in the format #RRGGBB or #RRGGBBAA"sv);
+
+    if (color_string[0] != '#')
+        return Error::from_string_view("Color must start with #"sv);
+
+    auto bytes = TRY(decode_hex(color_string.substring_view(1)));
+    VERIFY(bytes.size() == 3 || bytes.size() == 4);
+
+    return Gfx::Color(bytes[0], bytes[1], bytes[2], bytes.size() == 4 ? bytes[3] : 255);
+}
+#endif
+
 static ErrorOr<Options> parse_options(Main::Arguments arguments)
 {
     Options options;
     Core::ArgsParser args_parser;
     args_parser.add_option(options.out_path, "Path to output image file", "output", 'o', "FILE");
+    args_parser.add_option(options.width, "Width of the image (default: 512)", "width", {}, "WIDTH");
+    args_parser.add_option(options.height, "Height of the image (default: 512)", "height", {}, "HEIGHT");
+    args_parser.add_option(options.predictor, "Predictor to use (valid values: 0-13, -1 for None; default: -1)", "predictor", {}, "PREDICTOR");
+    StringView color_string = "#FF0000"sv;
+    args_parser.add_option(color_string, "Color to use (format: #RRGGBB or #RRGGBBAA; default: #FF0000)", "color", {}, "COLOR");
     args_parser.parse(arguments);
+
+    auto color = Color::from_string(color_string);
+    if (!color.has_value())
+        return Error::from_string_view("Invalid color"sv);
+    options.color = color.value();
 
     if (options.out_path.is_empty())
         return Error::from_string_view("-o is required"sv);
+
+    if (options.predictor < -1 || options.predictor > 13)
+        return Error::from_string_view("Predictor must be -1 or between 0 and 13"sv);
 
     return options;
 }
