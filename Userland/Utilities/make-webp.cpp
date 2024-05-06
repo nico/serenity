@@ -79,13 +79,82 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Options const& option
 
     // optional-transform   =  (%b1 transform optional-transform) / %b0
 
+    // XXX try reordering color index transform and predictor transform
+    bool write_color_index_transform = true;
+    if (write_color_index_transform) {
+        TRY(bit_stream.write_bits(1u, 1u)); // Transform present.
+        TRY(bit_stream.write_bits(3u, 2u)); // COLOR_INDEXING_TRANSFORM
+
+        // int color_table_size = ReadBits(8) + 1;
+        u32 color_table_size = 256; // Interesting values (due to bundling): 1, 2, 4, 16, 256.
+        TRY(bit_stream.write_bits(color_table_size - 1, 8u));
+
+        size_t const color_cache_size = 0;
+        TRY(bit_stream.write_bits(0u, 1u)); // No color cache.
+
+        // Meta prefix presence is only stored for spatially-coded images (i.e. the main image), not for entropy images (e.g. the color index image).
+
+        constexpr Array alphabet_sizes = to_array<size_t>({ 256 + 24 + static_cast<size_t>(color_cache_size), 256, 256, 256, 40 }); // XXX Shared?
+
+        for (int i = 0; i < 4; ++i) {
+            TRY(bit_stream.write_bits(0u, 1u)); // Normal code length code.
+
+            // Write code length codes.
+            constexpr int kCodeLengthCodes = 19;
+            Array<int, kCodeLengthCodes> kCodeLengthCodeOrder = { 17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+            int num_code_lengths = max(4u, find_index(kCodeLengthCodeOrder.begin(), kCodeLengthCodeOrder.end(), 8) + 1);
+
+            // "int num_code_lengths = 4 + ReadBits(4);"
+            TRY(bit_stream.write_bits(num_code_lengths - 4u, 4u));
+
+            for (int i = 0; i < num_code_lengths - 1; ++i)
+                TRY(bit_stream.write_bits(0u, 3u));
+            TRY(bit_stream.write_bits(1u, 3u));
+
+            // Write code lengths.
+            if (alphabet_sizes[i] == 256) {
+                TRY(bit_stream.write_bits(0u, 1u)); // max_symbol is alphabet_size
+            } else {
+                TRY(bit_stream.write_bits(1u, 1u)); // max_symbol is explicitly coded
+                // "int length_nbits = 2 + 2 * ReadBits(3);"
+                TRY(bit_stream.write_bits(3u, 3u));   // length_nbits = 2 + 2 * 3
+                // "int max_symbol = 2 + ReadBits(length_nbits);"
+                TRY(bit_stream.write_bits(254u, 8u)); // max_symbol = 2 + 254
+            }
+        }
+
+        // Don't use #5 to write the color index.
+        TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
+        TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
+        TRY(bit_stream.write_bits(0u, 1u)); // is_first_8bits
+        TRY(bit_stream.write_bits(0u, 1u)); // symbol0
+
+        u8 last_r = 0, last_g = 0, last_b = 0, last_a = 0;
+        for (u32 i = 0; i < color_table_size; ++i) {
+            u8 r = i;
+            u8 g = 255 - i;
+            u8 b = 128;
+            u8 a = 255;
+
+            TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[(u8)(g - last_g)], 8u));
+            TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[(u8)(r - last_r)], 8u));
+            TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[(u8)(b - last_b)], 8u));
+            TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[(u8)(a - last_a)], 8u));
+
+            last_r = r;
+            last_g = g;
+            last_b = b;
+            last_a = a;
+        }
+    }
+
     bool write_predictor_transform = options.predictor != -1;
     if (write_predictor_transform) {
         TRY(bit_stream.write_bits(1u, 1u)); // Transform present.
         TRY(bit_stream.write_bits(0u, 2u)); // PREDICTOR_TRANSFORM
 
         // int size_bits = ReadBits(3) + 2;
-        TRY(bit_stream.write_bits(7u, 3u)); // PREDICTOR_TRANSFORM
+        TRY(bit_stream.write_bits(7u, 3u)); // 7 + 2; value doesn't matter.
 
         TRY(bit_stream.write_bits(0u, 1u)); // No color cache.
 
@@ -108,7 +177,6 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Options const& option
         // No actual data to store since it's 0 bits per entry again.
     }
 
-
     TRY(bit_stream.write_bits(0u, 1u)); // No further transforms.
 
     // https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification#5_image_data
@@ -117,6 +185,7 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Options const& option
     // color-cache-info      =  %b0
     // color-cache-info      =/ (%b1 4BIT) ; 1 followed by color cache size
     TRY(bit_stream.write_bits(0u, 1u)); // No color cache for now.
+    // XXX try using a color cache and making the constant value a color cache entry?
 
     // meta-prefix           =  %b0 / (%b1 entropy-image)
     TRY(bit_stream.write_bits(0u, 1u)); // No meta prefix for now.
