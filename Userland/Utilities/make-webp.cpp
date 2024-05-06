@@ -86,7 +86,7 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Options const& option
         TRY(bit_stream.write_bits(3u, 2u)); // COLOR_INDEXING_TRANSFORM
 
         // int color_table_size = ReadBits(8) + 1;
-        u32 color_table_size = 256; // Interesting values (due to bundling): 1, 2, 4, 16, 256.
+        u32 color_table_size = 4; // Interesting values (due to bundling): 1, 2, 4, 16, 256.
         TRY(bit_stream.write_bits(color_table_size - 1, 8u));
 
         size_t const color_cache_size = 0;
@@ -96,6 +96,7 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Options const& option
 
         constexpr Array alphabet_sizes = to_array<size_t>({ 256 + 24 + static_cast<size_t>(color_cache_size), 256, 256, 256, 40 }); // XXX Shared?
 
+        // XXX this stores the palette uncompressed. would be cooler to compress it!
         for (int i = 0; i < 4; ++i) {
             TRY(bit_stream.write_bits(0u, 1u)); // Normal code length code.
 
@@ -131,8 +132,8 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Options const& option
 
         u8 last_r = 0, last_g = 0, last_b = 0, last_a = 0;
         for (u32 i = 0; i < color_table_size; ++i) {
-            u8 r = i;
-            u8 g = 255 - i;
+            u8 r = (i * 255 / (color_table_size - 1));
+            u8 g = 255 - (i * 255 / (color_table_size - 1));
             u8 b = 128;
             u8 a = 255;
 
