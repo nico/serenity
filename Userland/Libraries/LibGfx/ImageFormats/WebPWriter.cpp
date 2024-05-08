@@ -11,6 +11,7 @@
 #include <AK/Debug.h>
 #include <LibCompress/DeflateTables.h>
 #include <LibGfx/Bitmap.h>
+#include <LibGfx/ImageFormats/WebPLosslessShared.h>
 #include <LibGfx/ImageFormats/WebPShared.h>
 #include <LibGfx/ImageFormats/WebPWriter.h>
 #include <LibRIFF/RIFF.h>
@@ -120,6 +121,7 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Bitmap const& bitmap)
 
     bool all_pixels_are_opaque = are_all_pixels_opaque(bitmap);
 
+    PrefixCodeGroup prefix_code_group;
     int number_of_full_channels = all_pixels_are_opaque ? 3 : 4;
     for (int i = 0; i < number_of_full_channels; ++i) {
         TRY(bit_stream.write_bits(0u, 1u)); // Normal code length code.
@@ -147,6 +149,11 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Bitmap const& bitmap)
             TRY(bit_stream.write_bits(254u, 8u)); // max_symbol = 2 + 254
         }
 
+        Array<u8, 256> bits_per_symbol;
+        for (int i = 0; i < 256; ++i)
+            bits_per_symbol[i] = 8;
+        prefix_code_group[i] = MUST(CanonicalCode::from_bytes(bits_per_symbol));
+
         // The code length codes only contain a single entry for '8'. WebP streams with a single element store 0 bits per element.
         // (This is different from deflate, which needs 1 bit per element.)
     }
@@ -157,13 +164,27 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Bitmap const& bitmap)
         TRY(bit_stream.write_bits(0u, 1u));   // num_symbols - 1
         TRY(bit_stream.write_bits(1u, 1u));   // is_first_8bits
         TRY(bit_stream.write_bits(255u, 8u)); // symbol0
+
+        Array<u8, 256> bits_per_symbol {};
+        // "When coding a single leaf node [...], all but one code length are zeros, and the single leaf node value
+        //  is marked with the length of 1 -- even when no bits are consumed when that single leaf node tree is used."
+        // CanonicalCode follows that convention too, even when describing simple code lengths.
+        bits_per_symbol[255] = 1;
+        prefix_code_group[3] = MUST(CanonicalCode::from_bytes(bits_per_symbol));
+
     }
 
     // For code #5, use a simple empty code, since we don't use this yet.
+    // "Note: Another special case is when all prefix code lengths are zeros (an empty prefix code). [...]
+    //  empty prefix codes can be coded as those containing a single symbol 0."
     TRY(bit_stream.write_bits(1u, 1u)); // Simple code length code.
     TRY(bit_stream.write_bits(0u, 1u)); // num_symbols - 1
     TRY(bit_stream.write_bits(0u, 1u)); // is_first_8bits
     TRY(bit_stream.write_bits(0u, 1u)); // symbol0
+    Array<u8, 256> bits_per_symbol {};
+    bits_per_symbol[0] = 1; // XXX comment
+    prefix_code_group[4] = MUST(CanonicalCode::from_bytes(bits_per_symbol));
+
 
     // Image data.
     for (ARGB32 pixel : bitmap) {
@@ -172,15 +193,10 @@ static ErrorOr<void> write_VP8L_image_data(Stream& stream, Bitmap const& bitmap)
         u8 g = pixel >> 8;
         u8 b = pixel;
 
-        // We wrote a huffman table that gives every symbol 8 bits. That means we can write the image data
-        // out uncompressed –- but we do need to reverse the bit order of the bytes.
-        TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[g], 8u));
-        TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[r], 8u));
-        TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[b], 8u));
-
-        // If all pixels are opaque, we wrote a one-element huffman table for alpha, which needs 0 bits per element.
-        if (!all_pixels_are_opaque)
-            TRY(bit_stream.write_bits(Compress::reverse8_lookup_table[a], 8u));
+        TRY(prefix_code_group[0].write_symbol(bit_stream, g));
+        TRY(prefix_code_group[1].write_symbol(bit_stream, r));
+        TRY(prefix_code_group[2].write_symbol(bit_stream, b));
+        TRY(prefix_code_group[3].write_symbol(bit_stream, a));
     }
 
     // FIXME: Make ~LittleEndianOutputBitStream do this, or make it VERIFY() that it has happened at least.
