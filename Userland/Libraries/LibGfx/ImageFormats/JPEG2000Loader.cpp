@@ -1008,6 +1008,9 @@ static ErrorOr<void> parse_codestream_main_header(JPEG2000LoadingContext& contex
     context.siz = TRY(read_image_and_tile_size(marker.data.value()));
 
     context.tiles.resize(context.siz.number_of_x_tiles() * context.siz.number_of_y_tiles());
+    for (size_t i = 0; i < context.tiles.size(); ++i)
+        context.tiles[i].index = i;
+
     context.decoded_tiles.resize(context.siz.number_of_x_tiles() * context.siz.number_of_y_tiles());
 
     bool saw_COD_marker = false;
@@ -1093,7 +1096,8 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     // context.decoded_tiles.resize(max(context.decoded_tiles.size(), (size_t)start_of_tile.tile_index + 1));
 
     auto& tile = context.tiles[start_of_tile.tile_index];
-    tile.index = start_of_tile.tile_index;
+    if (tile.index != start_of_tile.tile_index)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Tile index out of order");
 
     if (tile.tile_parts.size() != start_of_tile.tile_part_index)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Tile part index out of order");
