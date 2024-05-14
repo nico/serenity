@@ -1728,8 +1728,8 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     if (cod.may_use_EPH_marker)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: EPH marker not yet implemented");
 
-    // if (cod.number_of_layers != 1)
-        // return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
+    if (cod.number_of_layers != 1)
+        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
 
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
