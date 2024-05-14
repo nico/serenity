@@ -1700,6 +1700,13 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
         }
     }
 
+    if (last_full_byte == 0xFF) {
+dbgln("final stuff!");
+        bool stuff_bit = TRY(read_bit());
+        if (stuff_bit)
+            return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Invalid bit-stuffing");
+    }
+
     return header;
 }
 
