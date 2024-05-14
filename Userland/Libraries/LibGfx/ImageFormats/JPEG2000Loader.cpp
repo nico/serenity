@@ -1349,6 +1349,7 @@ struct TagTreeNode {
             }
 
             bool bit = TRY(read_bit());
+// dbgln("read_value: x: {}, y: {}, bit: {}, value: {}", x, y, bit, value);
             if (!bit)
                 value++;
             else
@@ -1745,6 +1746,8 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part)
 {
+    // dbgln("decoding tile {} part {}", tile_part.sot.tile_index, tile_part.sot.tile_part_index);
+
     auto data = tile_part.data;
 
 int n = 0;
@@ -1913,6 +1916,16 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
     FixedMemoryStream stream { data };
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
+#if 0
+dbg("raw header:");
+for (int i = 0; i < 15; ++i) {
+if (i % 4 == 0) dbg(" ");
+dbg("{:02x}", data[i]);
+}
+dbgln();
+#endif
+
+    // XXX why do we pass in a bitstream here instead of just bytes?
     auto header = TRY(read_packet_header(context, bitstream, packet_context, tile, coding_parameters, progression_data));
     if (header.is_empty) {
 dbgln("empty packet per header; skipping");
