@@ -11,6 +11,7 @@
 #include <LibCompress/PackBitsDecoder.h>
 #include <LibGfx/ImageFormats/CCITTDecoder.h>
 #include <LibGfx/ImageFormats/JBIG2Loader.h>
+#include <LibGfx/ImageFormats/JPEG2000Loader.h>
 #include <LibGfx/ImageFormats/JPEGLoader.h>
 #include <LibGfx/ImageFormats/PNGLoader.h>
 #include <LibPDF/CommonNames.h>
@@ -364,10 +365,10 @@ PDFErrorOr<ByteBuffer> Filter::decode_jbig2(Document* document, ReadonlyBytes by
 
 PDFErrorOr<ByteBuffer> Filter::decode_dct(ReadonlyBytes bytes)
 {
-    if (!Gfx::JPEGImageDecoderPlugin::sniff({ bytes.data(), bytes.size() }))
+    if (!Gfx::JPEGImageDecoderPlugin::sniff(bytes))
         return AK::Error::from_string_literal("Not a JPEG image!");
 
-    auto decoder = TRY(Gfx::JPEGImageDecoderPlugin::create_with_options({ bytes.data(), bytes.size() }, { .cmyk = Gfx::JPEGDecoderOptions::CMYK::PDF }));
+    auto decoder = TRY(Gfx::JPEGImageDecoderPlugin::create_with_options(bytes, { .cmyk = Gfx::JPEGDecoderOptions::CMYK::PDF }));
     auto internal_format = decoder->natural_frame_format();
 
     if (internal_format == Gfx::NaturalFrameFormat::CMYK) {
@@ -398,9 +399,45 @@ PDFErrorOr<ByteBuffer> Filter::decode_dct(ReadonlyBytes bytes)
     return buffer;
 }
 
-PDFErrorOr<ByteBuffer> Filter::decode_jpx(ReadonlyBytes)
+PDFErrorOr<ByteBuffer> Filter::decode_jpx(ReadonlyBytes bytes)
 {
-    return Error::rendering_unsupported_error("JPX Filter is not supported");
+    if (!Gfx::JPEG2000ImageDecoderPlugin::sniff(bytes))
+        return AK::Error::from_string_literal("Not a JPEG2000 image!");
+
+    auto decoder = TRY(Gfx::JPEG2000ImageDecoderPlugin::create(bytes));
+
+    // auto internal_format = decoder->natural_frame_format();
+    // FIXME: CMYK stuff
+    // FIXME: grayscale stuff
+    // FIXME: embedded colorspace stuff
+    // FIXME: alpha only if present; and also only if
+    // FIXME: per-channel alpha (?!)
+    // FIXME: chroma-key transparency
+    // FIXME: enumerated color spaces 12 (CMYK) and 19 (CIELab)
+
+    auto bitmap = TRY(decoder->frame(0)).image;
+    // auto size = bitmap->size().width() * bitmap->size().height() * (internal_format == Gfx::NaturalFrameFormat::Grayscale ? 1 : 3);
+    auto size = bitmap->size().width() * bitmap->size().height() * 4;
+    ByteBuffer buffer;
+    TRY(buffer.try_ensure_capacity(size));
+
+    for (auto& pixel : *bitmap) {
+        Color color = Color::from_argb(pixel);
+        // if (internal_format == Gfx::NaturalFrameFormat::Grayscale) {
+        //     // Either channel is fine, they're all the same.
+        //     buffer.append(color.red());
+        // } else {
+            buffer.append(color.red());
+            buffer.append(color.green());
+            buffer.append(color.blue());
+
+            // XXX instead of storing alpha inline, extract separate SMask if SMaskInData set
+            // buffer.append(color.alpha()); // XXX first? last?
+        // }
+    }
+    return buffer;
+
+    // return Error::rendering_unsupported_error("JPX Filter is not supported");
 }
 
 PDFErrorOr<ByteBuffer> Filter::decode_crypt(ReadonlyBytes)

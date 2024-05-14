@@ -1111,6 +1111,7 @@ PDFErrorOr<Renderer::LoadedImage> Renderer::load_image(NonnullRefPtr<StreamObjec
     auto width = TRY(m_document->resolve_to<int>(image_dict->get_value(CommonNames::Width)));
     auto height = TRY(m_document->resolve_to<int>(image_dict->get_value(CommonNames::Height)));
 
+#if 0
     auto is_filter = [&](DeprecatedFlyString const& name) -> PDFErrorOr<bool> {
         if (!image_dict->contains(CommonNames::Filter))
             return false;
@@ -1123,19 +1124,28 @@ PDFErrorOr<Renderer::LoadedImage> Renderer::load_image(NonnullRefPtr<StreamObjec
         auto last_filter_index = filters->elements().size() - 1;
         return MUST(filters->get_name_at(m_document, last_filter_index))->name() == name;
     };
-    if (TRY(is_filter(CommonNames::JPXDecode))) {
-        return Error(Error::Type::RenderingUnsupported, "JPXDecode filter");
-    }
+#endif
+    // XXX
+    // if (TRY(is_filter(CommonNames::JPXDecode))) {
+        // return Error(Error::Type::RenderingUnsupported, "JPXDecode filter");
+    // }
 
     bool is_image_mask = false;
     if (image_dict->contains(CommonNames::ImageMask)) {
         is_image_mask = TRY(m_document->resolve_to<bool>(image_dict->get_value(CommonNames::ImageMask)));
     }
 
+    // "SMaskInData specifies whether soft-mask information packaged with the im- age samples should be used (see “Soft-Mask Images” on page 553);
+    //  if it is, the SMask entry is not needed. If SMaskInData is nonzero, there must be only one opacity channel in the JPEG2000 data and
+    //  it must apply to all color channels."
+
     // "(Required for images, except those that use the JPXDecode filter; not allowed for image masks) [...]
     //  it can be any type of color space except Pattern."
     NonnullRefPtr<ColorSpace> color_space = DeviceGrayColorSpace::the();
     if (!is_image_mask) {
+        // XXX JPX does not require this (might be embedded)
+        // "If ColorSpace is not present in the image dictionary, the color space informa- tion in the JPEG2000 data is used."
+        // e.g. 0000117.pdf page 4
         auto color_space_object = MUST(image_dict->get_object(m_document, CommonNames::ColorSpace));
         color_space = TRY(get_color_space_from_document(color_space_object));
     }
@@ -1166,6 +1176,9 @@ PDFErrorOr<Renderer::LoadedImage> Renderer::load_image(NonnullRefPtr<StreamObjec
 
     int const n_components = color_space->number_of_components();
 
+    // XXX for JPX:
+    // "Decode is ignored, except in the case where the image is treated as a mask; that is, when ImageMask is true.
+    //  In this case, the JPEG2000 data must provide a single color channel with 1-bit samples."
     Vector<float> decode_array;
     if (image_dict->contains(CommonNames::Decode)) {
         decode_array = MUST(image_dict->get_array(m_document, CommonNames::Decode))->float_elements();

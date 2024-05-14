@@ -2977,7 +2977,7 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
 #else
     for (size_t component_index = 0; component_index < context.siz.components.size(); ++component_index) {
         // XXX instead of this, take max over all tile components since this can vary per tile and per component
-        TRY(save_pyramid(context, component_index));
+        // TRY(save_pyramid(context, component_index));
         for (size_t r_minus_1 = 0; r_minus_1 < context.cod.parameters.number_of_decomposition_levels; ++r_minus_1) {
             for (size_t tile_index = 0; tile_index < context.tiles.size(); ++tile_index) {
                 auto& tile = context.tiles[tile_index];
@@ -2994,7 +2994,7 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
                 auto rect = component.nLL_rects[r_minus_1];
                 component.nLL = TRY(_2D_SR(rect, transformation, move(component.nLL), sub_band[0], sub_band[1], sub_band[2]));
             }
-            TRY(save_pyramid(context, component_index));
+            // TRY(save_pyramid(context, component_index));
         }
     }
 #endif
