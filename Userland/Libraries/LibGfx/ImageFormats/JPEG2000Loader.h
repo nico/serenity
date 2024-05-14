@@ -45,6 +45,8 @@ public:
 
     virtual ErrorOr<Optional<ReadonlyBytes>> icc_data() override;
 
+    virtual NaturalFrameFormat natural_frame_format() const override;
+
 private:
     JPEG2000ImageDecoderPlugin();
 
