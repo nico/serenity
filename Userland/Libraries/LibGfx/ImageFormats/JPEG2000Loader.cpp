@@ -1716,8 +1716,8 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     if (cod.may_use_EPH_marker)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: EPH marker not yet implemented");
 
-    if (cod.number_of_layers != 1)
-        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
+    // if (cod.number_of_layers != 1)
+        // return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
 
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
@@ -1814,7 +1814,7 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
 
     } while (progression_data.resolution_level > number_of_decomposition_levels_for_component(context, tile, progression_data.component));
 
-    // dbgln("progression order: layer {}, resolution level: {}, component: {}, precinct {}", progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
+    dbgln("progression order: layer {}, resolution level: {}, component: {}, precinct {}", progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
 
     // Compute tile size at resolution level r.
     int r = progression_data.resolution_level;
