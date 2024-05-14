@@ -3173,4 +3173,20 @@ ErrorOr<Optional<ReadonlyBytes>> JPEG2000ImageDecoderPlugin::icc_data()
     return m_context->icc_data;
 }
 
+NaturalFrameFormat JPEG2000ImageDecoderPlugin::natural_frame_format() const
+{
+    if (m_context->state == JPEG2000LoadingContext::State::Error)
+        return NaturalFrameFormat::RGB;
+
+    if (m_context->siz.components.size() == 1)
+        return NaturalFrameFormat::Grayscale;
+
+    // XXX look at component configuration.
+    // XXX not clear what happens for CMYK that has CMYK profile :thonk:
+    // if (m_context->components.size() == 4)
+        // return NaturalFrameFormat::CMYK;
+
+    return NaturalFrameFormat::RGB;
+}
+
 }

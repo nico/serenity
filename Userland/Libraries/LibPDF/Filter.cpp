@@ -406,7 +406,7 @@ PDFErrorOr<ByteBuffer> Filter::decode_jpx(ReadonlyBytes bytes)
 
     auto decoder = TRY(Gfx::JPEG2000ImageDecoderPlugin::create(bytes));
 
-    // auto internal_format = decoder->natural_frame_format();
+    auto internal_format = decoder->natural_frame_format();
     // FIXME: CMYK stuff
     // FIXME: grayscale stuff
     // FIXME: embedded colorspace stuff
@@ -423,17 +423,17 @@ PDFErrorOr<ByteBuffer> Filter::decode_jpx(ReadonlyBytes bytes)
 
     for (auto& pixel : *bitmap) {
         Color color = Color::from_argb(pixel);
-        // if (internal_format == Gfx::NaturalFrameFormat::Grayscale) {
-        //     // Either channel is fine, they're all the same.
-        //     buffer.append(color.red());
-        // } else {
+        if (internal_format == Gfx::NaturalFrameFormat::Grayscale) {
+            // Either channel is fine, they're all the same.
+            buffer.append(color.red());
+        } else {
             buffer.append(color.red());
             buffer.append(color.green());
             buffer.append(color.blue());
 
             // XXX instead of storing alpha inline, extract separate SMask if SMaskInData set
             // buffer.append(color.alpha()); // XXX first? last?
-        // }
+        }
     }
     return buffer;
 
