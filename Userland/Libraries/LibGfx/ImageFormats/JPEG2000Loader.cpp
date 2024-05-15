@@ -1419,6 +1419,12 @@ struct PacketContext {
     IntRect precinct_rect;
 };
 
+// XXX roles:
+// * during packet decoding, store per-packet state like number of coding passes, length of data, pointer to data, (p)
+// * during code-block decoding, store per-code-block state like was-included-previously, is included, lblock, pointer to coefficients
+// => probably need to split this?
+//    ...and keep it possible to read all packet headers first, and defer decode completely until after that
+//    But also, Lblock etc means that packets for the same precinct/subband/component must have their headers read in order
 struct CodeBlock {
     SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
 
@@ -1435,6 +1441,7 @@ struct CodeBlock {
     bool is_included { true };
 
     // XXX comment
+    // number of zero bit planes; only stored the very first time a code-block is included
     u32 p { 0 };
 
     u8 number_of_coding_passes { 0 };
@@ -1442,6 +1449,8 @@ struct CodeBlock {
     u32 length_of_data { 0 };
 
     IntRect rect; // clipped to subband rect
+
+    ReadonlyBytes data;
 };
 
 struct PacketSubBandData {
@@ -1680,7 +1689,8 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
             // FIXME: Figure out. For now, always B.10.7.1, but that won't always be right.
 
             // B.10.7.1 Single codeword segment
-            // "The length of a codeword segment is represented by a binary number of length:
+            // "A codeword segment is the number of bytes contributed to a packet by a code-block.
+            //  The length of a codeword segment is represented by a binary number of length:
             //      bits = Lblock + ⌊log2(number_of_coding_passes)⌋
             //  where Lblock is a code-block state variable. A separate Lblock is used for each code-block in the precinct.
             //  The value of Lblock is initially set to three. The number of bytes contributed by each code-block is preceded by signalling
@@ -1703,6 +1713,14 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
             current_block.length_of_data = length;
 
             // B.10.7.2 Multiple codeword segments
+            // "Multiple codeword segments arise when a termination occurs between coding passes which are included in the packet"
+            // XXX what's termination? reset of arithmetic coder context state?
+            // "In normal operation (not selective arithmetic coding bypass), the arithmetic coder shall be terminated either
+            //  at the end of every coding pass or only at the end of every code-block (see D.4.1)"
+            // => This can only happen if uses_termination_on_each_coding_pass() or uses_selective_arithmetic_coding_bypass().
+            //    We currently reject files with code_block_style != 0, so this cannot currently happen.
+            //    Once we stop rejecting files with uses_termination_on_each_coding_pass() or uses_selective_arithmetic_coding_bypass()
+            //    set, we must implement this.
             // FIXME: Implement.
         }
     }
@@ -1951,10 +1969,24 @@ dbgln("empty packet per header; skipping");
     if (coding_parameters.code_block_style != 0)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Code-block style not yet implemented");
 
-    u32 offset = stream.offset();
     int number_of_sub_bands = r == 0 ? 1 : 3;
-    for (int i = 0; i < number_of_sub_bands; ++i) {
 
+    // Set `data` on each codeblock on the packet.
+    u32 offset = stream.offset();
+    for (int i = 0; i < number_of_sub_bands; ++i) {
+        for (auto& current_block : header.sub_bands[i].code_blocks) {
+            // FIXME: Are codeblocks on byte boundaries? => Looks like it. Find spec ref.
+            // XXX Make read_packet_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
+
+            // "The sequence of bytes actually included for any given code-block must not end in a 0xFF"
+            // XXX: check?
+            current_block.data = data.slice(offset, current_block.length_of_data);
+            offset += current_block.length_of_data;
+        }
+    }
+
+    // Decode. (Could do this later / elsewhere.)
+    for (int i = 0; i < number_of_sub_bands; ++i) {
         // Annex E, E.1 Inverse quantization procedure:
         // "Mb = G + exp_b - 1       (E-2)
         //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
@@ -1982,15 +2014,7 @@ dbgln("empty packet per header; skipping");
         header.sub_bands[i].coefficients.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
 
         for (auto& current_block : header.sub_bands[i].code_blocks) {
-            auto start_offset = offset;
-            // FIXME: Are codeblocks on byte boundaries? => Looks like it. Find spec ref.
-            // XXX Make read_packet_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
-            offset += current_block.length_of_data;
-
-            // if (r > 2) continue; // XXX hack
-
-            auto packet_data = data.slice(start_offset, current_block.length_of_data);
-            auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(packet_data));
+            auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
             TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
 
