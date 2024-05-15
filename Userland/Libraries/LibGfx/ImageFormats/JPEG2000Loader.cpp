@@ -1470,8 +1470,10 @@ IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width
     return IntRect::intersection(outer_rect, IntRect::from_two_points({ new_x, new_y }, { new_right, new_bottom }));
 }
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, BigEndianInputBitStream& bitstream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, Stream& stream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
 {
+    BigEndianInputBitStream bitstream { MaybeOwned { stream } };
+
     int N_L = coding_parameters.number_of_decomposition_levels;
     int r = data.resolution_level;
     u32 current_layer_index = data.layer;
@@ -1913,9 +1915,6 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
     if (data.is_empty())
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot handle tile-parts without any packets yet");
 
-    FixedMemoryStream stream { data };
-    BigEndianInputBitStream bitstream { MaybeOwned { stream } };
-
 #if 0
 dbg("raw header:");
 for (int i = 0; i < 15; ++i) {
@@ -1925,8 +1924,9 @@ dbg("{:02x}", data[i]);
 dbgln();
 #endif
 
-    // XXX why do we pass in a bitstream here instead of just bytes?
-    auto header = TRY(read_packet_header(context, bitstream, packet_context, tile, coding_parameters, progression_data));
+    // XXX maybe pass in bytes instead of stream?
+    FixedMemoryStream stream { data };
+    auto header = TRY(read_packet_header(context, stream, packet_context, tile, coding_parameters, progression_data));
     if (header.is_empty) {
 dbgln("empty packet per header; skipping");
         return stream.offset();
