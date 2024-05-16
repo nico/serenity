@@ -823,9 +823,10 @@ struct DecodedComponent {
     DecodedCoefficients nLL; // r == 0 <=> N_L LL
 
     // XXX bad name maybe? each entry are 3 subbands already,
-    // so subbands_bands or something? needs self-consistent names.
-    // sub_bands[r] <=> N_L - r HL, LH, HH
-    Vector<Array<DecodedCoefficients, 3>> sub_bands;
+    // so subbands_bands or something? decompositions? decomposition_levels? needs self-consistent names.
+    // decomposition_levels is probably closest to spec.
+    // decompositions[r] <=> N_L - r HL, LH, HH
+    Vector<Array<DecodedCoefficients, 3>> decompositions;
 
     // nLL_rects[i] <=> N_L - i + 1 LL rect
     Vector<IntRect> nLL_rects;
@@ -1853,7 +1854,7 @@ static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& 
         for (auto [component_index, component] : enumerate(decoded_tile.components)) {
             int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
             dbgln("making {} sub-bands", num_decomposition_levels);
-            component.sub_bands.resize(num_decomposition_levels);
+            component.decompositions.resize(num_decomposition_levels);
             component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
 
             component.component_info = context.siz.components[component_index];
@@ -2057,7 +2058,7 @@ dbgln("empty packet per header; skipping");
         // XXX this stores persistent decoding state on DecodedCoefficients -- should layer info just go there too?
 
 // dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
-        DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
+        DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].decompositions[r - 1][(int)sub_band - 1];
         if (coefficients.coefficients.is_empty()) {
             coefficients.rect = header.sub_bands[i].subband_rect;
 
@@ -2717,23 +2718,23 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
         store(nLL, ll_rect.location(), bitmap);
 
-        for (size_t i = 0; i < t0.sub_bands.size(); ++i) {
-            auto& sub_band = t0.sub_bands[i];
+        for (size_t i = 0; i < t0.decompositions.size(); ++i) {
+            auto& decomposition = t0.decompositions[i];
 
-            if (sub_band[0].rect.height() < ll_rect.height())
+            if (decomposition[0].rect.height() < ll_rect.height())
                 continue;
 
-            VERIFY(sub_band[0].rect.height() == ll_rect.height());
-            VERIFY(sub_band[1].rect.width() == ll_rect.width());
-            VERIFY(sub_band[2].rect.width() == sub_band[0].rect.width());
-            VERIFY(sub_band[2].rect.height() == sub_band[1].rect.height());
+            VERIFY(decomposition[0].rect.height() == ll_rect.height());
+            VERIFY(decomposition[1].rect.width() == ll_rect.width());
+            VERIFY(decomposition[2].rect.width() == decomposition[0].rect.width());
+            VERIFY(decomposition[2].rect.height() == decomposition[1].rect.height());
 
-            store(sub_band[0], { ll_rect.right(), ll_rect.top() }, bitmap);
-            store(sub_band[1], { ll_rect.left(), ll_rect.bottom() }, bitmap);
-            store(sub_band[2], { ll_rect.right(), ll_rect.bottom() }, bitmap);
+            store(decomposition[0], { ll_rect.right(), ll_rect.top() }, bitmap);
+            store(decomposition[1], { ll_rect.left(), ll_rect.bottom() }, bitmap);
+            store(decomposition[2], { ll_rect.right(), ll_rect.bottom() }, bitmap);
 
-            ll_rect.set_right(ll_rect.right() + sub_band[0].rect.width());
-            ll_rect.set_bottom(ll_rect.bottom() + sub_band[1].rect.height());
+            ll_rect.set_right(ll_rect.right() + decomposition[0].rect.width());
+            ll_rect.set_bottom(ll_rect.bottom() + decomposition[1].rect.height());
         }
     }
     static int n_images = 0;
@@ -2765,9 +2766,9 @@ static void _1D_FILTR(CodingStyleParameters::Transformation transformation, Deco
     // XXX make look more like spec
     auto ll = component.nLL;
 
-    for (auto [r_minus_1, sub_band] : enumerate(component.sub_bands)) {
+    for (auto [r_minus_1, decomposition] : enumerate(component.decompositions)) {
         auto rect = component.nLL_rects[r_minus_1];
-        ll = TRY(_2D_SR(rect, transformation, move(ll), sub_band[0], sub_band[1], sub_band[2]));
+        ll = TRY(_2D_SR(rect, transformation, move(ll), decomposition[0], decomposition[1], decomposition[2]));
         // TRY(save_pyramid(ll, component));
     }
 
@@ -3067,16 +3068,16 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
                 auto& tile = context.tiles[tile_index];
                 auto& component = context.decoded_tiles[tile.index].components[component_index];
 
-                if (r_minus_1 >= component.sub_bands.size())
+                if (r_minus_1 >= component.decompositions.size())
                     continue;
 
-                auto& sub_band = component.sub_bands[r_minus_1];
+                auto& decomposition = component.decompositions[r_minus_1];
 
 dbgln("idwt for tile {} component {}", tile.index, component_index);
                 auto transformation = coding_style_parameters_for_component(context, tile, component_index).transformation;
 
                 auto rect = component.nLL_rects[r_minus_1];
-                component.nLL = TRY(_2D_SR(rect, transformation, move(component.nLL), sub_band[0], sub_band[1], sub_band[2]));
+                component.nLL = TRY(_2D_SR(rect, transformation, move(component.nLL), decomposition[0], decomposition[1], decomposition[2]));
             }
             // TRY(save_pyramid(context, component_index));
         }
