@@ -808,6 +808,20 @@ struct TileData {
     IntRect rect;
 };
 
+// Data for a code-block. If multiple packets store bitplanes for the same code-block,
+// this is the state stored for each codeblock across packets.
+struct CodeBlockState {
+    // B.10.7.1 Single codeword segment
+    // "Lblock is a code-block state variable. [...] The value of Lblock is initially set to three."
+    u32 Lblock { 3 };
+
+    // Becomes true when the first packet including this codeblock is read.
+    bool has_been_included_in_previous_packet { false };
+};
+
+// Indexed first by precinct, then by code block.
+using PacketState = Vector<Vector<CodeBlockState>>;
+
 struct DecodedCoefficients {
     IntRect rect;
     Vector<float> coefficients;
@@ -816,6 +830,10 @@ struct DecodedCoefficients {
     Vector<float> scanline_buffer;
     Vector<float> scanline_buffer2;
     int scanline_start { 0 };
+
+    // XXX this doesn't _really_ belong here. it's also data that's stored per component/level/precinct, as are the coefficients,
+    // but it conceptually lives earlier, during packet reading.
+    PacketState code_block_state;
 };
 
 struct DecodedComponent {
@@ -1418,6 +1436,8 @@ struct PacketContext {
     int xcb_prime { 0 };
     int ycb_prime { 0 };
     IntRect precinct_rect;
+
+    int num_precincts { 0 };
 };
 
 // XXX roles:
@@ -1427,23 +1447,9 @@ struct PacketContext {
 //    ...and keep it possible to read all packet headers first, and defer decode completely until after that
 //    But also, Lblock etc means that packets for the same precinct/subband/component must have their headers read in order
 
-// Data for a code-block. If multiple packets store bitplanes for the same code-block,
-// this is the state stored for each codeblock across packets.
-struct CodeBlockState {
-    // B.10.7.1 Single codeword segment
-    // "Lblock is a code-block state variable. [...] The value of Lblock is initially set to three."
-    u32 Lblock { 3 };
-
-    // Becomes true when the first packet including this codeblock is read.
-    bool has_been_included_in_previous_packet { false };
-};
-
 // Data stored in packet headers. Stores data that's different across packets for the same codeblock.
 struct CodeBlockPacketData {
     SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
-
-    // XXX store this elsewhere
-    CodeBlockState state;
 
     bool is_included { true };
 
@@ -1486,7 +1492,10 @@ IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width
     return IntRect::intersection(outer_rect, IntRect::from_two_points({ new_x, new_y }, { new_right, new_bottom }));
 }
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, Stream& stream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
+static ErrorOr<DecodedCoefficients*> get_or_create_code_block_packet_data(
+    JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int num_codeblocks);
+
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream& stream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
 {
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
@@ -1610,14 +1619,18 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
         header.sub_bands[sub_band_index].code_blocks.resize(codeblock_x_count * codeblock_y_count);
         // auto& current_block = header.sub_bands[sub_band_index].code_blocks[0];
 
+        auto& coefficients = *TRY(get_or_create_code_block_packet_data(context, tile, data, sub_band, packet_context.num_precincts, codeblock_x_count * codeblock_y_count));
+
         // XXX store this somewhere and reuse it across packets (...maybe? definitely across bitplanes in this packet;
         // almost certainly across bitplanes for same precinct/resolution level/component in other layers)
         auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
         auto p_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
 
+
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[sub_band_index].code_blocks)) {
 
-            auto& current_block_state = current_block.state;
+            // auto& current_block_state = current_block.state;
+            auto& current_block_state = coefficients.code_block_state[data.precinct][code_block_index];
 
             size_t code_block_x = code_block_index % codeblock_x_count;
             size_t code_block_y = code_block_index / codeblock_x_count;
@@ -1710,7 +1723,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
                 k++;
             current_block_state.Lblock += k;
             u32 bits = current_block_state.Lblock + (u32)floor(log2(number_of_coding_passes));
-            // dbgln("bits for length of codeword segment: {} bits", bits);
+            dbgln("bits for length of codeword segment: {} bits", bits);
             if (bits > 32)
                 return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Too many bits for length of codeword segment");
             u32 length = 0;
@@ -1718,7 +1731,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
                 bool bit = TRY(read_bit());
                 length = (length << 1) | bit;
             }
-            // dbgln("length of codeword segment: {} bytes", length);
+            dbgln("length of codeword segment: {} bytes", length);
             current_block.length_of_data = length;
 
             // B.10.7.2 Multiple codeword segments
@@ -1889,6 +1902,24 @@ dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, 
     return &coefficients;
 }
 
+static ErrorOr<DecodedCoefficients*> get_or_create_code_block_packet_data(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int num_code_blocks)
+{
+    auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
+    auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
+
+    int const r = progression_data.resolution_level;
+    DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].decompositions[r - 1][(int)sub_band - 1];
+    if (coefficients.code_block_state.is_empty()) {
+        coefficients.code_block_state.resize(num_precincts);
+    }
+
+    if (coefficients.code_block_state[progression_data.precinct].is_empty()) {
+        coefficients.code_block_state[progression_data.precinct].resize(num_code_blocks);
+    }
+
+    return &coefficients;
+}
+
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
 {
     ProgressionData progression_data;
@@ -1915,17 +1946,16 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
     // B.6
     // (B-16)
     int num_precincts_wide = 0;
-    // int num_precincts_high = 0;
+    int num_precincts_high = 0;
     int PPx = coding_parameters.precinct_sizes[r].PPx;
     int PPy = coding_parameters.precinct_sizes[r].PPy;
-
 
     if (ll_rect.width() != 0) {
         num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.left() / (1 << PPx));
     }
-    // if (ll_rect.height() != 0) {
-    //     num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
-    // }
+    if (ll_rect.height() != 0) {
+        num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.top() / (1 << PPy));
+    }
     // dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
 
     // "It can happen that numprecincts is 0 for a particular tile-component and resolution level. When this happens, there are no packets for this tile-component and resolution level."
@@ -1982,6 +2012,7 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
     packet_context.xcb_prime = xcb_prime;
     packet_context.ycb_prime = ycb_prime;
     packet_context.precinct_rect = precinct_rect;
+    packet_context.num_precincts = num_precincts_wide * num_precincts_high;
 
     if (data.is_empty())
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot handle tile-parts without any packets yet");
