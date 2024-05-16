@@ -1431,9 +1431,6 @@ struct CodeBlock {
     // Becomes true when the first packet including this codeblock is read.
     bool has_been_included_in_previous_packet { false };
 
-    // The layer that this code-block is first included in per B.10.4.
-    u32 first_included_in_layer { 0 };
-
     // B.10.7.1 Single codeword segment
     // "Lblock is a code-block state variable. [...] The value of Lblock is initially set to three."
     u32 Lblock { 3 };
