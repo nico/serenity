@@ -15,8 +15,10 @@ namespace JPEG2000 {
 struct TagTreeNode;
 class TagTree {
 public:
+    TagTree();
     TagTree(TagTree&&);
     ~TagTree();
+    TagTree& operator=(TagTree&& other);
 
     static ErrorOr<TagTree> create(u32 x_count, u32 y_count);
 
@@ -25,7 +27,7 @@ public:
 private:
     TagTree(NonnullOwnPtr<TagTreeNode>);
 
-    NonnullOwnPtr<TagTreeNode> m_root;
+    OwnPtr<TagTreeNode> m_root;
 };
 
 }
