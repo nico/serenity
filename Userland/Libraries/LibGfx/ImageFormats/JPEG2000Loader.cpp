@@ -1858,6 +1858,7 @@ static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& 
 
             component.component_info = context.siz.components[component_index];
 
+            // XXX this could be lazy (?)
             for (int r = 2; r <= num_decomposition_levels + 1; ++r) {
                 int n_b = r == 0 ? N_L : (N_L + 1 - r); // always right branch
                 auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, component_index, n_b, SubBand::HorizontalLowpassVerticalLowpass);
