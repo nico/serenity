@@ -2517,99 +2517,86 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, Q
     int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
     // dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
-    // XXX make current pass a state variable too, probably?
-    int& current_bitplane = state.current_bitplane;
-    for (int pass = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
-        // dbgln();
-        // dbgln("current bitplane: {}", current_bitplane);
+    auto significance_propagation_pass = [&](int current_bitplane, int pass) {
+        // D.3.1 Significance propagation decoding pass
+        for (int y = 0; y < h; y += 4) { // XXX does += 4 make sense here?
+            int y_end = min(y + 4, h);
+            int num_rows = y_end - y;
+            for (int x = 0; x < w; ++x) {
+                for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
+                    // dbgln("sigprop x: {}, y: {}", x, y + coefficient_index);
 
-        // D0, Is this the first bit-plane for the code-block?
-        bool is_first_bitplane_for_code_block = (u32)current_bitplane == current_block.p;
-        if (!is_first_bitplane_for_code_block) {
-            // XXX can probably store this more intelligently
+                    // D1, Is the current coefficient already significant?
+                    if (!is_significant(x, y + coefficient_index)) {
+                        // D2, Is the context bin zero? (see Table D.1)
+                        u8 context = compute_context(x, y + coefficient_index);
+                        if (context != 0) {
+                            // C1, Decode significance bit of current coefficient (See D.3.1)
+                            // u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
+                            bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+                            // dbgln("sigprop is_newly_significant: {} (context {})", is_newly_significant, context);
+                            // is_current_coefficient_significant = is_newly_significant;
+                            set_significant(x, y + coefficient_index, is_newly_significant);
+                            if (is_newly_significant) {
+                                became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
+                                magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
+                            }
+                            was_coded_in_pass[(y + coefficient_index) * w + x] = pass;
 
-            // D.3.1 Significance propagation decoding pass
-            for (int y = 0; y < h; y += 4) { // XXX does += 4 make sense here?
-                int y_end = min(y + 4, h);
-                int num_rows = y_end - y;
-                for (int x = 0; x < w; ++x) {
-                    for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
-                        // dbgln("sigprop x: {}, y: {}", x, y + coefficient_index);
-
-                        // D1, Is the current coefficient already significant?
-                        if (!is_significant(x, y + coefficient_index)) {
-                            // D2, Is the context bin zero? (see Table D.1)
-                            u8 context = compute_context(x, y + coefficient_index);
-                            if (context != 0) {
-                                // C1, Decode significance bit of current coefficient (See D.3.1)
-                                // u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
-                                bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                                // dbgln("sigprop is_newly_significant: {} (context {})", is_newly_significant, context);
-                                // is_current_coefficient_significant = is_newly_significant;
-                                set_significant(x, y + coefficient_index, is_newly_significant);
-                                if (is_newly_significant) {
-                                    became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
-                                    magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
-                                }
-                                was_coded_in_pass[(y + coefficient_index) * w + x] = pass;
-
-                                // D3, Did the current coefficient just become significant?
-                                if (is_newly_significant) {
-                                    bool sign_bit = read_sign_bit(x, y + coefficient_index);
-                                    set_sign(x, y + coefficient_index, sign_bit);
-                                }
+                            // D3, Did the current coefficient just become significant?
+                            if (is_newly_significant) {
+                                bool sign_bit = read_sign_bit(x, y + coefficient_index);
+                                set_sign(x, y + coefficient_index, sign_bit);
                             }
                         }
-                        // D4, Are there more coefficients in the significance propagation?
-                        // C0, Go to the next coefficient or column
                     }
+                    // D4, Are there more coefficients in the significance propagation?
+                    // C0, Go to the next coefficient or column
                 }
             }
-            ++pass;
-            if (pass >= current_block.number_of_coding_passes)
-                break;
-
-            // D.3.3 Magnitude refinement pass
-            for (int y = 0; y < h; y += 4) { // XXX does += 4 make sense here?
-                int y_end = min(y + 4, h);
-                int num_rows = y_end - y;
-                // XXX maybe store a "is any pixel significant in this scanline" flag to skip entire scanlines? measure if that's worth it.
-                for (int x = 0; x < w; ++x) {
-                    for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
-                        // dbgln("magnitude x: {}, y: {}", x, y + coefficient_index);
-
-                        // D5, Is the coefficient insignificant?
-                        if (!is_significant(x, y + coefficient_index))
-                            continue;
-
-                        // D6, Was the coefficient coded in the last significance propagation?
-                        if (became_significant_in_pass[(y + coefficient_index) * w + x] != current_bitplane) {
-                            // C3, Decode magnitude refinement pass bit of current coefficient
-                            // Table D.4 – Contexts for the magnitude refinement coding passes
-                            u8 context;
-                            if (became_significant_in_pass[(y + coefficient_index) * w + x] == current_bitplane - 1) {
-                                u8 sum_h = is_significant(x - 1, y + coefficient_index) + is_significant(x + 1, y + coefficient_index);
-                                u8 sum_v = is_significant(x, y + coefficient_index - 1) + is_significant(x, y + coefficient_index + 1);
-                                u8 sum_d = is_significant(x - 1, y + coefficient_index - 1) + is_significant(x - 1, y + coefficient_index + 1) + is_significant(x + 1, y + coefficient_index - 1) + is_significant(x + 1, y + coefficient_index + 1);
-                                context = (sum_h + sum_v + sum_d) >= 1 ? 15 : 14;
-                            } else {
-                                context = 16;
-                            }
-                            bool magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                            // dbgln("magnitude_bit: {} (context {})", magnitude_bit, context);
-                            magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << (num_bits - current_bitplane);
-                        }
-
-                        // D7, Are there more coefficients in the magnitude refinement pass?
-                        // C0, Go to the next coefficient or column
-                    }
-                }
-            }
-            ++pass;
-            if (pass >= current_block.number_of_coding_passes)
-                break;
         }
+    };
 
+    auto magnitude_refinement_pass = [&](int current_bitplane) {
+        // D.3.3 Magnitude refinement pass
+        for (int y = 0; y < h; y += 4) { // XXX does += 4 make sense here?
+            int y_end = min(y + 4, h);
+            int num_rows = y_end - y;
+            // XXX maybe store a "is any pixel significant in this scanline" flag to skip entire scanlines? measure if that's worth it.
+            for (int x = 0; x < w; ++x) {
+                for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
+                    // dbgln("magnitude x: {}, y: {}", x, y + coefficient_index);
+
+                    // D5, Is the coefficient insignificant?
+                    if (!is_significant(x, y + coefficient_index))
+                        continue;
+
+                    // D6, Was the coefficient coded in the last significance propagation?
+                    if (became_significant_in_pass[(y + coefficient_index) * w + x] != current_bitplane) {
+                        // C3, Decode magnitude refinement pass bit of current coefficient
+                        // Table D.4 – Contexts for the magnitude refinement coding passes
+                        u8 context;
+                        if (became_significant_in_pass[(y + coefficient_index) * w + x] == current_bitplane - 1) {
+                            u8 sum_h = is_significant(x - 1, y + coefficient_index) + is_significant(x + 1, y + coefficient_index);
+                            u8 sum_v = is_significant(x, y + coefficient_index - 1) + is_significant(x, y + coefficient_index + 1);
+                            u8 sum_d = is_significant(x - 1, y + coefficient_index - 1) + is_significant(x - 1, y + coefficient_index + 1) + is_significant(x + 1, y + coefficient_index - 1) + is_significant(x + 1, y + coefficient_index + 1);
+                            context = (sum_h + sum_v + sum_d) >= 1 ? 15 : 14;
+                        } else {
+                            context = 16;
+                        }
+                        bool magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+                        // dbgln("magnitude_bit: {} (context {})", magnitude_bit, context);
+                        magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << (num_bits - current_bitplane);
+                    }
+
+                    // D7, Are there more coefficients in the magnitude refinement pass?
+                    // C0, Go to the next coefficient or column
+                }
+            }
+        }
+    };
+
+    auto cleanup_pass = [&](int current_bitplane, int pass) {
         // Cleanup pass (textual description in D.3.4 Cleanup pass)
         // XXX have a "everything is signifcant" bit and skip this pass when it's set? Measure.
         for (int y = 0; y < h; y += 4) {
@@ -2713,6 +2700,33 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, Q
                 // (Both done by loop.)
             }
         }
+    };
+
+    // XXX make current pass a state variable too, probably?
+    int& current_bitplane = state.current_bitplane;
+    for (int pass = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
+        // dbgln();
+        // dbgln("current bitplane: {}", current_bitplane);
+
+        // D0, Is this the first bit-plane for the code-block?
+        bool is_first_bitplane_for_code_block = (u32)current_bitplane == current_block.p;
+        if (!is_first_bitplane_for_code_block) {
+            // XXX can probably store this more intelligently
+
+            significance_propagation_pass(current_bitplane, pass);
+
+            ++pass;
+            if (pass >= current_block.number_of_coding_passes)
+                break;
+
+            magnitude_refinement_pass(current_bitplane);
+
+            ++pass;
+            if (pass >= current_block.number_of_coding_passes)
+                break;
+        }
+
+        cleanup_pass(current_bitplane, pass);
     }
 
     // XXX bitplane to coefficient conversion should be a dedicated step somewhere else.
