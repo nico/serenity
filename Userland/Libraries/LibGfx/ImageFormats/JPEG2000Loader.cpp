@@ -844,6 +844,9 @@ struct CodeblockBitplaneState {
     Vector<u8> was_coded_in_pass;
     int current_bitplane { 0 };
 
+    // D0, Is this the first bit-plane for the code-block?
+    int pass { 0 };
+
     QMArithmeticDecoder::Context uniform_context;
     QMArithmeticDecoder::Context run_length_context;
     Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
@@ -2125,6 +2128,9 @@ dbgln("empty packet per header; skipping");
         }
     }
 
+// XXX hacks
+// if (progression_data.layer > 0) return offset;
+
     // Decode. (Could do this later / elsewhere.)
     for (int i = 0; i < number_of_sub_bands; ++i) {
         // Annex E, E.1 Inverse quantization procedure:
@@ -2172,6 +2178,10 @@ dbgln("empty packet per header; skipping");
 
             TRY(decode_code_block(state, M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
+
+        // Convert decoded bitplanes to coefficients
+        // XXX do this only once, instead of once per packet. as-is, we do this conversion every time we decode a layer.
+        // XXX could do this only before the IDWT, for the whole image at once, maybe
 
         auto& coefficients = *TRY(get_or_create_decoded_coefficients(context, tile, progression_data, sub_band, header.sub_bands[i].subband_rect));
 
@@ -2598,7 +2608,7 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, Q
 
     auto cleanup_pass = [&](int current_bitplane, int pass) {
         // Cleanup pass (textual description in D.3.4 Cleanup pass)
-        // XXX have a "everything is signifcant" bit and skip this pass when it's set? Measure.
+        // XXX have a "everything is significant" bit and skip this pass when it's set? Measure.
         for (int y = 0; y < h; y += 4) {
             int y_end = min(y + 4, h);
             int num_rows = y_end - y;
@@ -2704,31 +2714,27 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, Q
 
     // XXX make current pass a state variable too, probably?
     int& current_bitplane = state.current_bitplane;
-    for (int pass = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
-        // dbgln();
-        // dbgln("current bitplane: {}", current_bitplane);
-
-        // D0, Is this the first bit-plane for the code-block?
-        bool is_first_bitplane_for_code_block = (u32)current_bitplane == current_block.p;
-        if (!is_first_bitplane_for_code_block) {
-            // XXX can probably store this more intelligently
-
+    int& pass = state.pass;
+dbgln("pass on entry {}", pass);
+    for (int pass_i = 0; pass_i < current_block.number_of_coding_passes; ++pass_i, ++pass) {
+        switch ((pass + 2) % 3) {
+        case 0:
+            // dbgln("significance propagation pass");
             significance_propagation_pass(current_bitplane, pass);
-
-            ++pass;
-            if (pass >= current_block.number_of_coding_passes)
-                break;
-
+            break;
+        case 1:
+            // dbgln("magnitude refinement pass");
             magnitude_refinement_pass(current_bitplane);
-
-            ++pass;
-            if (pass >= current_block.number_of_coding_passes)
-                break;
+            break;
+        case 2:
+            // dbgln("cleanup pass");
+            cleanup_pass(current_bitplane, pass);
+            ++current_bitplane;
+            break;
         }
-
-        cleanup_pass(current_bitplane, pass);
     }
 
+// XXX oh! only do this the last time round!
     // XXX bitplane to coefficient conversion should be a dedicated step somewhere else.
     // (...hmm, but this only outputs the bitplanes really, so it's fine? maybe?)
     for (int y = 0; y < h; ++y) {
