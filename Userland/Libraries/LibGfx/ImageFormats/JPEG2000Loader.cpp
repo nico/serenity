@@ -1852,14 +1852,11 @@ static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& 
         decoded_tile.components.resize(context.siz.components.size());
         for (auto [component_index, component] : enumerate(decoded_tile.components)) {
             int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
-            coding_style_parameters_for_component(context, tile, component_index);
             dbgln("making {} sub-bands", num_decomposition_levels);
             component.sub_bands.resize(num_decomposition_levels);
             component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
 
             component.component_info = context.siz.components[component_index];
-            // component.component_index = component_index;
-            // component.tile_rect = tile.rect;
 
             for (int r = 2; r <= num_decomposition_levels + 1; ++r) {
                 int n_b = r == 0 ? N_L : (N_L + 1 - r); // always right branch
