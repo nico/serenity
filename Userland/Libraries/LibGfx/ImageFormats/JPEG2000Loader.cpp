@@ -835,8 +835,35 @@ struct DecodedCoefficients {
     int scanline_start { 0 };
 };
 
+struct CodeblockBitplaneState {
+    // Stores 1 bit significance and 1 bit sign for the 4 pixels in a vertical strip.
+    Vector<u8> significance_and_sign;
+
+    Vector<u16> magnitudes;
+    Vector<u8> became_significant_in_pass;
+    Vector<u8> was_coded_in_pass;
+    int current_bitplane { 0 };
+
+    QMArithmeticDecoder::Context uniform_context;
+    QMArithmeticDecoder::Context run_length_context;
+    Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
+
+    void reset_contexts()
+    {
+        // Table D.7 – Initial states for all contexts
+        uniform_context = { 46, 0 };
+        run_length_context = { 3, 0 };
+        for (auto& context : all_other_contexts)
+            context = { 0, 0 };
+        all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
+    }
+};
+
 struct PacketDecodingState {
     Vector<PrecinctPacketState> precinct_data;
+
+    // indexed by precinct, then codeblock
+    Vector<Vector<CodeblockBitplaneState>> codeblock_bitplane_state;
 };
 
 struct DecodedComponent {
@@ -1459,7 +1486,8 @@ struct PacketContext {
 struct CodeBlockPacketData {
     SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
 
-    bool is_included { true };
+    bool is_included { false };
+    bool is_included_for_the_first_time { false };
 
     // XXX comment
     // number of zero bit planes; only stored the very first time a code-block is included
@@ -1669,8 +1697,8 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
             // And Annex E, E.1 Inverse quantization procedure:
             // "Mb = G + exp_b - 1       (E-2)
             //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
-            bool is_included_for_the_first_time = is_included && !current_block_state.has_been_included_in_previous_packet;
-            if (is_included_for_the_first_time) {
+            current_block.is_included_for_the_first_time = is_included && !current_block_state.has_been_included_in_previous_packet;
+            if (current_block.is_included_for_the_first_time) {
                 u32 p = TRY(p_tree.read_value(code_block_x, code_block_y, read_bit));
                 // dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
@@ -1762,8 +1790,6 @@ dbgln("final stuff!");
 
     return header;
 }
-
-struct CodeblockBitplaneState;
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
@@ -1931,29 +1957,24 @@ static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(JPEG20
     return &coefficients;
 }
 
-struct CodeblockBitplaneState {
-    // Stores 1 bit significance and 1 bit sign for the 4 pixels in a vertical strip.
-    Vector<u8> significance_and_sign;
+static ErrorOr<CodeblockBitplaneState*> get_or_create_code_block_bitplane_state(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int codeblock_index, int num_precincts, int code_block_x_count, int code_block_y_count)
+{
+    auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
+    auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
 
-    Vector<u16> magnitudes;
-    Vector<u8> became_significant_in_pass;
-    Vector<u8> was_coded_in_pass;
-    int current_bitplane { 0 };
-
-    QMArithmeticDecoder::Context uniform_context;
-    QMArithmeticDecoder::Context run_length_context;
-    Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
-
-    void reset_contexts()
-    {
-        // Table D.7 – Initial states for all contexts
-        uniform_context = { 46, 0 };
-        run_length_context = { 3, 0 };
-        for (auto& context : all_other_contexts)
-            context = { 0, 0 };
-        all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
+    int const r = progression_data.resolution_level;
+    PacketDecodingState& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL_packet_state : decoded_tile.components[progression_data.component].decompositions_packet_state[r - 1][(int)sub_band - 1];
+    if (coefficients.codeblock_bitplane_state.is_empty()) {
+        coefficients.codeblock_bitplane_state.resize(num_precincts);
     }
-};
+
+    if (coefficients.codeblock_bitplane_state[progression_data.precinct].is_empty()) {
+        coefficients.codeblock_bitplane_state[progression_data.precinct].resize(code_block_x_count * code_block_y_count);
+    }
+
+    return &coefficients.codeblock_bitplane_state[progression_data.precinct][codeblock_index];
+}
+
 
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
 {
@@ -2132,22 +2153,22 @@ dbgln("empty packet per header; skipping");
         auto clipped_precinct_rect = header.sub_bands[i].subband_rect.intersected(precinct_rect);
         header.sub_bands[i].coefficients.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
 
-        for (auto& current_block : header.sub_bands[i].code_blocks) {
+        for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
             auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
 
-        // auto& coefficients = *TRY(get_or_create_code_block_packet_data(context, tile, data, sub_band, packet_context.num_precincts, codeblock_x_count, codeblock_y_count));
-            // XXX have to store this on the codeblock, so that we can continue decoding in the next packet.
-            CodeblockBitplaneState state;
+            auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.codeblock_x_count, header.codeblock_y_count));
 
-            int w = current_block.rect.width();
-            int h = current_block.rect.height();
-            int num_strips = ceil_div(h, 4);
-            TRY(state.significance_and_sign.try_resize(w * num_strips));
-            TRY(state.magnitudes.try_resize(w * h));
-            TRY(state.became_significant_in_pass.try_resize(w * h));
-            TRY(state.was_coded_in_pass.try_resize(w * h));
-            state.current_bitplane = current_block.p;
-            state.reset_contexts();
+            if (current_block.is_included_for_the_first_time) {
+                int w = current_block.rect.width();
+                int h = current_block.rect.height();
+                int num_strips = ceil_div(h, 4);
+                TRY(state.significance_and_sign.try_resize(w * num_strips));
+                TRY(state.magnitudes.try_resize(w * h));
+                TRY(state.became_significant_in_pass.try_resize(w * h));
+                TRY(state.was_coded_in_pass.try_resize(w * h));
+                state.current_bitplane = current_block.p;
+                state.reset_contexts();
+            }
 
             TRY(decode_code_block(state, M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
