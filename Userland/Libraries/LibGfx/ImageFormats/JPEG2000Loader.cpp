@@ -1844,6 +1844,34 @@ static u8 get_exponent(QuantizationDefault const& quantization_parameters, SubBa
     VERIFY_NOT_REACHED();
 }
 
+static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& context, TileData const& tile, int N_L)
+{
+    auto& decoded_tile = context.decoded_tiles[tile.index];
+    if (decoded_tile.components.is_empty()) {
+        dbgln("tile {} rect {}, making {} componennts", tile.index, tile.rect, context.siz.components.size());
+        decoded_tile.components.resize(context.siz.components.size());
+        for (auto [component_index, component] : enumerate(decoded_tile.components)) {
+            int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
+            coding_style_parameters_for_component(context, tile, component_index);
+            dbgln("making {} sub-bands", num_decomposition_levels);
+            component.sub_bands.resize(num_decomposition_levels);
+            component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
+
+            component.component_info = context.siz.components[component_index];
+            // component.component_index = component_index;
+            // component.tile_rect = tile.rect;
+
+            for (int r = 2; r <= num_decomposition_levels + 1; ++r) {
+                int n_b = r == 0 ? N_L : (N_L + 1 - r); // always right branch
+                auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, component_index, n_b, SubBand::HorizontalLowpassVerticalLowpass);
+dbgln("r {} llrect {}", r, rect);
+                component.nLL_rects.append(rect);
+            }
+        }
+    }
+    return &decoded_tile;
+}
+
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
 {
     ProgressionData progression_data;
@@ -2026,32 +2054,7 @@ dbgln("empty packet per header; skipping");
             TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
 
-        // context.decoded_tiles.resize(max(context.tiles.size(), (size_t)tile.index));
-        auto& decoded_tile = context.decoded_tiles[tile.index];
-        if (decoded_tile.components.is_empty()) {
-            dbgln("tile {} rect {}, making {} componennts", tile.index, tile.rect, context.siz.components.size());
-            decoded_tile.components.resize(context.siz.components.size());
-            for (auto [component_index, component] : enumerate(decoded_tile.components)) {
-                int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
-                coding_style_parameters_for_component(context, tile, component_index);
-                dbgln("making {} sub-bands", num_decomposition_levels);
-                component.sub_bands.resize(num_decomposition_levels);
-                component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
-
-                component.component_info = context.siz.components[component_index];
-                // component.component_index = component_index;
-                // component.tile_rect = tile.rect;
-
-                int N_L = coding_parameters.number_of_decomposition_levels;
-                for (int r = 2; r <= num_decomposition_levels + 1; ++r) {
-                    int n_b = r == 0 ? N_L : (N_L + 1 - r); // always right branch
-                    auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, component_index, n_b, SubBand::HorizontalLowpassVerticalLowpass);
-dbgln("r {} llrect {}", r, rect);
-                    component.nLL_rects.append(rect);
-                }
-
-            }
-        }
+        auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
 
         // XXX this stores persistent decoding state on DecodedCoefficients -- should layer info just go there too?
 
