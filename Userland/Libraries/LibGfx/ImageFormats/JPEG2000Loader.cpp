@@ -1871,6 +1871,24 @@ dbgln("r {} llrect {}", r, rect);
     return &decoded_tile;
 }
 
+static ErrorOr<DecodedCoefficients*> get_or_create_decoded_coefficients(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, IntRect sub_band_rect)
+{
+    auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
+    auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
+
+    int const r = progression_data.resolution_level;
+    DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].decompositions[r - 1][(int)sub_band - 1];
+    if (coefficients.coefficients.is_empty()) {
+        coefficients.rect = sub_band_rect;
+
+// dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
+dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, r, (int)sub_band, coefficients.rect);
+            coefficients.coefficients.resize(coefficients.rect.width() * coefficients.rect.height());
+    }
+
+    return &coefficients;
+}
+
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
 {
     ProgressionData progression_data;
@@ -2053,19 +2071,7 @@ dbgln("empty packet per header; skipping");
             TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
 
-        auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
-
-        // XXX this stores persistent decoding state on DecodedCoefficients -- should layer info just go there too?
-
-// dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
-        DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].decompositions[r - 1][(int)sub_band - 1];
-        if (coefficients.coefficients.is_empty()) {
-            coefficients.rect = header.sub_bands[i].subband_rect;
-
-// dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
-dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, r, (int)sub_band, coefficients.rect);
-            coefficients.coefficients.resize(coefficients.rect.width() * coefficients.rect.height());
-        }
+        auto& coefficients = *TRY(get_or_create_decoded_coefficients(context, tile, progression_data, sub_band, header.sub_bands[i].subband_rect));
 
         // auto rect = header.sub_bands[i].subband_rect;
         auto rect = clipped_precinct_rect;
