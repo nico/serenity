@@ -1763,9 +1763,11 @@ dbgln("final stuff!");
     return header;
 }
 
+struct CodeblockBitplaneState;
+
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -1928,6 +1930,30 @@ static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(JPEG20
 
     return &coefficients;
 }
+
+struct CodeblockBitplaneState {
+    // Stores 1 bit significance and 1 bit sign for the 4 pixels in a vertical strip.
+    Vector<u8> significance_and_sign;
+
+    Vector<u16> magnitudes;
+    Vector<u8> became_significant_in_pass;
+    Vector<u8> was_coded_in_pass;
+    int current_bitplane { 0 };
+
+    QMArithmeticDecoder::Context uniform_context;
+    QMArithmeticDecoder::Context run_length_context;
+    Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
+
+    void reset_contexts()
+    {
+        // Table D.7 – Initial states for all contexts
+        uniform_context = { 46, 0 };
+        run_length_context = { 3, 0 };
+        for (auto& context : all_other_contexts)
+            context = { 0, 0 };
+        all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
+    }
+};
 
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
 {
@@ -2108,7 +2134,22 @@ dbgln("empty packet per header; skipping");
 
         for (auto& current_block : header.sub_bands[i].code_blocks) {
             auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
-            TRY(decode_code_block(M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
+
+        // auto& coefficients = *TRY(get_or_create_code_block_packet_data(context, tile, data, sub_band, packet_context.num_precincts, codeblock_x_count, codeblock_y_count));
+            // XXX have to store this on the codeblock, so that we can continue decoding in the next packet.
+            CodeblockBitplaneState state;
+
+            int w = current_block.rect.width();
+            int h = current_block.rect.height();
+            int num_strips = ceil_div(h, 4);
+            TRY(state.significance_and_sign.try_resize(w * num_strips));
+            TRY(state.magnitudes.try_resize(w * h));
+            TRY(state.became_significant_in_pass.try_resize(w * h));
+            TRY(state.was_coded_in_pass.try_resize(w * h));
+            state.current_bitplane = current_block.p;
+            state.reset_contexts();
+
+            TRY(decode_code_block(state, M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
 
         auto& coefficients = *TRY(get_or_create_decoded_coefficients(context, tile, progression_data, sub_band, header.sub_bands[i].subband_rect));
@@ -2206,31 +2247,7 @@ dbgln("empty packet per header; skipping");
     return offset;
 }
 
-struct CodeblockBitplaneState {
-    // Stores 1 bit significance and 1 bit sign for the 4 pixels in a vertical strip.
-    Vector<u8> significance_and_sign;
-
-    Vector<u16> magnitudes;
-    Vector<u8> became_significant_in_pass;
-    Vector<u8> was_coded_in_pass;
-    int current_bitplane { 0 };
-
-    QMArithmeticDecoder::Context uniform_context;
-    QMArithmeticDecoder::Context run_length_context;
-    Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
-
-    void reset_contexts()
-    {
-        // Table D.7 – Initial states for all contexts
-        uniform_context = { 46, 0 };
-        run_length_context = { 3, 0 };
-        for (auto& context : all_other_contexts)
-            context = { 0, 0 };
-        all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
-    }
-};
-
-static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
@@ -2256,17 +2273,6 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     int w = current_block.rect.width();
     int h = current_block.rect.height();
     // dbgln("code-block rect: {}, sub-band {}", current_block.rect, (int)current_block.sub_band);
-
-    int num_strips = ceil_div(h, 4);
-
-    // XXX have to store this on the codeblock, so that we can continue decoding in the next packet.
-    CodeblockBitplaneState state;
-    TRY(state.significance_and_sign.try_resize(w * num_strips));
-    TRY(state.magnitudes.try_resize(w * h));
-    TRY(state.became_significant_in_pass.try_resize(w * h));
-    TRY(state.was_coded_in_pass.try_resize(w * h));
-    state.current_bitplane = current_block.p;
-    state.reset_contexts();
 
     Vector<u8>& significance_and_sign = state.significance_and_sign;
     Vector<u16>& magnitudes = state.magnitudes;
@@ -2490,6 +2496,7 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
     // dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
+    // XXX make current pass a state variable too, probably?
     int& current_bitplane = state.current_bitplane;
     for (int pass = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
         // dbgln();
