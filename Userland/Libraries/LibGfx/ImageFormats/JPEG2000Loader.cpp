@@ -819,8 +819,11 @@ struct CodeBlockState {
     bool has_been_included_in_previous_packet { false };
 };
 
-// Indexed first by precinct, then by code block.
-using PacketState = Vector<Vector<CodeBlockState>>;
+struct PrecinctPacketState {
+    Vector<CodeBlockState> code_block_state;
+    JPEG2000::TagTree code_block_inclusion_tree;
+    JPEG2000::TagTree p_tree;
+};
 
 struct DecodedCoefficients {
     IntRect rect;
@@ -830,10 +833,10 @@ struct DecodedCoefficients {
     Vector<float> scanline_buffer;
     Vector<float> scanline_buffer2;
     int scanline_start { 0 };
+};
 
-    // XXX this doesn't _really_ belong here. it's also data that's stored per component/level/precinct, as are the coefficients,
-    // but it conceptually lives earlier, during packet reading.
-    PacketState code_block_state;
+struct PacketDecodingState {
+    Vector<PrecinctPacketState> precinct_data;
 };
 
 struct DecodedComponent {
@@ -850,6 +853,9 @@ struct DecodedComponent {
     Vector<IntRect> nLL_rects;
 
     ImageAndTileSize::ComponentInformation component_info;
+
+    PacketDecodingState nLL_packet_state;
+    Vector<Array<PacketDecodingState, 3>> decompositions_packet_state;
 
     // int component_index {};
     // IntRect tile_rect;
@@ -1409,8 +1415,10 @@ TagTree::TagTree(NonnullOwnPtr<TagTreeNode> root)
 {
 }
 
+TagTree::TagTree() = default;
 TagTree::TagTree(TagTree&&) = default;
 TagTree::~TagTree() = default;
+TagTree& TagTree::operator=(TagTree&& other) = default;
 
 ErrorOr<TagTree> TagTree::create(u32 x_count, u32 y_count)
 {
@@ -1492,8 +1500,8 @@ IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width
     return IntRect::intersection(outer_rect, IntRect::from_two_points({ new_x, new_y }, { new_right, new_bottom }));
 }
 
-static ErrorOr<DecodedCoefficients*> get_or_create_code_block_packet_data(
-    JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int num_codeblocks);
+static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(
+    JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int code_block_x_count, int code_block_y_count);
 
 ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream& stream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
 {
@@ -1619,18 +1627,15 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
         header.sub_bands[sub_band_index].code_blocks.resize(codeblock_x_count * codeblock_y_count);
         // auto& current_block = header.sub_bands[sub_band_index].code_blocks[0];
 
-        auto& coefficients = *TRY(get_or_create_code_block_packet_data(context, tile, data, sub_band, packet_context.num_precincts, codeblock_x_count * codeblock_y_count));
+        auto& coefficients = *TRY(get_or_create_code_block_packet_data(context, tile, data, sub_band, packet_context.num_precincts, codeblock_x_count, codeblock_y_count));
 
-        // XXX store this somewhere and reuse it across packets (...maybe? definitely across bitplanes in this packet;
-        // almost certainly across bitplanes for same precinct/resolution level/component in other layers)
-        auto code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
-        auto p_tree = TRY(JPEG2000::TagTree::create(codeblock_x_count, codeblock_y_count));
-
+        auto& code_block_inclusion_tree = coefficients.precinct_data[data.precinct].code_block_inclusion_tree;
+        auto& p_tree = coefficients.precinct_data[data.precinct].p_tree;
 
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[sub_band_index].code_blocks)) {
 
             // auto& current_block_state = current_block.state;
-            auto& current_block_state = coefficients.code_block_state[data.precinct][code_block_index];
+            auto& current_block_state = coefficients.precinct_data[data.precinct].code_block_state[code_block_index];
 
             size_t code_block_x = code_block_index % codeblock_x_count;
             size_t code_block_y = code_block_index / codeblock_x_count;
@@ -1721,6 +1726,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
             u32 k = 0;
             while (TRY(read_bit()))
                 k++;
+            dbgln("increment: {} bits", k);
             current_block_state.Lblock += k;
             u32 bits = current_block_state.Lblock + (u32)floor(log2(number_of_coding_passes));
             dbgln("bits for length of codeword segment: {} bits", bits);
@@ -1770,8 +1776,8 @@ ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
     if (cod.may_use_EPH_marker)
         return Error::from_string_literal("JPEG2000ImageDecoderPlugin: EPH marker not yet implemented");
 
-    if (cod.number_of_layers != 1)
-        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
+    // if (cod.number_of_layers != 1)
+        // return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Cannot decode more than one layer yet");
 
     // Guaranteed by parse_codestream_tile_header.
     VERIFY(!tile.tile_parts.is_empty());
@@ -1868,6 +1874,7 @@ static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& 
             int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
             dbgln("making {} sub-bands", num_decomposition_levels);
             component.decompositions.resize(num_decomposition_levels);
+            component.decompositions_packet_state.resize(num_decomposition_levels);
             component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
 
             component.component_info = context.siz.components[component_index];
@@ -1902,19 +1909,21 @@ dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, 
     return &coefficients;
 }
 
-static ErrorOr<DecodedCoefficients*> get_or_create_code_block_packet_data(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int num_code_blocks)
+static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int code_block_x_count, int code_block_y_count)
 {
     auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
     auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
 
     int const r = progression_data.resolution_level;
-    DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].decompositions[r - 1][(int)sub_band - 1];
-    if (coefficients.code_block_state.is_empty()) {
-        coefficients.code_block_state.resize(num_precincts);
+    PacketDecodingState& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL_packet_state : decoded_tile.components[progression_data.component].decompositions_packet_state[r - 1][(int)sub_band - 1];
+    if (coefficients.precinct_data.is_empty()) {
+        coefficients.precinct_data.resize(num_precincts);
     }
 
-    if (coefficients.code_block_state[progression_data.precinct].is_empty()) {
-        coefficients.code_block_state[progression_data.precinct].resize(num_code_blocks);
+    if (coefficients.precinct_data[progression_data.precinct].code_block_state.is_empty()) {
+        coefficients.precinct_data[progression_data.precinct].code_block_state.resize(code_block_x_count * code_block_y_count);
+        coefficients.precinct_data[progression_data.precinct].code_block_inclusion_tree = TRY(JPEG2000::TagTree::create(code_block_x_count, code_block_y_count));
+        coefficients.precinct_data[progression_data.precinct].p_tree = TRY(JPEG2000::TagTree::create(code_block_x_count, code_block_y_count));
     }
 
     return &coefficients;
