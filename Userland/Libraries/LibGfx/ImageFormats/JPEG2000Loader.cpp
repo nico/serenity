@@ -1757,10 +1757,10 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
             u32 k = 0;
             while (TRY(read_bit()))
                 k++;
-            dbgln("increment: {} bits", k);
+            // dbgln("increment: {} bits", k);
             current_block_state.Lblock += k;
             u32 bits = current_block_state.Lblock + (u32)floor(log2(number_of_coding_passes));
-            dbgln("bits for length of codeword segment: {} bits", bits);
+            // dbgln("bits for length of codeword segment: {} bits", bits);
             if (bits > 32)
                 return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Too many bits for length of codeword segment");
             u32 length = 0;
@@ -1768,7 +1768,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
                 bool bit = TRY(read_bit());
                 length = (length << 1) | bit;
             }
-            dbgln("length of codeword segment: {} bytes", length);
+            // dbgln("length of codeword segment: {} bytes", length);
             current_block.length_of_data = length;
 
             // B.10.7.2 Multiple codeword segments
@@ -1933,7 +1933,7 @@ static ErrorOr<DecodedCoefficients*> get_or_create_decoded_coefficients(JPEG2000
         coefficients.rect = sub_band_rect;
 
 // dbgln("resize to {}x{}", coefficients.size.width(), coefficients.size.height());
-dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, r, (int)sub_band, coefficients.rect);
+// dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, r, (int)sub_band, coefficients.rect);
             coefficients.coefficients.resize(coefficients.rect.width() * coefficients.rect.height());
     }
 
