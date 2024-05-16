@@ -1420,20 +1420,29 @@ struct PacketContext {
 };
 
 // XXX roles:
-// * during packet decoding, store per-packet state like number of coding passes, length of data, pointer to data, (p)
-// * during code-block decoding, store per-code-block state like was-included-previously, is included, lblock, pointer to coefficients
+// * during packet decoding, store per-packet state like is included, number of coding passes, length of data, pointer to data, (p)
+// * during code-block decoding, store per-code-block state like was-included-previously, block, pointer to coefficients
 // => probably need to split this?
 //    ...and keep it possible to read all packet headers first, and defer decode completely until after that
 //    But also, Lblock etc means that packets for the same precinct/subband/component must have their headers read in order
-struct CodeBlock {
-    SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
 
-    // Becomes true when the first packet including this codeblock is read.
-    bool has_been_included_in_previous_packet { false };
-
+// Data for a code-block. If multiple packets store bitplanes for the same code-block,
+// this is the state stored for each codeblock across packets.
+struct CodeBlockState {
     // B.10.7.1 Single codeword segment
     // "Lblock is a code-block state variable. [...] The value of Lblock is initially set to three."
     u32 Lblock { 3 };
+
+    // Becomes true when the first packet including this codeblock is read.
+    bool has_been_included_in_previous_packet { false };
+};
+
+// Data stored in packet headers. Stores data that's different across packets for the same codeblock.
+struct CodeBlockPacketData {
+    SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
+
+    // XXX store this elsewhere
+    CodeBlockState state;
 
     bool is_included { true };
 
@@ -1451,7 +1460,7 @@ struct CodeBlock {
 };
 
 struct PacketSubBandData {
-    Vector<CodeBlock> code_blocks;
+    Vector<CodeBlockPacketData> code_blocks;
 
     Vector<i16> coefficients;
     IntRect subband_rect;
@@ -1607,6 +1616,8 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
 
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[sub_band_index].code_blocks)) {
 
+            auto& current_block_state = current_block.state;
+
             size_t code_block_x = code_block_index % codeblock_x_count;
             size_t code_block_y = code_block_index / codeblock_x_count;
 
@@ -1615,7 +1626,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
 
             // B.10.4 Code-block inclusion
             bool is_included;
-            if (current_block.has_been_included_in_previous_packet) {
+            if (current_block_state.has_been_included_in_previous_packet) {
                 // "For code-blocks that have been included in a previous packet, a single bit is used to represent the information, where
                 //  a 1 means that the code-block is included in this layer and a 0 means that it is not."
                 is_included = TRY(read_bit());
@@ -1639,12 +1650,12 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
             // And Annex E, E.1 Inverse quantization procedure:
             // "Mb = G + exp_b - 1       (E-2)
             //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
-            bool is_included_for_the_first_time = is_included && !current_block.has_been_included_in_previous_packet;
+            bool is_included_for_the_first_time = is_included && !current_block_state.has_been_included_in_previous_packet;
             if (is_included_for_the_first_time) {
                 u32 p = TRY(p_tree.read_value(code_block_x, code_block_y, read_bit));
                 // dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
-                current_block.has_been_included_in_previous_packet = true;
+                current_block_state.has_been_included_in_previous_packet = true;
                 current_block.sub_band = sub_band;
             }
 
@@ -1696,8 +1707,8 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext const& context, 
             u32 k = 0;
             while (TRY(read_bit()))
                 k++;
-            current_block.Lblock += k;
-            u32 bits = current_block.Lblock + (u32)floor(log2(number_of_coding_passes));
+            current_block_state.Lblock += k;
+            u32 bits = current_block_state.Lblock + (u32)floor(log2(number_of_coding_passes));
             // dbgln("bits for length of codeword segment: {} bits", bits);
             if (bits > 32)
                 return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Too many bits for length of codeword segment");
@@ -1734,7 +1745,7 @@ dbgln("final stuff!");
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output, IntRect precinct_rect);
+static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -2171,7 +2182,7 @@ struct CodeblockBitplaneState {
     }
 };
 
-static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output, IntRect precinct_rect)
+static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
