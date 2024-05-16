@@ -2045,6 +2045,8 @@ dbgln("r {} llrect {}", r, rect);
             }
         }
 
+        // XXX this stores persistent decoding state on DecodedCoefficients -- should layer info just go there too?
+
 // dbgln("component {} level {} sub-band {}", progression_data.component, r, (int)sub_band);
         DecodedCoefficients& coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL : decoded_tile.components[progression_data.component].sub_bands[r - 1][(int)sub_band - 1];
         if (coefficients.coefficients.is_empty()) {
@@ -2148,6 +2150,30 @@ dbgln("component {} level {} sub-band {} rect: {}", progression_data.component, 
     return offset;
 }
 
+struct CodeblockBitplaneState {
+    // Stores 1 bit significance and 1 bit sign for the 4 pixels in a vertical strip.
+    Vector<u8> significance_and_sign;
+
+    Vector<u16> magnitudes;
+    Vector<u8> became_significant_in_pass;
+    Vector<u8> was_coded_in_pass;
+    int current_bitplane { 0 };
+
+    QMArithmeticDecoder::Context uniform_context;
+    QMArithmeticDecoder::Context run_length_context;
+    Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
+
+    void reset_contexts()
+    {
+        // Table D.7 – Initial states for all contexts
+        uniform_context = { 46, 0 };
+        run_length_context = { 3, 0 };
+        for (auto& context : all_other_contexts)
+            context = { 0, 0 };
+        all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
+    }
+};
+
 static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlock& current_block, PacketSubBandData& output, IntRect precinct_rect)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
@@ -2178,11 +2204,16 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     int num_strips = ceil_div(h, 4);
 
     // XXX have to store this on the codeblock, so that we can continue decoding in the next packet.
-    Vector<u8> significance_and_sign;
-    TRY(significance_and_sign.try_resize(w * num_strips));
+    CodeblockBitplaneState state;
+    TRY(state.significance_and_sign.try_resize(w * num_strips));
+    TRY(state.magnitudes.try_resize(w * h));
+    TRY(state.became_significant_in_pass.try_resize(w * h));
+    TRY(state.was_coded_in_pass.try_resize(w * h));
+    state.current_bitplane = current_block.p;
+    state.reset_contexts();
 
-    Vector<u16> magnitudes;
-    TRY(magnitudes.try_resize(w * h));
+    Vector<u8>& significance_and_sign = state.significance_and_sign;
+    Vector<u16>& magnitudes = state.magnitudes;
 
     auto is_significant = [&](int x, int y) {
         if (x < 0 || x >= w || y < 0 || y >= h)
@@ -2352,11 +2383,9 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
 
     // D.4 Initializing and terminating
     // Table D.7 – Initial states for all contexts
-    QMArithmeticDecoder::Context uniform_context { 46, 0 };
-    QMArithmeticDecoder::Context run_length_context { 3, 0 };
-    //QMArithmeticDecoder::Context all_zero_neighbors_context = { 4, 0 };
-    Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
-    all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
+    QMArithmeticDecoder::Context& uniform_context = state.uniform_context;
+    QMArithmeticDecoder::Context& run_length_context = state.run_length_context;
+    Array<QMArithmeticDecoder::Context, 17>& all_other_contexts = state.all_other_contexts;
 
     auto read_sign_bit = [&](int x, int y) {
         // C2, Decode sign bit of current coefficient
@@ -2384,13 +2413,11 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     // Table D.11 – Decoding in the context model flow chart
 
     // XXX have to store this on the codeblock, so that we can continue decoding in the next packet.
-    Vector<u8> became_significant_in_pass;
-    became_significant_in_pass.resize(w * h);
+    Vector<u8>& became_significant_in_pass = state.became_significant_in_pass;
 
     // Set even for coefficients that are not significant, if they had an explicit "not significant" bit.
     // XXX probably have to store this elsewhere too? Can layers start at a different pass?
-    Vector<u8> was_coded_in_pass;
-    was_coded_in_pass.resize(w * h);
+    Vector<u8>& was_coded_in_pass = state.was_coded_in_pass;
 
     // D.2.1
     // "The number Nb(u, v) of decoded MSBs includes the number of all zero most significant bit-planes signalled in the packet header (see B.10.5)."
@@ -2407,8 +2434,8 @@ static ErrorOr<void> decode_code_block(int M_b, QMArithmeticDecoder& arithmetic_
     int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
     // dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
-    // XXX don't start current_bitplane at 0, start at the first bitplane that's in this packet.
-    for (int pass = 0, current_bitplane = current_block.p; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
+    int& current_bitplane = state.current_bitplane;
+    for (int pass = 0; pass < current_block.number_of_coding_passes; ++pass, ++current_bitplane) {
         // dbgln();
         // dbgln("current bitplane: {}", current_bitplane);
 
