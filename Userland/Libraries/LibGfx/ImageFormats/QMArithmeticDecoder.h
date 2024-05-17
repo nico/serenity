@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Queue.h>
 #include <AK/Span.h>
 
 namespace Gfx {
@@ -21,6 +22,8 @@ namespace Gfx {
 // Exposed for testing.
 class QMArithmeticDecoder {
 public:
+    QMArithmeticDecoder() = default;
+
     struct Context {
         u8 I { 0 };      // Index I stored for context CX (E.2.4)
         u8 is_mps { 0 }; // "More probable symbol" (E.1.1). 0 or 1.
@@ -30,13 +33,19 @@ public:
 
     bool get_next_bit(Context& context);
 
+    Vector<ReadonlyBytes>& data() { return m_data; }
+
+    void INITDEC();
+
 private:
     QMArithmeticDecoder(ReadonlyBytes data)
-        : m_data(data)
     {
+        // m_data.append(data);
+        m_current_data = data;
     }
 
-    ReadonlyBytes m_data;
+    ReadonlyBytes m_current_data;
+    Vector<ReadonlyBytes> m_data; // Queue<ReadonlyBytes> has no copy ctor, and in practice this is 1 element long anyways
 
     // The code below uses names from the spec, so that the algorithms look exactly like the flowcharts in the spec.
 
@@ -47,15 +56,14 @@ private:
     // "MPS": "More probable symbol" (E.1.1)
     // "LPS": "Less probable symbol" (E.1.1)
 
-    void INITDEC();
     u8 DECODE(); // Returns a single decoded bit.
     u8 MPS_EXCHANGE();
     u8 LPS_EXCHANGE();
     void RENORMD();
     void BYTEIN();
 
-    u8 B(size_t offset = 0) const; // Byte pointed to by BP.
-    size_t BP { 0 };               // Pointer into compressed data.
+    u8 B(size_t offset = 0); // Byte pointed to by BP.
+    size_t BP { 0 };         // Pointer into compressed data.
 
     // E.3.1 Decoder code register conventions
     u32 C { 0 }; // Consists of u16 C_high, C_low.

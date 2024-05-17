@@ -91,15 +91,31 @@ u8 QMArithmeticDecoder::NMPS(u16 index) { return qe_table[index].nmps; }
 u8 QMArithmeticDecoder::NLPS(u16 index) { return qe_table[index].nlps; }
 u8 QMArithmeticDecoder::SWITCH(u16 index) { return qe_table[index].switch_flag; }
 
-u8 QMArithmeticDecoder::B(size_t offset) const
+u8 QMArithmeticDecoder::B(size_t offset)
 {
+    if (BP >= m_current_data.size()) {
+        if (!m_data.is_empty()) {
+dbgln("reloading arithmetic decoder data");
+            m_current_data = m_data[0];
+            m_data.remove(0);
+            BP = 0;
+        }
+    }
+
     // E.2.10 Minimization of the compressed data
     // "the convention is used in the decoder that when a marker code is encountered,
     //  1-bits (without bit stuffing) are supplied to the decoder until the coding interval is complete."
-    if (BP + offset >= m_data.size())
+    if (BP + offset >= m_current_data.size()) {
+        // XXX JPEG2000 guarantees that packet codeword segments don't end in 0xFF, so we don't have
+        // to worry about BP being in one part of the queue and + 1 in the next.
+        VERIFY(BP >= m_current_data.size() || m_data.is_empty());
+
+dbgln("returning fill data, offset {}", offset);
         return 0xFF;
+    }
+
 // dbgln("B({}) = {:#x}", BP + offset, m_data[BP + offset]);
-    return m_data[BP + offset];
+    return m_current_data[BP + offset];
 }
 
 void QMArithmeticDecoder::INITDEC()
