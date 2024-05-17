@@ -3287,6 +3287,7 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
         auto& decoded_tile = context.decoded_tiles[tile_index];
 
         // XXX per-component subsampling
+        VERIFY(decoded_tile.components[0].rect.size() == decoded_tile.components[0].nLL.rect.size());
         int w = decoded_tile.components[0].nLL.rect.width();
         int h = decoded_tile.components[0].nLL.rect.height();
         for (int y = 0; y < h; ++y) {
