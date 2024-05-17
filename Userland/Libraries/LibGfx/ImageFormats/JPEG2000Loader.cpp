@@ -840,8 +840,17 @@ struct CodeblockBitplaneState {
     Vector<u8> significance_and_sign;
 
     Vector<u16> magnitudes;
+
+
+    // Stores bit index (not pass!) where the coefficient became significant.
+    // XXX name sucks
     Vector<u8> became_significant_in_pass;
+
+    // Stores the pass (not bit index!) the coefficient was coded in, even if it was coded as "not yet significant".
+    // Will always be a significance propagation pass.
+    // XXX use fewer vectors for all this state somehow
     Vector<u8> was_coded_in_pass;
+
     int current_bitplane { 0 };
 
     int pass { 0 };
@@ -1687,7 +1696,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
                 //  current code-block is first included."
                 is_included = TRY(code_block_inclusion_tree.read_value(code_block_x, code_block_y, read_bit, current_layer_index + 1)) <= current_layer_index;
             }
-            // dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
+            dbgln_if(JPEG2000_DEBUG, "code-block inclusion: {}", is_included);
             current_block.is_included = is_included;
 
             if (!is_included)
@@ -1704,7 +1713,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
             current_block.is_included_for_the_first_time = is_included && !current_block_state.has_been_included_in_previous_packet;
             if (current_block.is_included_for_the_first_time) {
                 u32 p = TRY(p_tree.read_value(code_block_x, code_block_y, read_bit));
-                // dbgln("zero bit-plane information: {}", p);
+                dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
                 current_block_state.has_been_included_in_previous_packet = true;
                 current_block.sub_band = sub_band;
@@ -2193,6 +2202,7 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
                 // state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
 
                 state.arithmetic_decoder.data().append(current_block.data);
+                // state.arithmetic_decoder.flush();
             }
 
             TRY(decode_code_block(state, M_b, current_block, header.sub_bands[i], clipped_precinct_rect));
@@ -2246,6 +2256,9 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
                 // if (i == 0) dbgln("x {} y {} value {}", x, y, value);
                 // if (i == 0) dbgln("index {} bounds {} / {}", y * w + h, coefficients.size, coefficients.coefficients.size());
                 // coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
+
+if (x == 15 && y == 31)
+    dbgln("coefficient value: {}", value);
 
                 auto subband_origin = header.sub_bands[i].subband_rect.location();
                 coefficients.coefficients[(y + clipped_precinct_rect.top() - subband_origin.y()) * header.sub_bands[i].subband_rect.width() + (x + clipped_precinct_rect.left() - subband_origin.x())] = value; // XXX precinct bounds!
@@ -2545,7 +2558,7 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
 
     // int num_bits = (current_block.number_of_coding_passes - 1) / 3 + 1; // /shruggie
     int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
-    // dbgln("num_bits: {} (p {})", num_bits, current_block.p);
+    dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
     auto significance_propagation_pass = [&](int current_bitplane, int pass) {
         // D.3.1 Significance propagation decoding pass
@@ -2617,6 +2630,11 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
                         bool magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                         // dbgln("magnitude_bit: {} (context {})", magnitude_bit, context);
                         magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << (num_bits - current_bitplane);
+
+if (x == 15 && (y + coefficient_index) == 31) {
+    dbgln("bit {} at {} ({} - {}), {:#x}", magnitude_bit, num_bits - current_bitplane, num_bits, current_bitplane, magnitudes[(y + coefficient_index) * w + x]);
+}
+
                     }
 
                     // D7, Are there more coefficients in the magnitude refinement pass?
@@ -2636,13 +2654,16 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
                 // dbgln("cleanup x: {}, y: {}", x, y);
 
                 Array<u8, 4> contexts {};
+                int num_undecoded = 0;
                 for (int i = 0; i < 4; ++i) {
                     contexts[i] = compute_context(x, y + i);
                     // dbgln("context[{}]: {}", i, contexts[i]);
+                    if (!is_significant(x, y + i))
+                        ++num_undecoded;  // XXX probably redundant since this would imply a context being non-0
                 }
 
                 // D8, Are four contiguous undecoded coefficients in a column each with a 0 context?, See D.3.4
-                bool are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context = num_rows == 4 && (contexts[0] + contexts[1] + contexts[2] + contexts[3] == 0);
+                bool are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context = num_rows == 4 && num_undecoded == 4 && (contexts[0] + contexts[1] + contexts[2] + contexts[3] == 0);
                 if (are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context) {
                     // C4, Run-length context label
                     auto not_four_zeros = arithmetic_decoder.get_next_bit(run_length_context);
@@ -2735,8 +2756,13 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
     // XXX make current pass a state variable too, probably?
     int& current_bitplane = state.current_bitplane;
     int& pass = state.pass;
-dbgln("pass on entry {}", pass);
-    for (int pass_i = 0; pass_i < current_block.number_of_coding_passes; ++pass_i, ++pass) {
+    // pass = 2;
+    // pass = 0;
+dbgln("pass on entry {}, {} passes, p {}, {} bytes", pass, current_block.number_of_coding_passes, current_block.p, current_block.length_of_data);
+    for (int pass_i = 0; pass_i < current_block.number_of_coding_passes - (int)current_block.p; ++pass_i, ++pass) {
+dbgln("pass {} bitplane {}", pass, current_bitplane);
+
+        // D0, Is this the first bit-plane for the code-block?
         switch ((pass + 2) % 3) {
         case 0:
             // dbgln("significance propagation pass");
@@ -2752,6 +2778,9 @@ dbgln("pass on entry {}", pass);
             ++current_bitplane;
             break;
         }
+
+                // state.reset_contexts();
+
     }
 
 // XXX oh! only do this the last time round!
@@ -2762,6 +2791,10 @@ dbgln("pass on entry {}", pass);
             auto sign = get_sign(x, y);
             auto magnitude = magnitudes[y * w + x];
             auto value = magnitude * (sign ? -1 : 1);
+
+if (x == 15 && y == 31)
+    dbgln("final value: {}", value);
+
             // XXX make relative to subband origin?
             // output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
             output.coefficients[(y + current_block.rect.top() - precinct_rect.top()) * precinct_rect.width() + (x + current_block.rect.left() - precinct_rect.left())] = value;
@@ -3153,6 +3186,9 @@ static ErrorOr<void> decode_image(JPEG2000LoadingContext& context)
 // XXX these are component-tiles; rename
     for (auto& tile : context.tiles)
         TRY(decode_tile(context, tile));
+
+    // XXX put bitplane to coefficient conversion here
+    // ...maybe even do bitplane decoding here?
 
     // Per component:
     // - combined code-block images at each resolution level, storing all sub-bands

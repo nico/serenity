@@ -91,6 +91,15 @@ u8 QMArithmeticDecoder::NMPS(u16 index) { return qe_table[index].nmps; }
 u8 QMArithmeticDecoder::NLPS(u16 index) { return qe_table[index].nlps; }
 u8 QMArithmeticDecoder::SWITCH(u16 index) { return qe_table[index].switch_flag; }
 
+void QMArithmeticDecoder::flush()
+{
+dbgln("flush arithmetic decoder data");
+            m_current_data = m_data[0];
+            m_data.remove(0);
+            // BP = 0;
+            INITDEC();
+}
+
 u8 QMArithmeticDecoder::B(size_t offset)
 {
     if (BP >= m_current_data.size()) {
@@ -114,7 +123,7 @@ dbgln("returning fill data, offset {}", offset);
         return 0xFF;
     }
 
-// dbgln("B({}) = {:#x}", BP + offset, m_data[BP + offset]);
+// dbgln("B({}) = {:#x}", BP + offset, m_current_data[BP + offset]);
     return m_current_data[BP + offset];
 }
 

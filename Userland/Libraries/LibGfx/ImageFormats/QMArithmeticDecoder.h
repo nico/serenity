@@ -34,6 +34,7 @@ public:
     bool get_next_bit(Context& context);
 
     Vector<ReadonlyBytes>& data() { return m_data; }
+    void flush();
 
     void INITDEC();
 
