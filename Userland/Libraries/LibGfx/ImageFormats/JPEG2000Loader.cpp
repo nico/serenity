@@ -2134,6 +2134,12 @@ dbgln("empty packet per header; skipping");
 
     // Decode. (Could do this later / elsewhere.)
     for (int i = 0; i < number_of_sub_bands; ++i) {
+
+        // Have to create the DecodedCoefficients before possibly skipping this subband, so that the non-empty dimension in the
+        // rect matches an assert in IDWT.
+        auto sub_band = r == 0 ? SubBand::HorizontalLowpassVerticalLowpass : (SubBand)(i + 1); // XXX store on SubBand?
+        auto& coefficients = *TRY(get_or_create_decoded_coefficients(context, tile, progression_data, sub_band, header.sub_bands[i].subband_rect));
+
         if (header.sub_bands[i].codeblock_x_count == 0 || header.sub_bands[i].codeblock_y_count == 0)
             continue;
 
@@ -2141,7 +2147,6 @@ dbgln("empty packet per header; skipping");
         // "Mb = G + exp_b - 1       (E-2)
         //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
         auto quantization_parameters = quantization_parameters_for_component(context, tile, progression_data.component);
-        auto sub_band = r == 0 ? SubBand::HorizontalLowpassVerticalLowpass : (SubBand)(i + 1); // XXX store on SubBand?
         auto exponent = get_exponent(quantization_parameters, sub_band, r);
 
         if (quantization_parameters.quantization_style == QuantizationDefault::QuantizationStyle::ScalarDerived) {
@@ -2196,8 +2201,6 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
         // Convert decoded bitplanes to coefficients
         // XXX do this only once, instead of once per packet. as-is, we do this conversion every time we decode a layer.
         // XXX could do this only before the IDWT, for the whole image at once, maybe
-
-        auto& coefficients = *TRY(get_or_create_decoded_coefficients(context, tile, progression_data, sub_band, header.sub_bands[i].subband_rect));
 
         // auto rect = header.sub_bands[i].subband_rect;
         auto rect = clipped_precinct_rect;
