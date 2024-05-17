@@ -1509,15 +1509,15 @@ struct CodeBlockPacketData {
 struct PacketSubBandData {
     Vector<CodeBlockPacketData> code_blocks;
 
+    int codeblock_x_count { 0 };
+    int codeblock_y_count { 0 };
+
     Vector<i16> coefficients;
     IntRect subband_rect;
 };
 
 struct PacketHeader {
     bool is_empty { false };
-
-    int codeblock_x_count { 0 };
-    int codeblock_y_count { 0 };
 
     // Only the first element is valid for r == 0 where we have LL. Else it's HL, LH, HH.
     Array<PacketSubBandData, 3> sub_bands;
@@ -1649,8 +1649,8 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
         auto codeblock_x_count = rect_covered_by_codeblocks.width() / (1 << packet_context.xcb_prime);
         auto codeblock_y_count = rect_covered_by_codeblocks.height() / (1 << packet_context.ycb_prime);
 
-        header.codeblock_x_count = codeblock_x_count;
-        header.codeblock_y_count = codeblock_y_count;
+        header.sub_bands[sub_band_index].codeblock_x_count = codeblock_x_count;
+        header.sub_bands[sub_band_index].codeblock_y_count = codeblock_y_count;
     // dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
 
         if (codeblock_x_count == 0 || codeblock_y_count == 0)
@@ -2134,6 +2134,9 @@ dbgln("empty packet per header; skipping");
 
     // Decode. (Could do this later / elsewhere.)
     for (int i = 0; i < number_of_sub_bands; ++i) {
+        if (header.sub_bands[i].codeblock_x_count == 0 || header.sub_bands[i].codeblock_y_count == 0)
+            continue;
+
         // Annex E, E.1 Inverse quantization procedure:
         // "Mb = G + exp_b - 1       (E-2)
         //  where the number of guard bits G and the exponent exp_b are specified in the QCD or QCC marker segments (see A.6.4 and A.6.5)."
@@ -2164,7 +2167,8 @@ dbgln("empty packet per header; skipping");
 
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
 
-            auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.codeblock_x_count, header.codeblock_y_count));
+
+            auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
 
             if (current_block.is_included_for_the_first_time) {
                 int w = current_block.rect.width();
