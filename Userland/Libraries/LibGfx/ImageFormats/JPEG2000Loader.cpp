@@ -844,12 +844,13 @@ struct CodeblockBitplaneState {
     Vector<u8> was_coded_in_pass;
     int current_bitplane { 0 };
 
-    // D0, Is this the first bit-plane for the code-block?
     int pass { 0 };
 
     QMArithmeticDecoder::Context uniform_context;
     QMArithmeticDecoder::Context run_length_context;
     Array<QMArithmeticDecoder::Context, 17> all_other_contexts {};
+
+    QMArithmeticDecoder arithmetic_decoder;
 
     void reset_contexts()
     {
@@ -1796,7 +1797,7 @@ dbgln("final stuff!");
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -2156,11 +2157,12 @@ dbgln("empty packet per header; skipping");
         // or alternatively, only return one precint's worth of data here adn assemble outside
         // if (header.sub_bands[i].coefficients.is_empty())
             // header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
+        // ...I think this only does one precinct of data now, but it does the resize once per layer, which is at best wasteful.
+        // But it should fill the combined bits from several layers into this, so it should at least work (?)
         auto clipped_precinct_rect = header.sub_bands[i].subband_rect.intersected(precinct_rect);
         header.sub_bands[i].coefficients.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
 
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
-            auto arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
 
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.codeblock_x_count, header.codeblock_y_count));
 
@@ -2174,9 +2176,17 @@ dbgln("empty packet per header; skipping");
                 TRY(state.was_coded_in_pass.try_resize(w * h));
                 state.current_bitplane = current_block.p;
                 state.reset_contexts();
+                state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
+                // state.arithmetic_decoder.data().enqueue(current_block.data);
+                // state.arithmetic_decoder.INITDEC();
+            } else if (current_block.is_included && current_block.data.size() > 0) {
+dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
+                // state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
+
+                state.arithmetic_decoder.data().append(current_block.data);
             }
 
-            TRY(decode_code_block(state, M_b, arithmetic_decoder, current_block, header.sub_bands[i], clipped_precinct_rect));
+            TRY(decode_code_block(state, M_b, current_block, header.sub_bands[i], clipped_precinct_rect));
         }
 
         // Convert decoded bitplanes to coefficients
@@ -2278,13 +2288,15 @@ dbgln("empty packet per header; skipping");
     return offset;
 }
 
-static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, QMArithmeticDecoder& arithmetic_decoder, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
         // return Error::from_string_literal("Cannot handle non-included codeblocks yet");
     if (!current_block.is_included)
         return {};
+
+    QMArithmeticDecoder& arithmetic_decoder = state.arithmetic_decoder;
 
     // Strips of four vertical coefficients at a time.
     // State per coefficient:
@@ -2473,6 +2485,7 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, Q
     // header.block.number_of_coding_passes is probably number of bitplanes in this packet (?)
     // XXX optionally reinitialize contexts between bitplanes, depending on uses_termination_on_each_coding_pass().
     // Currently, we reinitialize after every code-block (which is what we usually want).
+    // (Note that we don't reset between packets for same codeblocks.)
 
     // D.4 Initializing and terminating
     // Table D.7 – Initial states for all contexts
