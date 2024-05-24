@@ -2308,6 +2308,41 @@ if (x == 15 && y == 31)
     return offset;
 }
 
+static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
+{
+    int w = current_block.rect.width();
+    int h = current_block.rect.height();
+
+    Vector<u8>& significance_and_sign = state.significance_and_sign;
+    Vector<u16>& magnitudes = state.magnitudes;
+
+    // XXX: make method on state
+    auto get_sign = [&](int x, int y) {
+        auto strip_index = y / 4;
+        auto strip_y = y % 4;
+        auto strip_offset = strip_index * w;
+        auto strip_value = significance_and_sign[strip_offset + x];
+        return (strip_value & (1 << (strip_y + 4))) != 0;
+    };
+
+    // XXX bitplane to coefficient conversion should be a dedicated step somewhere else.
+    // (...hmm, but this only outputs the bitplanes really, so it's fine? maybe?)
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            auto sign = get_sign(x, y);
+            auto magnitude = magnitudes[y * w + x];
+            auto value = magnitude * (sign ? -1 : 1);
+
+if (x == 15 && y == 31)
+    dbgln("final value: {}", value);
+
+            // XXX make relative to subband origin?
+            // output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
+            output.coefficients[(y + current_block.rect.top() - precinct_rect.top()) * precinct_rect.width() + (x + current_block.rect.left() - precinct_rect.left())] = value;
+        }
+    }
+}
+
 static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
@@ -2783,23 +2818,8 @@ dbgln("pass {} bitplane {}", pass, current_bitplane);
 
     }
 
-// XXX oh! only do this the last time round!
-    // XXX bitplane to coefficient conversion should be a dedicated step somewhere else.
-    // (...hmm, but this only outputs the bitplanes really, so it's fine? maybe?)
-    for (int y = 0; y < h; ++y) {
-        for (int x = 0; x < w; ++x) {
-            auto sign = get_sign(x, y);
-            auto magnitude = magnitudes[y * w + x];
-            auto value = magnitude * (sign ? -1 : 1);
-
-if (x == 15 && y == 31)
-    dbgln("final value: {}", value);
-
-            // XXX make relative to subband origin?
-            // output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
-            output.coefficients[(y + current_block.rect.top() - precinct_rect.top()) * precinct_rect.width() + (x + current_block.rect.left() - precinct_rect.left())] = value;
-        }
-    }
+    // XXX oh! only do this the last time round!
+    decoded_block_to_coefficients(state, current_block, output, precinct_rect);
 
 #if 0
 {
