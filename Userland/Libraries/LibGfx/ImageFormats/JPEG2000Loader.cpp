@@ -1807,7 +1807,7 @@ dbgln("final stuff!");
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
 static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block   );
-static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
+static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlockPacketData& current_block, Vector<i16>& output, IntRect precinct_rect);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -2209,7 +2209,7 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
 
             TRY(decode_code_block(state, M_b, current_block));
             // XXX oh! only do this the last time round!
-            decoded_block_to_coefficients(state, current_block, header.sub_bands[i], clipped_precinct_rect);
+            decoded_block_to_coefficients(state, current_block, header.sub_bands[i].coefficients, clipped_precinct_rect);
         }
 
         // Convert decoded bitplanes to coefficients
@@ -2312,7 +2312,7 @@ if (x == 15 && y == 31)
     return offset;
 }
 
-static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
+static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlockPacketData& current_block, Vector<i16>& output, IntRect precinct_rect)
 {
     int w = current_block.rect.width();
     int h = current_block.rect.height();
@@ -2342,7 +2342,7 @@ if (x == 15 && y == 31)
 
             // XXX make relative to subband origin?
             // output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
-            output.coefficients[(y + current_block.rect.top() - precinct_rect.top()) * precinct_rect.width() + (x + current_block.rect.left() - precinct_rect.left())] = value;
+            output[(y + current_block.rect.top() - precinct_rect.top()) * precinct_rect.width() + (x + current_block.rect.left() - precinct_rect.left())] = value;
         }
     }
 }
