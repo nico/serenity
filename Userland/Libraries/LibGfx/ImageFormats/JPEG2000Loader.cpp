@@ -1806,7 +1806,8 @@ dbgln("final stuff!");
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block   );
+static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
 {
@@ -2180,8 +2181,6 @@ dbgln("empty packet per header; skipping");
         header.sub_bands[i].coefficients.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
 
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
-
-
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
 
             if (current_block.is_included_for_the_first_time) {
@@ -2205,7 +2204,12 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
                 // state.arithmetic_decoder.flush();
             }
 
-            TRY(decode_code_block(state, M_b, current_block, header.sub_bands[i], clipped_precinct_rect));
+            if (!current_block.is_included)
+                continue;
+
+            TRY(decode_code_block(state, M_b, current_block));
+            // XXX oh! only do this the last time round!
+            decoded_block_to_coefficients(state, current_block, header.sub_bands[i], clipped_precinct_rect);
         }
 
         // Convert decoded bitplanes to coefficients
@@ -2343,13 +2347,12 @@ if (x == 15 && y == 31)
     }
 }
 
-static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block, PacketSubBandData& output, IntRect precinct_rect)
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
         // return Error::from_string_literal("Cannot handle non-included codeblocks yet");
-    if (!current_block.is_included)
-        return {};
+    VERIFY(current_block.is_included);
 
     QMArithmeticDecoder& arithmetic_decoder = state.arithmetic_decoder;
 
@@ -2817,9 +2820,6 @@ dbgln("pass {} bitplane {}", pass, current_bitplane);
                 // state.reset_contexts();
 
     }
-
-    // XXX oh! only do this the last time round!
-    decoded_block_to_coefficients(state, current_block, output, precinct_rect);
 
 #if 0
 {
