@@ -841,7 +841,6 @@ struct CodeblockBitplaneState {
 
     Vector<u16> magnitudes;
 
-
     // Stores bit index (not pass!) where the coefficient became significant.
     // XXX name sucks
     Vector<u8> became_significant_in_pass;
@@ -872,6 +871,7 @@ struct CodeblockBitplaneState {
     }
 };
 
+// DecodedComponent has one of these for each subband at each resolution level.
 struct PacketDecodingState {
     Vector<PrecinctPacketState> precinct_data;
 
@@ -1521,7 +1521,6 @@ struct PacketSubBandData {
     int codeblock_x_count { 0 };
     int codeblock_y_count { 0 };
 
-    Vector<i16> coefficients;
     IntRect subband_rect;
 };
 
@@ -2178,7 +2177,8 @@ dbgln("empty packet per header; skipping");
         // ...I think this only does one precinct of data now, but it does the resize once per layer, which is at best wasteful.
         // But it should fill the combined bits from several layers into this, so it should at least work (?)
         auto clipped_precinct_rect = header.sub_bands[i].subband_rect.intersected(precinct_rect);
-        header.sub_bands[i].coefficients.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
+        Vector<i16> precinct_coefficents;
+        precinct_coefficents.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
 
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
@@ -2209,7 +2209,7 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
 
             TRY(decode_code_block(state, M_b, current_block));
             // XXX oh! only do this the last time round!
-            decoded_block_to_coefficients(state, current_block, header.sub_bands[i].coefficients, clipped_precinct_rect);
+            decoded_block_to_coefficients(state, current_block, precinct_coefficents, clipped_precinct_rect);
         }
 
         // Convert decoded bitplanes to coefficients
@@ -2226,7 +2226,7 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
 
         for (int y = 0; y < h; ++y) {
             for (int x = 0; x < w; ++x) {
-                float value = header.sub_bands[i].coefficients[y * w + x];
+                float value = precinct_coefficents[y * w + x];
 
                 // E.1 Inverse quantization procedure
                 // We coefficients stores qbar_b.
