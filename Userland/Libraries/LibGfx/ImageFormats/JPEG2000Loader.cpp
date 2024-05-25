@@ -817,8 +817,14 @@ struct CodeBlockState {
 
     // Becomes true when the first packet including this codeblock is read.
     bool has_been_included_in_previous_packet { false };
+
+    // One for each layer in this code-block.
+    // XXX this is packet reading output data, while the struct stores packet reading input state.
+    //     this should be somewhere else.
+    Vector<ReadonlyBytes, 1> data;
 };
 
+// State needed to read packet headers.
 struct PrecinctPacketState {
     Vector<CodeBlockState> code_block_state;
     JPEG2000::TagTree code_block_inclusion_tree;
