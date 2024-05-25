@@ -2170,16 +2170,7 @@ dbgln("empty packet per header; skipping");
 
         int M_b = quantization_parameters.number_of_guard_bits + exponent - 1;
 
-        // XXX: only do this for the first precinct, so that additional precincts don't clobber earlier precincts
-        // or alternatively, only return one precint's worth of data here adn assemble outside
-        // if (header.sub_bands[i].coefficients.is_empty())
-            // header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
-        // ...I think this only does one precinct of data now, but it does the resize once per layer, which is at best wasteful.
-        // But it should fill the combined bits from several layers into this, so it should at least work (?)
-        auto clipped_precinct_rect = header.sub_bands[i].subband_rect.intersected(precinct_rect);
-        Vector<i16> precinct_coefficents;
-        precinct_coefficents.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
-
+        // Read bitplanes of all code-blocks.
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
 
@@ -2208,11 +2199,31 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
                 continue;
 
             TRY(decode_code_block(state, M_b, current_block));
+        }
+
+        // Assemble bitplanes from all code-blocks into coefficients of the whole precinct.
+
+        // XXX: the following comment is outdated
+        // XXX: only do this for the first precinct, so that additional precincts don't clobber earlier precincts
+        // or alternatively, only return one precint's worth of data here adn assemble outside
+        // if (header.sub_bands[i].coefficients.is_empty())
+            // header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
+        // ...I think this only does one precinct of data now, but it does the resize once per layer, which is at best wasteful.
+        // But it should fill the combined bits from several layers into this, so it should at least work (?)
+        auto clipped_precinct_rect = header.sub_bands[i].subband_rect.intersected(precinct_rect);
+        Vector<i16> precinct_coefficents;
+        precinct_coefficents.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
+        for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
+            if (!current_block.is_included)
+                continue;
+
+            // XXX: this never creates; have a non-creating getter too?
+            auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
             // XXX oh! only do this the last time round!
             decoded_block_to_coefficients(state, current_block, precinct_coefficents, clipped_precinct_rect);
         }
 
-        // Convert decoded bitplanes to coefficients
+        // Convert precinct i16 coefficients into dequantized floats, and put into the subband buffer (which can have several precincts).
         // XXX do this only once, instead of once per packet. as-is, we do this conversion every time we decode a layer.
         // XXX could do this only before the IDWT, for the whole image at once, maybe
 
