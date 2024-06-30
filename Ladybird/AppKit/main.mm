@@ -10,13 +10,12 @@
 #include <Ladybird/Types.h>
 #include <Ladybird/Utilities.h>
 #include <LibCore/ArgsParser.h>
-#include <LibCore/EventLoop.h>
 #include <LibGfx/Font/FontDatabase.h>
 #include <LibMain/Main.h>
+#include <LibWebView/Application.h>
 #include <LibWebView/ChromeProcess.h>
 #include <LibWebView/CookieJar.h>
 #include <LibWebView/Database.h>
-#include <LibWebView/ProcessManager.h>
 #include <LibWebView/URL.h>
 
 #import <Application/Application.h>
@@ -75,7 +74,7 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     Application* application = [Application sharedApplication];
 
     Core::EventLoopManager::install(*new Ladybird::CFEventLoopManager);
-    Core::EventLoop event_loop;
+    WebView::Application web_view_app(arguments.argc, arguments.argv);
 
     platform_init();
 
@@ -120,12 +119,10 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         open_urls_from_client(raw_urls, NewWindow::Yes);
     };
 
-    WebView::ProcessManager::initialize();
-
     auto mach_port_server = make<Ladybird::MachPortServer>();
     set_mach_server_name(mach_port_server->server_port_name());
-    mach_port_server->on_receive_child_mach_port = [](auto pid, auto port) {
-        WebView::ProcessManager::the().add_process(pid, move(port));
+    mach_port_server->on_receive_child_mach_port = [&web_view_app](auto pid, auto port) {
+        web_view_app.set_process_mach_port(pid, move(port));
     };
 
     auto sql_client = TRY([application launchSQLServer]);
@@ -154,5 +151,5 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
 
     [NSApp setDelegate:delegate];
 
-    return event_loop.exec();
+    return web_view_app.exec();
 }

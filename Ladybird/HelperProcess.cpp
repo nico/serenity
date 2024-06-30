@@ -8,7 +8,7 @@
 #include "Utilities.h"
 #include <AK/Enumerate.h>
 #include <LibCore/Process.h>
-#include <LibWebView/ProcessManager.h>
+#include <LibWebView/Application.h>
 
 enum class RegisterWithProcessManager {
     No,
@@ -49,7 +49,7 @@ static ErrorOr<NonnullRefPtr<ClientType>> launch_server_process_impl(
             auto process = result.release_value();
 
             if (register_with_process_manager == RegisterWithProcessManager::Yes)
-                WebView::ProcessManager::the().add_process(WebView::process_type_from_name(server_name), process.process.pid());
+                WebView::Application::the().add_child_process(WebView::Process { WebView::process_type_from_name(server_name), process.client, move(process.process) });
 
             if (enable_callgrind_profiling == Ladybird::EnableCallgrindProfiling::Yes) {
                 dbgln();
