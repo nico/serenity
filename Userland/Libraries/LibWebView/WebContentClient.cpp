@@ -33,6 +33,7 @@ void WebContentClient::unregister_view(u64 page_id)
     m_views.remove(page_id);
     if (m_views.is_empty()) {
         on_web_content_process_crash = nullptr;
+        async_close_server();
     }
 }
 
