@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#define WEBP_DEBUG 1
+
 // Lossless format: https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification
 
 #include <AK/BitStream.h>
@@ -81,24 +83,29 @@ struct Symbol {
 };
 }
 
-NEVER_INLINE static ErrorOr<void> write_image_data(LittleEndianOutputBitStream& bit_stream, ReadonlySpan<Symbol> symbols, PrefixCodeGroup const& prefix_code_group)
+NEVER_INLINE static ErrorOr<void> write_image_data(LittleEndianOutputBitStream& bit_stream, ReadonlySpan<Symbol> symbols, PrefixCodeGroup const& prefix_code_group, IntRect tile, int w)
 {
     // This is currently the hot loop. Keep performance in mind when you change it.
-    for (Symbol const& symbol : symbols) {
-        TRY(prefix_code_group[0].write_symbol(bit_stream, symbol.green_or_length_or_index));
-        if (symbol.green_or_length_or_index < 256) {
-            TRY(prefix_code_group[1].write_symbol(bit_stream, symbol.r));
-            TRY(prefix_code_group[2].write_symbol(bit_stream, symbol.b));
-            TRY(prefix_code_group[3].write_symbol(bit_stream, symbol.a));
-        } else if (symbol.green_or_length_or_index < 256 + 24) {
-            TRY(bit_stream.write_bits(static_cast<unsigned>(symbol.remaining_length & 0x3ff), symbol.remaining_length >> 10));
+    symbols = symbols.slice(tile.y() * w + tile.x());
+    for (int y = 0; y < tile.height(); ++y) {
+        for (int x = 0; x < tile.width(); ++x) {
+            auto const& symbol = symbols[x];
+            TRY(prefix_code_group[0].write_symbol(bit_stream, symbol.green_or_length_or_index));
+            if (symbol.green_or_length_or_index < 256) {
+                TRY(prefix_code_group[1].write_symbol(bit_stream, symbol.r));
+                TRY(prefix_code_group[2].write_symbol(bit_stream, symbol.b));
+                TRY(prefix_code_group[3].write_symbol(bit_stream, symbol.a));
+            } else if (symbol.green_or_length_or_index < 256 + 24) {
+                TRY(bit_stream.write_bits(static_cast<unsigned>(symbol.remaining_length & 0x3ff), symbol.remaining_length >> 10));
 
-            auto distance = prefix_decompose(symbol.distance);
-            TRY(prefix_code_group[4].write_symbol(bit_stream, distance.prefix_code));
-            TRY(bit_stream.write_bits(symbol.distance - distance.offset, distance.extra_bits));
-        } else {
-            // Nothing to do.
+                auto distance = prefix_decompose(symbol.distance);
+                TRY(prefix_code_group[4].write_symbol(bit_stream, distance.prefix_code));
+                TRY(bit_stream.write_bits(symbol.distance - distance.offset, distance.extra_bits));
+            } else {
+                // Nothing to do.
+            }
         }
+        symbols = symbols.slice(w);
     }
     return {};
 }
@@ -392,7 +399,7 @@ static Optional<unsigned> can_write_as_simple_code_lengths(ReadonlyBytes code_le
     return non_zero_symbol_count;
 }
 
-static ErrorOr<PrefixCodeGroup> compute_and_write_prefix_code_group(Vector<Symbol> const& symbols, LittleEndianOutputBitStream& bit_stream, IsOpaque& is_fully_opaque, u16 color_cache_size)
+static ErrorOr<PrefixCodeGroup> compute_and_write_prefix_code_group(Vector<Symbol> const& all_symbols, LittleEndianOutputBitStream& bit_stream, IsOpaque& is_fully_opaque, u16 color_cache_size, IntRect tile, int w)
 {
     // prefix-code-group     =
     //     5prefix-code ; See "Interpretation of Meta Prefix Codes" to
@@ -427,17 +434,26 @@ static ErrorOr<PrefixCodeGroup> compute_and_write_prefix_code_group(Vector<Symbo
             value++;
     };
 
-    for (Symbol const& symbol : symbols) {
-        saturating_increment(symbol_frequencies[0][symbol.green_or_length_or_index]);
-        if (symbol.green_or_length_or_index < 256) {
-            saturating_increment(symbol_frequencies[1][symbol.r]);
-            saturating_increment(symbol_frequencies[2][symbol.b]);
-            saturating_increment(symbol_frequencies[3][symbol.a]);
-        } else if (symbol.green_or_length_or_index < 256 + 24) {
-            saturating_increment(symbol_frequencies[4][prefix_decompose(symbol.distance).prefix_code]);
-        } else {
-            // Nothing to do.
+    // XXX derp this doesn't work, as symbols don't map nicely to tiles the way pixels do
+    dbgln("tile {}, w {}, symbol size {}", tile, w, all_symbols.size());
+    ReadonlySpan<Symbol> symbols = all_symbols.span();
+    symbols = symbols.slice(tile.y() * w + tile.x());
+    for (int y = 0; y < tile.height(); ++y) {
+        for (int x = 0; x < tile.width(); ++x) {
+            dbgln("x {} y {}", x, y);
+            auto const& symbol = symbols[x];
+            saturating_increment(symbol_frequencies[0][symbol.green_or_length_or_index]);
+            if (symbol.green_or_length_or_index < 256) {
+                saturating_increment(symbol_frequencies[1][symbol.r]);
+                saturating_increment(symbol_frequencies[2][symbol.b]);
+                saturating_increment(symbol_frequencies[3][symbol.a]);
+            } else if (symbol.green_or_length_or_index < 256 + 24) {
+                saturating_increment(symbol_frequencies[4][prefix_decompose(symbol.distance).prefix_code]);
+            } else {
+                // Nothing to do.
+            }
         }
+        symbols = symbols.slice(w);
     }
 
     Vector<u8, 256 + 24 + 64> code_lengths_green_or_length {};
@@ -467,6 +483,7 @@ static ErrorOr<PrefixCodeGroup> compute_and_write_prefix_code_group(Vector<Symbo
         else
             prefix_code_group[i] = TRY(write_normal_code_lengths(bit_stream, code_lengths[i], alphabet_sizes[i]));
 
+        // XXX this is wrong with tiles
         if (i == 3)
             is_fully_opaque.set_is_fully_opaque_if_not_yet_known(non_zero_symbol_count.has_value() && non_zero_symbol_count.value() == 1 && symbols[0] == 0xff);
     }
@@ -498,20 +515,65 @@ static ErrorOr<void> write_VP8L_coded_image(ImageKind image_kind, LittleEndianOu
         TRY(bit_stream.write_bits(0u, 1u));
     }
 
+    // XXX have toggle for turning this off
+    Vector<IntRect, 1> entropy_tiles;
+
     if (image_kind == ImageKind::SpatiallyCoded) {
         // meta-prefix           =  %b0 / (%b1 entropy-image)
         dbgln_if(WEBP_DEBUG, "writing has_meta_prefix false");
 
-        // We do huffman coding by writing a single prefix-code-group for the entire image.
-        // FIXME: Consider using a meta-prefix image and using one prefix-code-group per tile.
-        TRY(bit_stream.write_bits(0u, 1u));
+        //     int prefix_bits = ReadBits(3) + 2;
+        //     int prefix_image_width =
+        //         DIV_ROUND_UP(image_width, 1 << prefix_bits);
+        //     int prefix_image_height =
+        //         DIV_ROUND_UP(image_height, 1 << prefix_bits);
+        // Huffman tables tend to become full after 64kiB of data, suggesting a target tile size of 256x256 isn't the worst.
+        // FIXME: Be smarter, tweak, etc.
+        if (max(bitmap.width(), bitmap.height()) > 256) {
+            TRY(bit_stream.write_bits(1u, 1u));
+
+            // We're just writing a dedicated huffman tree per tile.
+            // FIXME: Maybe do some subdivision scheme, where high-entropy tiles get subdivided and low-entropy tiles share huffman codes?
+
+            unsigned prefix_bits = 8;
+            TRY(bit_stream.write_bits(prefix_bits - 2, 3u));
+            unsigned block_size = 1 << prefix_bits;
+            auto meta_prefix_bitmap = TRY(Bitmap::create(BitmapFormat::BGRA8888, { ceil_div(bitmap.width(), block_size), ceil_div(bitmap.height(), block_size) }));
+            // "The red and green components of a pixel define a 16-bit meta prefix code used in a particular block of the ARGB image."
+            for (int y = 0; y < meta_prefix_bitmap->height(); ++y) {
+                for (int x = 0; x < meta_prefix_bitmap->width(); ++x) {
+                    unsigned index = y * meta_prefix_bitmap->width() + x;
+                    meta_prefix_bitmap->set_pixel({ x, y }, Color(index >> 8, index & 0xff, 0, 0));
+
+                    IntRect tile_rect { x * block_size, y * block_size, block_size, block_size };
+                    dbgln("in tile {}", tile_rect);
+                    TRY(entropy_tiles.try_append(tile_rect.intersected(bitmap.rect())));
+                }
+            }
+            IsOpaque dont_care;
+            TRY(write_VP8L_coded_image(ImageKind::EntropyCoded, bit_stream, *meta_prefix_bitmap, dont_care, {}));
+        } else {
+            TRY(bit_stream.write_bits(0u, 1u));
+            entropy_tiles.append(bitmap.rect());
+        }
+    } else {
+        entropy_tiles.append(bitmap.rect());
     }
 
     // data                  =  prefix-codes lz77-coded-image
     // prefix-codes          =  prefix-code-group *prefix-codes
     auto symbols = TRY(bitmap_to_symbols(bitmap, color_cache_bits));
-    auto prefix_code_group = TRY(compute_and_write_prefix_code_group(symbols, bit_stream, is_fully_opaque, color_cache_size));
-    TRY(write_image_data(bit_stream, symbols.span(), prefix_code_group));
+
+    // XXX loop
+    Vector<PrefixCodeGroup> prefix_code_groups;
+    TRY(prefix_code_groups.try_ensure_capacity(entropy_tiles.size()));
+    for (auto tile_rect : entropy_tiles) {
+        auto prefix_code_group = TRY(compute_and_write_prefix_code_group(symbols, bit_stream, is_fully_opaque, color_cache_size, tile_rect, bitmap.width()));
+        prefix_code_groups.append(move(prefix_code_group));
+    }
+
+    for (auto [i, tile_rect] : enumerate(entropy_tiles))
+        TRY(write_image_data(bit_stream, symbols.span(), prefix_code_groups[i], tile_rect, bitmap.width()));
 
     return {};
 }
@@ -554,6 +616,9 @@ static ErrorOr<NonnullRefPtr<Bitmap>> maybe_write_predictor_transform(LittleEndi
     //  This subresolution image is encoded using the same techniques described in Chapter 5."
     unsigned block_size = 1 << size_bits;
     auto subresolution_bitmap = TRY(Bitmap::create(BitmapFormat::BGRA8888, { ceil_div(bitmap->width(), block_size), ceil_div(bitmap->height(), block_size) }));
+
+    dbgln("size {}", subresolution_bitmap->size());
+
     subresolution_bitmap->fill(Color(0, 1 /* 1 is the "L" predictor */, 0, 0));
     IsOpaque dont_care;
     TRY(write_VP8L_coded_image(ImageKind::EntropyCoded, bit_stream, *subresolution_bitmap, dont_care, {}));
