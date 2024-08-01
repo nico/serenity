@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#define WEBP_DEBUG 1
+// #define WEBP_DEBUG 1
 
 // Lossless format: https://developers.google.com/speed/webp/docs/webp_lossless_bitstream_specification
 
@@ -564,12 +564,14 @@ static ErrorOr<void> write_VP8L_coded_image(ImageKind image_kind, LittleEndianOu
     for (Symbol& symbol : symbols) {
         u16 x = offset % bitmap.width();
         u16 y = offset / bitmap.width();
-        for (u16 i = 0; i < entropy_tiles.size(); ++i) { // XXX do better
+        u16 i;
+        for (i = 0; i < entropy_tiles.size(); ++i) { // XXX do better
             if (entropy_tiles[i].contains({ x, y })) {
                 symbol.group_index = i;
                 break;
             }
         }
+        VERIFY(i < entropy_tiles.size());
 
         if (symbol.green_or_length_or_index < 256) {
             ++offset;
@@ -579,7 +581,8 @@ static ErrorOr<void> write_VP8L_coded_image(ImageKind image_kind, LittleEndianOu
                 offset += length_prefix_code + 1;
             } else {
                 int extra_bits = symbol.remaining_length >> 10;
-                offset += ((2 + (length_prefix_code & 1)) << extra_bits) + (symbol.remaining_length & 0x3fff) + 1;
+                VERIFY(extra_bits == (length_prefix_code - 2) >> 1);
+                offset += ((2 + (length_prefix_code & 1)) << extra_bits) + (symbol.remaining_length & 0x3ff) + 1;
             }
         } else {
             ++offset;
