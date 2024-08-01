@@ -522,18 +522,22 @@ static ErrorOr<void> write_VP8L_coded_image(ImageKind image_kind, LittleEndianOu
         //         DIV_ROUND_UP(image_width, 1 << prefix_bits);
         //     int prefix_image_height =
         //         DIV_ROUND_UP(image_height, 1 << prefix_bits);
+        // => prefix_bits is in [2, 9]; tile size is in [4, 512]
         // Huffman tables tend to become full after 64kiB of data, suggesting a target tile size of 256x256 isn't the worst.
         // FIXME: Be smarter, tweak, etc.
-        if (max(bitmap.width(), bitmap.height()) > 256) {
+        unsigned const prefix_bits = 7;
+        unsigned const block_size = 1 << prefix_bits;
+        if (max(bitmap.width(), bitmap.height()) > (int)block_size) {
             TRY(bit_stream.write_bits(1u, 1u));
 
             // We're just writing a dedicated huffman tree per tile.
             // FIXME: Maybe do some subdivision scheme, where high-entropy tiles get subdivided and low-entropy tiles share huffman codes?
 
-            unsigned prefix_bits = 8;
             TRY(bit_stream.write_bits(prefix_bits - 2, 3u));
-            unsigned block_size = 1 << prefix_bits;
             auto meta_prefix_bitmap = TRY(Bitmap::create(BitmapFormat::BGRA8888, { ceil_div(bitmap.width(), block_size), ceil_div(bitmap.height(), block_size) }));
+
+            // dbgln("size {}", meta_prefix_bitmap->size());
+
             // "The red and green components of a pixel define a 16-bit meta prefix code used in a particular block of the ARGB image."
             for (int y = 0; y < meta_prefix_bitmap->height(); ++y) {
                 for (int x = 0; x < meta_prefix_bitmap->width(); ++x) {
@@ -541,7 +545,7 @@ static ErrorOr<void> write_VP8L_coded_image(ImageKind image_kind, LittleEndianOu
                     meta_prefix_bitmap->set_pixel({ x, y }, Color(index >> 8, index & 0xff, 0, 0));
 
                     IntRect tile_rect { x * block_size, y * block_size, block_size, block_size };
-                    dbgln("in tile {}", tile_rect);
+                    // dbgln("in tile {}", tile_rect);
                     TRY(entropy_tiles.try_append(tile_rect.intersected(bitmap.rect())));
                 }
             }
@@ -641,8 +645,6 @@ static ErrorOr<NonnullRefPtr<Bitmap>> maybe_write_predictor_transform(LittleEndi
     //  This subresolution image is encoded using the same techniques described in Chapter 5."
     unsigned block_size = 1 << size_bits;
     auto subresolution_bitmap = TRY(Bitmap::create(BitmapFormat::BGRA8888, { ceil_div(bitmap->width(), block_size), ceil_div(bitmap->height(), block_size) }));
-
-    dbgln("size {}", subresolution_bitmap->size());
 
     subresolution_bitmap->fill(Color(0, 1 /* 1 is the "L" predictor */, 0, 0));
     IsOpaque dont_care;
