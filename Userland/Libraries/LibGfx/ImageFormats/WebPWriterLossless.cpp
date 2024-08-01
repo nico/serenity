@@ -73,39 +73,40 @@ struct Symbol {
         };
         struct {
             // 4 bits num_extra_bits, 10 bits payload. FIXME: Could store num_extra_bits in green_or_length_or_index?
-            u16 remaining_length;
+            u16 remaining_length; // XXX don't have to store num_extra_bits at all; can compute it from green_or_length_or_index
 
             // FIXME: Must become u32, or at least u21, when emitting full backreferences instead of just RLE.
             // FIXME: Could use a single u32 for remaining_length and distance if num_extra_bits goes in green_or_length_or_index.
             u16 distance;
         };
     };
+
+    // u16 x, y;
+    u16 group_index { 0 };
 };
 }
 
-NEVER_INLINE static ErrorOr<void> write_image_data(LittleEndianOutputBitStream& bit_stream, ReadonlySpan<Symbol> symbols, PrefixCodeGroup const& prefix_code_group, IntRect tile, int w)
+NEVER_INLINE static ErrorOr<void> write_image_data(LittleEndianOutputBitStream& bit_stream, ReadonlySpan<Symbol> symbols, ReadonlySpan<PrefixCodeGroup> const& prefix_code_groups)
 {
     // This is currently the hot loop. Keep performance in mind when you change it.
-    symbols = symbols.slice(tile.y() * w + tile.x());
-    for (int y = 0; y < tile.height(); ++y) {
-        for (int x = 0; x < tile.width(); ++x) {
-            auto const& symbol = symbols[x];
-            TRY(prefix_code_group[0].write_symbol(bit_stream, symbol.green_or_length_or_index));
-            if (symbol.green_or_length_or_index < 256) {
-                TRY(prefix_code_group[1].write_symbol(bit_stream, symbol.r));
-                TRY(prefix_code_group[2].write_symbol(bit_stream, symbol.b));
-                TRY(prefix_code_group[3].write_symbol(bit_stream, symbol.a));
-            } else if (symbol.green_or_length_or_index < 256 + 24) {
-                TRY(bit_stream.write_bits(static_cast<unsigned>(symbol.remaining_length & 0x3ff), symbol.remaining_length >> 10));
+    for (Symbol const& symbol : symbols) {
+        // XXX ish
+        PrefixCodeGroup const& prefix_code_group = prefix_code_groups[symbol.group_index];
 
-                auto distance = prefix_decompose(symbol.distance);
-                TRY(prefix_code_group[4].write_symbol(bit_stream, distance.prefix_code));
-                TRY(bit_stream.write_bits(symbol.distance - distance.offset, distance.extra_bits));
-            } else {
-                // Nothing to do.
-            }
+        TRY(prefix_code_group[0].write_symbol(bit_stream, symbol.green_or_length_or_index));
+        if (symbol.green_or_length_or_index < 256) {
+            TRY(prefix_code_group[1].write_symbol(bit_stream, symbol.r));
+            TRY(prefix_code_group[2].write_symbol(bit_stream, symbol.b));
+            TRY(prefix_code_group[3].write_symbol(bit_stream, symbol.a));
+        } else if (symbol.green_or_length_or_index < 256 + 24) {
+            TRY(bit_stream.write_bits(static_cast<unsigned>(symbol.remaining_length & 0x3ff), symbol.remaining_length >> 10));
+
+            auto distance = prefix_decompose(symbol.distance);
+            TRY(prefix_code_group[4].write_symbol(bit_stream, distance.prefix_code));
+            TRY(bit_stream.write_bits(symbol.distance - distance.offset, distance.extra_bits));
+        } else {
+            // Nothing to do.
         }
-        symbols = symbols.slice(w);
     }
     return {};
 }
@@ -399,7 +400,7 @@ static Optional<unsigned> can_write_as_simple_code_lengths(ReadonlyBytes code_le
     return non_zero_symbol_count;
 }
 
-static ErrorOr<PrefixCodeGroup> compute_and_write_prefix_code_group(Vector<Symbol> const& all_symbols, LittleEndianOutputBitStream& bit_stream, IsOpaque& is_fully_opaque, u16 color_cache_size, IntRect tile, int w)
+static ErrorOr<PrefixCodeGroup> compute_and_write_prefix_code_group(Vector<Symbol> const& all_symbols, LittleEndianOutputBitStream& bit_stream, IsOpaque& is_fully_opaque, u16 color_cache_size, u16 group_index)
 {
     // prefix-code-group     =
     //     5prefix-code ; See "Interpretation of Meta Prefix Codes" to
@@ -434,26 +435,20 @@ static ErrorOr<PrefixCodeGroup> compute_and_write_prefix_code_group(Vector<Symbo
             value++;
     };
 
-    // XXX derp this doesn't work, as symbols don't map nicely to tiles the way pixels do
-    dbgln("tile {}, w {}, symbol size {}", tile, w, all_symbols.size());
-    ReadonlySpan<Symbol> symbols = all_symbols.span();
-    symbols = symbols.slice(tile.y() * w + tile.x());
-    for (int y = 0; y < tile.height(); ++y) {
-        for (int x = 0; x < tile.width(); ++x) {
-            dbgln("x {} y {}", x, y);
-            auto const& symbol = symbols[x];
-            saturating_increment(symbol_frequencies[0][symbol.green_or_length_or_index]);
-            if (symbol.green_or_length_or_index < 256) {
-                saturating_increment(symbol_frequencies[1][symbol.r]);
-                saturating_increment(symbol_frequencies[2][symbol.b]);
-                saturating_increment(symbol_frequencies[3][symbol.a]);
-            } else if (symbol.green_or_length_or_index < 256 + 24) {
-                saturating_increment(symbol_frequencies[4][prefix_decompose(symbol.distance).prefix_code]);
-            } else {
-                // Nothing to do.
-            }
+    for (Symbol const& symbol : all_symbols) {
+        // XXX it's a bit silly that we're doing N passes over all_symbols.
+        if (symbol.group_index != group_index)
+            continue;
+        saturating_increment(symbol_frequencies[0][symbol.green_or_length_or_index]);
+        if (symbol.green_or_length_or_index < 256) {
+            saturating_increment(symbol_frequencies[1][symbol.r]);
+            saturating_increment(symbol_frequencies[2][symbol.b]);
+            saturating_increment(symbol_frequencies[3][symbol.a]);
+        } else if (symbol.green_or_length_or_index < 256 + 24) {
+            saturating_increment(symbol_frequencies[4][prefix_decompose(symbol.distance).prefix_code]);
+        } else {
+            // Nothing to do.
         }
-        symbols = symbols.slice(w);
     }
 
     Vector<u8, 256 + 24 + 64> code_lengths_green_or_length {};
@@ -564,16 +559,43 @@ static ErrorOr<void> write_VP8L_coded_image(ImageKind image_kind, LittleEndianOu
     // prefix-codes          =  prefix-code-group *prefix-codes
     auto symbols = TRY(bitmap_to_symbols(bitmap, color_cache_bits));
 
+    // Assign each symbol to a prefix code group.
+    size_t offset = 0;
+    for (Symbol& symbol : symbols) {
+        u16 x = offset % bitmap.width();
+        u16 y = offset / bitmap.width();
+        for (u16 i = 0; i < entropy_tiles.size(); ++i) { // XXX do better
+            if (entropy_tiles[i].contains({ x, y })) {
+                symbol.group_index = i;
+                break;
+            }
+        }
+
+        if (symbol.green_or_length_or_index < 256) {
+            ++offset;
+        } else if (symbol.green_or_length_or_index < 256 + 24) {
+            u8 length_prefix_code = symbol.green_or_length_or_index - 256;
+            if (length_prefix_code < 4) {
+                offset += length_prefix_code + 1;
+            } else {
+                int extra_bits = symbol.remaining_length >> 10;
+                offset += ((2 + (length_prefix_code & 1)) << extra_bits) + (symbol.remaining_length & 0x3fff) + 1;
+            }
+        } else {
+            ++offset;
+        }
+    }
+
     // XXX loop
     Vector<PrefixCodeGroup> prefix_code_groups;
     TRY(prefix_code_groups.try_ensure_capacity(entropy_tiles.size()));
-    for (auto tile_rect : entropy_tiles) {
-        auto prefix_code_group = TRY(compute_and_write_prefix_code_group(symbols, bit_stream, is_fully_opaque, color_cache_size, tile_rect, bitmap.width()));
+    // for (auto tile_rect : entropy_tiles) {
+    for (u16 i = 0; i < entropy_tiles.size(); ++i) {
+        auto prefix_code_group = TRY(compute_and_write_prefix_code_group(symbols, bit_stream, is_fully_opaque, color_cache_size, i));
         prefix_code_groups.append(move(prefix_code_group));
     }
 
-    for (auto [i, tile_rect] : enumerate(entropy_tiles))
-        TRY(write_image_data(bit_stream, symbols.span(), prefix_code_groups[i], tile_rect, bitmap.width()));
+    TRY(write_image_data(bit_stream, symbols.span(), prefix_code_groups));
 
     return {};
 }
