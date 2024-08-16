@@ -48,6 +48,7 @@ template<SIMDVector T>
 requires(IsIntegral<ElementOf<T>>)
 ALWAYS_INLINE T abs(T x)
 {
+    // XXX __builtin_elementwise_abs in clang?
     return bitselect(x, -x, x > 0);
 }
 
