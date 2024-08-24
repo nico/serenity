@@ -268,12 +268,14 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                 }
                 case PNG::FilterType::Paeth: {
                     // XXX better
+                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
+                    auto topleft = __builtin_shufflevector(pixel_xy_minus_1, pixel_y_minus_1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
+#if 0
                     auto p0 = extract_u8x4<0>(pixel);
                     auto p1 = extract_u8x4<4>(pixel);
                     auto p2 = extract_u8x4<8>(pixel);
                     auto p3 = extract_u8x4<12>(pixel);
 
-                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
                     auto pixel_x_minus_1_0 = extract_u8x4<0>(left);
                     auto pixel_x_minus_1_1 = extract_u8x4<4>(left);
                     auto pixel_x_minus_1_2 = extract_u8x4<8>(left);
@@ -284,7 +286,6 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                     auto pixel_y_minus_1_2 = extract_u8x4<8>(pixel_y_minus_1);
                     auto pixel_y_minus_1_3 = extract_u8x4<12>(pixel_y_minus_1);
 
-                    auto topleft = __builtin_shufflevector(pixel_xy_minus_1, pixel_y_minus_1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
                     auto pixel_xy_minus_1_0 = extract_u8x4<0>(topleft);
                     auto pixel_xy_minus_1_1 = extract_u8x4<4>(topleft);
                     auto pixel_xy_minus_1_2 = extract_u8x4<8>(topleft);
@@ -299,6 +300,9 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                     return __builtin_shufflevector(__builtin_shufflevector(pixel_0, pixel_1, 0, 1, 2, 3, 4, 5, 6, 7),
                                                    __builtin_shufflevector(pixel_2, pixel_3, 0, 1, 2, 3, 4, 5, 6, 7),
                                                    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+#else
+                    return pixel - PNG::paeth_predictor(left, pixel_y_minus_1, topleft);
+#endif
                 }
                 }
                 VERIFY_NOT_REACHED();

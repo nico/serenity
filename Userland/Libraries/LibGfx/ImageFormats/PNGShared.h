@@ -74,4 +74,23 @@ ALWAYS_INLINE AK::SIMD::u8x4 paeth_predictor(AK::SIMD::u8x4 a, AK::SIMD::u8x4 b,
     return (a & mask_a) | (b & mask_b) | (c & mask_c);
 }
 
+ALWAYS_INLINE AK::SIMD::u8x16 paeth_predictor(AK::SIMD::u8x16 a, AK::SIMD::u8x16 b, AK::SIMD::u8x16 c)
+{
+    using namespace AK::SIMD;
+    auto a16 = simd_cast<i16x16>(a);
+    auto b16 = simd_cast<i16x16>(b);
+    auto c16 = simd_cast<i16x16>(c);
+
+    auto p16 = a16 + b16 - c16;
+    auto pa16 = abs(p16 - a16);
+    auto pb16 = abs(p16 - b16);
+    auto pc16 = abs(p16 - c16);
+
+    auto mask_a = simd_cast<u8x16>((pa16 <= pb16) & (pa16 <= pc16));
+    auto mask_b = ~mask_a & simd_cast<u8x16>(pb16 <= pc16);
+    auto mask_c = ~(mask_a | mask_b);
+
+    return (a & mask_a) | (b & mask_b) | (c & mask_c);
+}
+
 };
