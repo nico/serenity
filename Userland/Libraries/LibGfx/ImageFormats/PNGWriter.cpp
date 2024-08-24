@@ -234,7 +234,10 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
 
         struct Filter {
             PNG::FilterType type;
-            AK::SIMD::u32x4 sum { 0, 0, 0, 0 };
+            AK::SIMD::u32x4 sum0 { 0, 0, 0, 0 };
+            AK::SIMD::u32x4 sum1 { 0, 0, 0, 0 };
+            AK::SIMD::u32x4 sum2 { 0, 0, 0, 0 };
+            AK::SIMD::u32x4 sum3 { 0, 0, 0, 0 };
 
             AK::SIMD::u8x16 predict(AK::SIMD::u8x16 pixel, AK::SIMD::u8x16 pixel_x_minus_1, AK::SIMD::u8x16 pixel_y_minus_1, AK::SIMD::u8x16 pixel_xy_minus_1)
             {
@@ -314,18 +317,27 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
 #endif
 
                 // XXX better
-                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<0>(simd)))));
-                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<4>(simd)))));
-                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<8>(simd)))));
-                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<12>(simd)))));
+                sum0 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<0>(simd)))));
+                sum1 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<4>(simd)))));
+                sum2 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<8>(simd)))));
+                sum3 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<12>(simd)))));
             }
 
             u32 sum_of_abs_values() const
             {
                 // XXX __builtin_reduce_add?
-                u32 result = sum[0] + sum[1] + sum[2];
+                u32 result = sum0[0] + sum0[1] + sum0[2];
                 if constexpr (include_alpha)
-                    result += sum[3];
+                    result += sum0[3];
+                result += sum1[0] + sum1[1] + sum1[2];
+                if constexpr (include_alpha)
+                    result += sum1[3];
+                result += sum2[0] + sum2[1] + sum2[2];
+                if constexpr (include_alpha)
+                    result += sum2[3];
+                result += sum3[0] + sum3[1] + sum3[2];
+                if constexpr (include_alpha)
+                    result += sum3[3];
                 return result;
             }
         };
