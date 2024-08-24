@@ -242,18 +242,21 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                 case PNG::FilterType::None:
                     return pixel;
                 case PNG::FilterType::Sub: {
-                    // auto left = __builtin_shufflevector(prev_left, current, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-
-                    return pixel - __builtin_shufflevector(pixel_x_minus_1, pixel, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+                    return pixel - left;
                 }
                 case PNG::FilterType::Up:
                     return pixel - pixel_y_minus_1;
                 case PNG::FilterType::Average: {
                     // XXX
                     // The sum Orig(a) + Orig(b) shall be performed without overflow (using at least nine-bit arithmetic).
+                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+                    auto average = (left / 2) + (pixel_y_minus_1 / 2);
+                    // XXX add missing bit if needed
+
                     // auto sum = AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_x_minus_1) + AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_y_minus_1);
                     // auto average = AK::SIMD::simd_cast<AK::SIMD::u8x4>(sum / 2);
-                    // return pixel - average;
+                    return pixel - average;
                 }
                 case PNG::FilterType::Paeth: {
                     // XXX better
@@ -294,6 +297,15 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
             void append(AK::SIMD::u8x16 simd)
             {
                 using namespace AK::SIMD;
+
+#if 0
+                u16x8 abs_lo = abs((i8x16)(__builtin_convertvector(simd & i8x16{0xFF}, i16x8)));
+                u16x8 abs_hi = abs((i8x16)(__builtin_convertvector(simd >> 8, i16x8)));
+                u32x4 sum_lo = __builtin_convertvector(abs_lo, u32x4);
+                u32x4 sum_hi = __builtin_convertvector(abs_hi, u32x4);
+                return sum_u32x4(sum_lo + sum_hi);
+#endif
+
                 // XXX better
                 sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<0>(simd)))));
                 sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<4>(simd)))));
@@ -340,17 +352,18 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
         // The following simple heuristic has performed well in early tests:
         // compute the output scanline using all five filters, and select the filter that gives the smallest sum of absolute values of outputs.
         // (Consider the output bytes as signed differences for this test.)
-        Filter& best_filter = none_filter;
-        if (best_filter.sum_of_abs_values() > sub_filter.sum_of_abs_values())
-            best_filter = sub_filter;
-        if (best_filter.sum_of_abs_values() > up_filter.sum_of_abs_values())
-            best_filter = up_filter;
-        if (best_filter.sum_of_abs_values() > average_filter.sum_of_abs_values())
-            best_filter = average_filter;
-        if (best_filter.sum_of_abs_values() > paeth_filter.sum_of_abs_values())
-            best_filter = paeth_filter;
+        Filter* best_filter = &none_filter;
+        if (best_filter->sum_of_abs_values() > sub_filter.sum_of_abs_values())
+            best_filter = &sub_filter;
+        if (best_filter->sum_of_abs_values() > up_filter.sum_of_abs_values())
+            best_filter = &up_filter;
+        if (best_filter->sum_of_abs_values() > average_filter.sum_of_abs_values())
+            best_filter = &average_filter;
+        if (best_filter->sum_of_abs_values() > paeth_filter.sum_of_abs_values())
+            best_filter = &paeth_filter;
+        best_filter = &average_filter;
 
-        TRY(uncompressed_block_data.try_append(to_underlying(best_filter.type)));
+        TRY(uncompressed_block_data.try_append(to_underlying(best_filter->type)));
 
         pixel_x_minus_1 = dummy_scanline[0];
         pixel_xy_minus_1 = dummy_scanline[0];
@@ -359,7 +372,7 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
             auto pixel = scanline[x];
             auto pixel_y_minus_1 = scanline_minus_1[x];
 
-            auto predicted_pixel = best_filter.predict(pixel, pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1);
+            auto predicted_pixel = best_filter->predict(pixel, pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1);
 
             for (int i = 0; i < 4; ++i) {
                 TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 2]));
