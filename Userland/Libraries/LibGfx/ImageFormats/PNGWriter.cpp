@@ -265,20 +265,22 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                     auto p2 = extract_u8x4<8>(pixel);
                     auto p3 = extract_u8x4<12>(pixel);
 
-                    auto pixel_x_minus_1_0 = extract_u8x4<0>(pixel_x_minus_1);
-                    auto pixel_x_minus_1_1 = extract_u8x4<4>(pixel_x_minus_1);
-                    auto pixel_x_minus_1_2 = extract_u8x4<8>(pixel_x_minus_1);
-                    auto pixel_x_minus_1_3 = extract_u8x4<12>(pixel_x_minus_1);
+                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
+                    auto pixel_x_minus_1_0 = extract_u8x4<0>(left);
+                    auto pixel_x_minus_1_1 = extract_u8x4<4>(left);
+                    auto pixel_x_minus_1_2 = extract_u8x4<8>(left);
+                    auto pixel_x_minus_1_3 = extract_u8x4<12>(left);
 
                     auto pixel_y_minus_1_0 = extract_u8x4<0>(pixel_y_minus_1);
                     auto pixel_y_minus_1_1 = extract_u8x4<4>(pixel_y_minus_1);
                     auto pixel_y_minus_1_2 = extract_u8x4<8>(pixel_y_minus_1);
                     auto pixel_y_minus_1_3 = extract_u8x4<12>(pixel_y_minus_1);
 
-                    auto pixel_xy_minus_1_0 = extract_u8x4<0>(pixel_xy_minus_1);
-                    auto pixel_xy_minus_1_1 = extract_u8x4<4>(pixel_xy_minus_1);
-                    auto pixel_xy_minus_1_2 = extract_u8x4<8>(pixel_xy_minus_1);
-                    auto pixel_xy_minus_1_3 = extract_u8x4<12>(pixel_xy_minus_1);
+                    auto topleft = __builtin_shufflevector(pixel_xy_minus_1, pixel_y_minus_1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
+                    auto pixel_xy_minus_1_0 = extract_u8x4<0>(topleft);
+                    auto pixel_xy_minus_1_1 = extract_u8x4<4>(topleft);
+                    auto pixel_xy_minus_1_2 = extract_u8x4<8>(topleft);
+                    auto pixel_xy_minus_1_3 = extract_u8x4<12>(topleft);
 
                     auto pixel_0 = p0 - PNG::paeth_predictor(pixel_x_minus_1_0, pixel_y_minus_1_0, pixel_xy_minus_1_0);
                     auto pixel_1 = p1 - PNG::paeth_predictor(pixel_x_minus_1_1, pixel_y_minus_1_1, pixel_xy_minus_1_1);
@@ -361,7 +363,8 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
             best_filter = &average_filter;
         if (best_filter->sum_of_abs_values() > paeth_filter.sum_of_abs_values())
             best_filter = &paeth_filter;
-        best_filter = &average_filter;
+        // best_filter = &average_filter;
+        best_filter = &paeth_filter;
 
         TRY(uncompressed_block_data.try_append(to_underlying(best_filter->type)));
 
