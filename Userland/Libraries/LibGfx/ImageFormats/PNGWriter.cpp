@@ -252,8 +252,12 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                     // The sum Orig(a) + Orig(b) shall be performed without overflow (using at least nine-bit arithmetic).
                     auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
 
+#if 0
+                    auto average = (left & pixel_y_minus_1) | ((left ^ pixel_y_minus_1) >> 1);
+#else
                     auto average = (left / 2) + (pixel_y_minus_1 / 2);
                     average += (left & pixel_y_minus_1) & AK::SIMD::u8x16 { 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+#endif
 
                     // auto sum = AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_x_minus_1) + AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_y_minus_1);
                     // auto average = AK::SIMD::simd_cast<AK::SIMD::u8x4>(sum / 2);
