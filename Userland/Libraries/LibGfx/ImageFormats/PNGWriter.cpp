@@ -214,23 +214,29 @@ union [[gnu::packed]] Pixel {
 };
 static_assert(AssertSize<Pixel, 4>());
 
+template<int start_index>
+AK::SIMD::u8x4 extract_u8x4(AK::SIMD::u8x16 vec) {
+    return __builtin_shufflevector(vec, vec,
+        start_index, start_index + 1, start_index + 2, start_index + 3);
+}
+
 template<bool include_alpha>
 static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk& png_chunk, Compress::ZlibCompressionLevel compression_level)
 {
     ByteBuffer uncompressed_block_data;
     TRY(uncompressed_block_data.try_ensure_capacity(bitmap.size_in_bytes() + bitmap.height()));
 
-    auto dummy_scanline = TRY(FixedArray<Pixel>::create(bitmap.width()));
+    auto dummy_scanline = TRY(FixedArray<AK::SIMD::u8x16>::create(ceil_div(bitmap.width(), 4)));
     auto const* scanline_minus_1 = dummy_scanline.data();
 
     for (int y = 0; y < bitmap.height(); ++y) {
-        auto* scanline = reinterpret_cast<Pixel const*>(bitmap.scanline(y));
+        auto* scanline = reinterpret_cast<AK::SIMD::u8x16 const*>(bitmap.scanline(y));
 
         struct Filter {
             PNG::FilterType type;
             AK::SIMD::u32x4 sum { 0, 0, 0, 0 };
 
-            AK::SIMD::u8x4 predict(AK::SIMD::u8x4 pixel, AK::SIMD::u8x4 pixel_x_minus_1, AK::SIMD::u8x4 pixel_y_minus_1, AK::SIMD::u8x4 pixel_xy_minus_1)
+            AK::SIMD::u8x16 predict(AK::SIMD::u8x16 pixel, AK::SIMD::u8x16 pixel_x_minus_1, AK::SIMD::u8x16 pixel_y_minus_1, AK::SIMD::u8x16 pixel_xy_minus_1)
             {
                 switch (type) {
                 case PNG::FilterType::None:
@@ -240,25 +246,61 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                 case PNG::FilterType::Up:
                     return pixel - pixel_y_minus_1;
                 case PNG::FilterType::Average: {
+                    // XXX
                     // The sum Orig(a) + Orig(b) shall be performed without overflow (using at least nine-bit arithmetic).
-                    auto sum = AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_x_minus_1) + AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_y_minus_1);
-                    auto average = AK::SIMD::simd_cast<AK::SIMD::u8x4>(sum / 2);
-                    return pixel - average;
+                    // auto sum = AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_x_minus_1) + AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_y_minus_1);
+                    // auto average = AK::SIMD::simd_cast<AK::SIMD::u8x4>(sum / 2);
+                    // return pixel - average;
                 }
-                case PNG::FilterType::Paeth:
-                    return pixel - PNG::paeth_predictor(pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1);
+                case PNG::FilterType::Paeth: {
+                    // XXX better
+                    auto p0 = extract_u8x4<0>(pixel);
+                    auto p1 = extract_u8x4<4>(pixel);
+                    auto p2 = extract_u8x4<8>(pixel);
+                    auto p3 = extract_u8x4<12>(pixel);
+
+                    auto pixel_x_minus_1_0 = extract_u8x4<0>(pixel_x_minus_1);
+                    auto pixel_x_minus_1_1 = extract_u8x4<4>(pixel_x_minus_1);
+                    auto pixel_x_minus_1_2 = extract_u8x4<8>(pixel_x_minus_1);
+                    auto pixel_x_minus_1_3 = extract_u8x4<12>(pixel_x_minus_1);
+
+                    auto pixel_y_minus_1_0 = extract_u8x4<0>(pixel_y_minus_1);
+                    auto pixel_y_minus_1_1 = extract_u8x4<4>(pixel_y_minus_1);
+                    auto pixel_y_minus_1_2 = extract_u8x4<8>(pixel_y_minus_1);
+                    auto pixel_y_minus_1_3 = extract_u8x4<12>(pixel_y_minus_1);
+
+                    auto pixel_xy_minus_1_0 = extract_u8x4<0>(pixel_xy_minus_1);
+                    auto pixel_xy_minus_1_1 = extract_u8x4<4>(pixel_xy_minus_1);
+                    auto pixel_xy_minus_1_2 = extract_u8x4<8>(pixel_xy_minus_1);
+                    auto pixel_xy_minus_1_3 = extract_u8x4<12>(pixel_xy_minus_1);
+
+                    auto pixel_0 = p0 - PNG::paeth_predictor(pixel_x_minus_1_0, pixel_y_minus_1_0, pixel_xy_minus_1_0);
+                    auto pixel_1 = p1 - PNG::paeth_predictor(pixel_x_minus_1_1, pixel_y_minus_1_1, pixel_xy_minus_1_1);
+                    auto pixel_2 = p2 - PNG::paeth_predictor(pixel_x_minus_1_2, pixel_y_minus_1_2, pixel_xy_minus_1_2);
+                    auto pixel_3 = p3 - PNG::paeth_predictor(pixel_x_minus_1_3, pixel_y_minus_1_3, pixel_xy_minus_1_3);
+
+                    //return AK::SIMD::u8x16 { pixel_0, pixel_1, pixel_2, pixel_3 };
+                    return __builtin_shufflevector(__builtin_shufflevector(pixel_0, pixel_1, 0, 1, 2, 3, 4, 5, 6, 7),
+                                                   __builtin_shufflevector(pixel_2, pixel_3, 0, 1, 2, 3, 4, 5, 6, 7),
+                                                   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+                }
                 }
                 VERIFY_NOT_REACHED();
             }
 
-            void append(AK::SIMD::u8x4 simd)
+            void append(AK::SIMD::u8x16 simd)
             {
                 using namespace AK::SIMD;
-                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(simd))));
+                // XXX better
+                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<0>(simd)))));
+                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<4>(simd)))));
+                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<8>(simd)))));
+                sum += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<12>(simd)))));
             }
 
             u32 sum_of_abs_values() const
             {
+                // XXX __builtin_reduce_add?
                 u32 result = sum[0] + sum[1] + sum[2];
                 if constexpr (include_alpha)
                     result += sum[3];
@@ -272,12 +314,12 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
         Filter average_filter { .type = PNG::FilterType::Average };
         Filter paeth_filter { .type = PNG::FilterType::Paeth };
 
-        auto pixel_x_minus_1 = Pixel::argb32_to_simd(dummy_scanline[0]);
-        auto pixel_xy_minus_1 = Pixel::argb32_to_simd(dummy_scanline[0]);
+        auto pixel_x_minus_1 = dummy_scanline[0];
+        auto pixel_xy_minus_1 = dummy_scanline[0];
 
-        for (int x = 0; x < bitmap.width(); ++x) {
-            auto pixel = Pixel::argb32_to_simd(scanline[x]);
-            auto pixel_y_minus_1 = Pixel::argb32_to_simd(scanline_minus_1[x]);
+        for (int x = 0; x < bitmap.width() / 4; x ++) {
+            auto pixel = scanline[x];
+            auto pixel_y_minus_1 = scanline_minus_1[x];
 
             none_filter.append(none_filter.predict(pixel, pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1));
             sub_filter.append(sub_filter.predict(pixel, pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1));
@@ -307,22 +349,33 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
 
         TRY(uncompressed_block_data.try_append(to_underlying(best_filter.type)));
 
-        pixel_x_minus_1 = Pixel::argb32_to_simd(dummy_scanline[0]);
-        pixel_xy_minus_1 = Pixel::argb32_to_simd(dummy_scanline[0]);
+        pixel_x_minus_1 = dummy_scanline[0];
+        pixel_xy_minus_1 = dummy_scanline[0];
 
-        for (int x = 0; x < bitmap.width(); ++x) {
-            auto pixel = Pixel::argb32_to_simd(scanline[x]);
-            auto pixel_y_minus_1 = Pixel::argb32_to_simd(scanline_minus_1[x]);
+        for (int x = 0; x < bitmap.width() / 4; ++x) {
+            auto pixel = scanline[x];
+            auto pixel_y_minus_1 = scanline_minus_1[x];
 
             auto predicted_pixel = best_filter.predict(pixel, pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1);
-            TRY(uncompressed_block_data.try_append(predicted_pixel[2]));
-            TRY(uncompressed_block_data.try_append(predicted_pixel[1]));
-            TRY(uncompressed_block_data.try_append(predicted_pixel[0]));
-            if constexpr (include_alpha)
-                TRY(uncompressed_block_data.try_append(predicted_pixel[3]));
+
+            for (int i = 0; i < 4; ++i) {
+                TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 2]));
+                TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 1]));
+                TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 0]));
+                if constexpr (include_alpha)
+                    TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 3]));
+            }
 
             pixel_x_minus_1 = pixel;
             pixel_xy_minus_1 = pixel_y_minus_1;
+        }
+
+        for (int x = (bitmap.width() / 4) * 4; x < bitmap.width(); ++x) {
+            TRY(uncompressed_block_data.try_append(0));
+            TRY(uncompressed_block_data.try_append(255));
+            TRY(uncompressed_block_data.try_append(0));
+            if constexpr (include_alpha)
+                TRY(uncompressed_block_data.try_append(255));
         }
 
         scanline_minus_1 = scanline;
