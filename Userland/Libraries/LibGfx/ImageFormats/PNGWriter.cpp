@@ -351,6 +351,7 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
         auto pixel_x_minus_1 = dummy_scanline[0];
         auto pixel_xy_minus_1 = dummy_scanline[0];
 
+        // This is a heuristic anyways, so it's fine to ignore the last few pixels on each scanline (if width is not a multiple of 4).
         for (int x = 0; x < bitmap.width() / 4; x ++) {
             auto pixel = scanline[x];
             auto pixel_y_minus_1 = scanline_minus_1[x];
@@ -406,6 +407,7 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
             pixel_xy_minus_1 = pixel_y_minus_1;
         }
 
+        // XXX
         for (int x = (bitmap.width() / 4) * 4; x < bitmap.width(); ++x) {
             TRY(uncompressed_block_data.try_append(0));
             TRY(uncompressed_block_data.try_append(255));
