@@ -242,7 +242,7 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                 case PNG::FilterType::None:
                     return pixel;
                 case PNG::FilterType::Sub: {
-                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
                     return pixel - left;
                 }
                 case PNG::FilterType::Up:
@@ -250,7 +250,7 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                 case PNG::FilterType::Average: {
                     // XXX
                     // The sum Orig(a) + Orig(b) shall be performed without overflow (using at least nine-bit arithmetic).
-                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+                    auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
                     auto average = (left / 2) + (pixel_y_minus_1 / 2);
                     // XXX add missing bit if needed
 
