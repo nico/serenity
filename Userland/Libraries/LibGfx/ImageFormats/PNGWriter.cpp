@@ -251,7 +251,9 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                     // XXX
                     // The sum Orig(a) + Orig(b) shall be performed without overflow (using at least nine-bit arithmetic).
                     auto left = __builtin_shufflevector(pixel_x_minus_1, pixel, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27);
-                    auto average = (left / 2) + (pixel_y_minus_1 / 2);
+
+                    // auto average = (left / 2) + (pixel_y_minus_1 / 2);
+                    auto average = (left & pixel_y_minus_1) | ((left ^ pixel_y_minus_1) >> 1);
                     // XXX add missing bit if needed
 
                     // auto sum = AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_x_minus_1) + AK::SIMD::simd_cast<AK::SIMD::u16x4>(pixel_y_minus_1);
@@ -363,8 +365,8 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
             best_filter = &average_filter;
         if (best_filter->sum_of_abs_values() > paeth_filter.sum_of_abs_values())
             best_filter = &paeth_filter;
-        // best_filter = &average_filter;
-        best_filter = &paeth_filter;
+        best_filter = &average_filter;
+        // best_filter = &paeth_filter;
 
         TRY(uncompressed_block_data.try_append(to_underlying(best_filter->type)));
 
