@@ -331,14 +331,14 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
         };
 
         Filter none_filter { .type = PNG::FilterType::None };
-        Filter sub_filter { .type = PNG::FilterType::Sub };
-        Filter up_filter { .type = PNG::FilterType::Up };
-        Filter average_filter { .type = PNG::FilterType::Average };
-        Filter paeth_filter { .type = PNG::FilterType::Paeth };
-
+        // Filter sub_filter { .type = PNG::FilterType::Sub };
+        // Filter up_filter { .type = PNG::FilterType::Up };
+        // Filter average_filter { .type = PNG::FilterType::Average };
+        // Filter paeth_filter { .type = PNG::FilterType::Paeth };
+// 
         auto pixel_x_minus_1 = dummy_scanline[0];
         auto pixel_xy_minus_1 = dummy_scanline[0];
-
+#if 0
         for (int x = 0; x < bitmap.width() / 4; x ++) {
             auto pixel = scanline[x];
             auto pixel_y_minus_1 = scanline_minus_1[x];
@@ -368,8 +368,10 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
             best_filter = &average_filter;
         if (best_filter->sum_of_abs_values() > paeth_filter.sum_of_abs_values())
             best_filter = &paeth_filter;
+#endif
         // best_filter = &average_filter;
         // best_filter = &paeth_filter;
+        auto best_filter = &none_filter;
 
         TRY(uncompressed_block_data.try_append(to_underlying(best_filter->type)));
 
