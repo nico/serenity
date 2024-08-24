@@ -241,8 +241,11 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                 switch (type) {
                 case PNG::FilterType::None:
                     return pixel;
-                case PNG::FilterType::Sub:
-                    return pixel - pixel_x_minus_1;
+                case PNG::FilterType::Sub: {
+                    // auto left = __builtin_shufflevector(prev_left, current, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+
+                    return pixel - __builtin_shufflevector(pixel_x_minus_1, pixel, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+                }
                 case PNG::FilterType::Up:
                     return pixel - pixel_y_minus_1;
                 case PNG::FilterType::Average: {
