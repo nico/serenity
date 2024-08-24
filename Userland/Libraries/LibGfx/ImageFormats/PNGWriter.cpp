@@ -394,7 +394,14 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
             auto pixel_y_minus_1 = scanline_minus_1[x];
 
             auto predicted_pixel = best_filter->predict(pixel, pixel_x_minus_1, pixel_y_minus_1, pixel_xy_minus_1);
-
+            if constexpr (include_alpha) {
+                predicted_pixel = __builtin_shufflevector(predicted_pixel, predicted_pixel, 2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+                TRY(uncompressed_block_data.try_append(&predicted_pixel, 16));
+            } else {
+                predicted_pixel = __builtin_shufflevector(predicted_pixel, predicted_pixel, 2, 1, 0, 6, 5, 4, 10, 9, 8, 14, 13, 12, 3, 7, 11, 15);
+                TRY(uncompressed_block_data.try_append(&predicted_pixel, 12));
+            }
+#if 0
             for (int i = 0; i < 4; ++i) {
                 TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 2]));
                 TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 1]));
@@ -402,6 +409,7 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
                 if constexpr (include_alpha)
                     TRY(uncompressed_block_data.try_append(predicted_pixel[i * 4 + 3]));
             }
+#endif
 
             pixel_x_minus_1 = pixel;
             pixel_xy_minus_1 = pixel_y_minus_1;
