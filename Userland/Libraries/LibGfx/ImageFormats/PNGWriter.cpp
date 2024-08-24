@@ -220,6 +220,12 @@ AK::SIMD::u8x4 extract_u8x4(AK::SIMD::u8x16 vec) {
         start_index, start_index + 1, start_index + 2, start_index + 3);
 }
 
+template<int start_index>
+AK::SIMD::u8x8 extract_u8x8(AK::SIMD::u8x16 vec) {
+    return __builtin_shufflevector(vec, vec,
+        start_index, start_index + 1, start_index + 2, start_index + 3, start_index + 4, start_index + 5, start_index + 6, start_index + 7);
+}
+
 template<bool include_alpha>
 static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk& png_chunk, Compress::ZlibCompressionLevel compression_level)
 {
@@ -234,10 +240,8 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
 
         struct Filter {
             PNG::FilterType type;
-            AK::SIMD::u32x4 sum0 { 0, 0, 0, 0 };
-            AK::SIMD::u32x4 sum1 { 0, 0, 0, 0 };
-            AK::SIMD::u32x4 sum2 { 0, 0, 0, 0 };
-            AK::SIMD::u32x4 sum3 { 0, 0, 0, 0 };
+            AK::SIMD::u32x8 sum0 { 0, 0, 0, 0 };
+            AK::SIMD::u32x8 sum1 { 0, 0, 0, 0 };
 
             AK::SIMD::u8x16 predict(AK::SIMD::u8x16 pixel, AK::SIMD::u8x16 pixel_x_minus_1, AK::SIMD::u8x16 pixel_y_minus_1, AK::SIMD::u8x16 pixel_xy_minus_1)
             {
@@ -321,27 +325,19 @@ static ErrorOr<void> add_image_data_to_chunk(Gfx::Bitmap const& bitmap, PNGChunk
 #endif
 
                 // XXX better
-                sum0 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<0>(simd)))));
-                sum1 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<4>(simd)))));
-                sum2 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<8>(simd)))));
-                sum3 += simd_cast<u32x4>(abs(simd_cast<i32x4>(simd_cast<i8x4>(extract_u8x4<12>(simd)))));
+                sum0 += simd_cast<u32x8>(abs(simd_cast<i32x8>(simd_cast<i8x8>(extract_u8x8<0>(simd)))));
+                sum1 += simd_cast<u32x8>(abs(simd_cast<i32x8>(simd_cast<i8x8>(extract_u8x8<8>(simd)))));
             }
 
             u32 sum_of_abs_values() const
             {
                 // XXX __builtin_reduce_add?
-                u32 result = sum0[0] + sum0[1] + sum0[2];
+                u32 result = sum0[0] + sum0[1] + sum0[2] + sum0[4] + sum0[5] + sum0[6];
                 if constexpr (include_alpha)
-                    result += sum0[3];
-                result += sum1[0] + sum1[1] + sum1[2];
+                    result += sum0[3] + sum0[7];
+                result += sum1[0] + sum1[1] + sum1[2] + sum1[4] + sum1[5] + sum1[6];
                 if constexpr (include_alpha)
-                    result += sum1[3];
-                result += sum2[0] + sum2[1] + sum2[2];
-                if constexpr (include_alpha)
-                    result += sum2[3];
-                result += sum3[0] + sum3[1] + sum3[2];
-                if constexpr (include_alpha)
-                    result += sum3[3];
+                    result += sum1[3] + sum1[7];
                 return result;
             }
         };
