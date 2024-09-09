@@ -62,6 +62,48 @@ TEST_CASE(canonical_code_complex)
         EXPECT_EQ(TRY_OR_FAIL(huffman.read_symbol(bit_stream)), output_byte);
 }
 
+TEST_CASE(canonical_code_lopsided)
+{
+    // The first symbol has length 1, the second has length 2, etc. The 15th and 16th symbols both have length 15, the maximum symbol length in deflate.
+    Array<u8, 16> const code {
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 15
+    };
+    Array<u8, 17> const input = {
+        // This is 0b0, 0b10, 0b110, 0b1110, ...
+        // But each bytes is little-endian, so the first byte is 0b11 0b011 0b01 0b0, etc. (The topmost two bits here are the first topmost bits of 0b1110.)
+        // Created by this python code:
+        //
+        //     all_bits = []
+        //     for i in range(0, 15):
+        //         all_bits += [ 1 ] * i + [ 0 ]
+        //     all_bits += [ 1 ] * 15
+        //
+        //     if len(all_bits) % 8 != 0:
+        //         all_bits += [ 0 ] * (8 - len(all_bits) % 8) # pad to 8-bit boundary
+        //
+        //     for i in range(0, len(all_bits), 8):
+        //         v = 0
+        //         for j in range(8):
+        //             v = all_bits[i + 7 - j] | (v << 1)
+        //         print(f'{v:#x}, ', end='')
+        //     print()
+        //
+        // 1 + 2 + ... + 15 + 15 == 15 * 16 / 2 + 15 == 135 is one short of being divisible by 8, so we add one 0 to pad to 136 bits.
+        // This explains the extra `0` at the end of the `output` array -- at the end of the data, the padding 0 bit decodes to the first symbol, 0.
+        0xda, 0xbd, 0xef, 0xf7, 0xf7, 0xef, 0xbf, 0xff, 0xfd, 0xdf, 0xff, 0xfb, 0xff, 0xfe, 0x7f, 0xff, 0x7f
+    };
+    Array<u8, 17> const output {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0
+    };
+
+    auto const huffman = TRY_OR_FAIL(Compress::CanonicalCode::from_bytes(code));
+    auto memory_stream = TRY_OR_FAIL(try_make<FixedMemoryStream>(input));
+    LittleEndianInputBitStream bit_stream { move(memory_stream) };
+
+    for (u8 output_byte : output)
+        EXPECT_EQ(TRY_OR_FAIL(huffman.read_symbol(bit_stream)), output_byte);
+}
+
 TEST_CASE(invalid_canonical_code)
 {
     Array<u8, 257> code;
