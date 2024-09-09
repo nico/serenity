@@ -208,7 +208,7 @@ public:
     ErrorOr<T> read_bits(size_t count)
     {
         auto result = TRY(peek_bits<T>(count));
-        discard_previously_peeked_bits(count);
+        TRY(discard_previously_peeked_bits(count));
 
         return result;
     }
@@ -222,15 +222,14 @@ public:
         return m_bit_buffer & lsb_mask<T>(min(count, m_bit_count));
     }
 
-    ALWAYS_INLINE void discard_previously_peeked_bits(u8 count)
+    ALWAYS_INLINE ErrorOr<void> discard_previously_peeked_bits(u8 count)
     {
-        // We allow "retrieving" more bits than we can provide, but we need to make sure that we don't underflow the current bit counter.
-        // This only affects certain "modes", but all the relevant checks have been handled in the respective `peek_bits` call.
         if (count > m_bit_count)
-            count = m_bit_count;
+            return Error::from_string_literal("Reached end-of-stream without collecting the required number of bits");
 
         m_bit_buffer >>= count;
         m_bit_count -= count;
+        return {};
     }
 
     /// Discards any sub-byte stream positioning the input stream may be keeping track of.
@@ -241,7 +240,7 @@ public:
 
         if (auto offset = m_bit_count % bits_per_byte; offset != 0) {
             remaining_bits = m_bit_buffer & lsb_mask<u8>(offset);
-            discard_previously_peeked_bits(offset);
+            MUST(discard_previously_peeked_bits(offset));
         }
 
         return remaining_bits;
@@ -252,12 +251,9 @@ private:
     {
         while (requested_bit_count > m_bit_count) [[likely]] {
             if (m_stream->is_eof()) [[unlikely]] {
-                if (m_unsatisfiable_read_behavior == UnsatisfiableReadBehavior::FillWithZero) {
+                if (m_unsatisfiable_read_behavior == UnsatisfiableReadBehavior::FillWithZero)
                     m_bit_count = requested_bit_count;
-                    return {};
-                }
-
-                return Error::from_string_literal("Reached end-of-stream without collecting the required number of bits");
+                return {};
             }
 
             size_t bits_to_read = bit_buffer_size - m_bit_count;

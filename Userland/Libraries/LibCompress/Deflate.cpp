@@ -148,7 +148,7 @@ ErrorOr<u32> CanonicalCode::read_symbol(LittleEndianInputBitStream& stream) cons
     auto prefix = TRY(stream.peek_bits<size_t>(m_max_prefixed_code_length));
 
     if (auto [symbol_value, code_length] = m_prefix_table[prefix]; code_length != 0) {
-        stream.discard_previously_peeked_bits(code_length);
+        TRY(stream.discard_previously_peeked_bits(code_length));
         return symbol_value;
     }
 
