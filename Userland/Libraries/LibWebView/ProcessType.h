@@ -15,7 +15,8 @@ enum class ProcessType : u8 {
     WebContent,
     WebWorker,
     RequestServer,
-    ImageDecoder,
+    ImageDecoder, // XXX remove?
+    SQLServer,
 };
 
 }

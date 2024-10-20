@@ -81,6 +81,9 @@ void Application::process_did_exit(Process&& process)
     case ProcessType::RequestServer:
         dbgln_if(WEBVIEW_PROCESS_DEBUG, "FIXME: Restart request server");
         break;
+    case ProcessType::SQLServer:
+        dbgln_if(WEBVIEW_PROCESS_DEBUG, "FIXME: Restart sql server");
+        break;
     case ProcessType::WebContent:
         if (auto client = process.client<WebContentClient>(); client.has_value()) {
             dbgln_if(WEBVIEW_PROCESS_DEBUG, "Restart WebContent process");

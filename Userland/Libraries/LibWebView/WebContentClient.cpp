@@ -40,7 +40,9 @@ void WebContentClient::unregister_view(u64 page_id)
 void WebContentClient::notify_process_information(WebView::ProcessHandle const& handle)
 {
     dbgln_if(SPAM_DEBUG, "handle: WebContentClient::NotifyProcessInformation! pid={}", handle.pid);
-    ProcessManager::the().add_process(ProcessType::WebContent, handle.pid);
+// XXX
+    //ProcessManager::the().add_process(ProcessType::WebContent, handle.pid);
+//WebView::Application::the().add_child_process(WebView::Process { ProcessType::WebContent, process.client, move(process.process) });
     m_process_handle = handle;
 }
 
