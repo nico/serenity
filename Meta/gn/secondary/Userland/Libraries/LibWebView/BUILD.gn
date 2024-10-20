@@ -133,6 +133,7 @@ shared_library("LibWebView") {
     "//Userland/Libraries/LibCore",
     "//Userland/Libraries/LibFileSystem",
     "//Userland/Libraries/LibGfx",
+    "//Userland/Libraries/LibImageDecoderClient",
     "//Userland/Libraries/LibIPC",
     "//Userland/Libraries/LibJS",
     "//Userland/Libraries/LibProtocol",
@@ -141,11 +142,13 @@ shared_library("LibWebView") {
     "//Userland/Libraries/LibWeb",
   ]
   sources = [
+    "Application.cpp",
     "Attribute.cpp",
     "ChromeProcess.cpp",
     "CookieJar.cpp",
     "Database.cpp",
     "InspectorClient.cpp",
+    "Process.cpp",
     "ProcessHandle.cpp",
     "ProcessManager.cpp",
     "RequestServerAdapter.cpp",

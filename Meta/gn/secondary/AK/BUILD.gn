@@ -368,6 +368,7 @@ write_cmake_config("ak_debug_gen") {
     "WEBGL_CONTEXT_DEBUG=",
     "WEBP_DEBUG=",
     "WEBSERVER_DEBUG=",
+    "WEBVIEW_PROCESS_DEBUG=",
     "WEB_FETCH_DEBUG=",
     "WEB_WORKER_DEBUG=",
     "WINDOWMANAGER_DEBUG=",
