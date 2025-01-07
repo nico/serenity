@@ -1783,7 +1783,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
                 bool bit = TRY(read_bit());
                 length = (length << 1) | bit;
             }
-            // dbgln("length of codeword segment: {} bytes", length);
+            dbgln("length of codeword segment: {} bytes", length);
             current_block.length_of_data = length;
 
             // B.10.7.2 Multiple codeword segments
@@ -2007,7 +2007,7 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
 
     } while (progression_data.resolution_level > number_of_decomposition_levels_for_component(context, tile, progression_data.component));
 
-    dbgln("progression order: layer {}, resolution level: {}, component: {}, precinct {}", progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
+    dbgln("progression order: tile {} layer {}, resolution level: {}, component: {}, precinct {}", tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
 
     // Compute tile size at resolution level r.
     int r = progression_data.resolution_level;
@@ -2133,7 +2133,7 @@ dbgln("empty packet per header; skipping");
     // Set `data` on each codeblock on the packet.
     u32 offset = stream.offset();
     for (int i = 0; i < number_of_sub_bands; ++i) {
-        for (auto& current_block : header.sub_bands[i].code_blocks) {
+        for (auto const& [current_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
             // FIXME: Are codeblocks on byte boundaries? => Looks like it. Find spec ref.
             // XXX Make read_packet_header() store codeblock byte ranges on CodeBlock instead of doing it here (?)
 
@@ -2141,6 +2141,15 @@ dbgln("empty packet per header; skipping");
             // XXX: check?
             current_block.data = data.slice(offset, current_block.length_of_data);
             offset += current_block.length_of_data;
+
+#if 1
+// store current block's data in a file for debugging
+    // dbgln("progression order: tile {} layer {}, resolution level: {}, component: {}, precinct {}", tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
+
+auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutionlevel-{}-component-{}-precinct-{}-subband-{}-codeblock-{}.bin",
+    tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct, i, current_block_index));
+    TRY(TRY(Core::File::open(filename, Core::File::OpenMode::ReadWrite))->write_until_depleted(current_block.data));
+#endif
         }
     }
 
@@ -2155,8 +2164,10 @@ dbgln("empty packet per header; skipping");
         auto sub_band = r == 0 ? SubBand::HorizontalLowpassVerticalLowpass : (SubBand)(i + 1); // XXX store on SubBand?
         auto& coefficients = *TRY(get_or_create_decoded_coefficients(context, tile, progression_data, sub_band, header.sub_bands[i].subband_rect));
 
-        if (header.sub_bands[i].codeblock_x_count == 0 || header.sub_bands[i].codeblock_y_count == 0)
+        if (header.sub_bands[i].codeblock_x_count == 0 || header.sub_bands[i].codeblock_y_count == 0) {
+            dbgln("skipping sub-band {} with no code-blocks", i);
             continue;
+        }
 
         // Annex E, E.1 Inverse quantization procedure:
         // "Mb = G + exp_b - 1       (E-2)
