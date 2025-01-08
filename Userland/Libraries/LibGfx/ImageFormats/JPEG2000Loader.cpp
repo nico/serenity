@@ -2230,6 +2230,7 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
 
                 // state.current_bitplane = current_block.p;
                 state.current_bitplane = state.original_p;
+                state.pass = 0;
                 state.reset_contexts();
 
                 // state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
