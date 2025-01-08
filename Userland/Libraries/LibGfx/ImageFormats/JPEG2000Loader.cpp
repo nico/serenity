@@ -867,6 +867,8 @@ struct CodeblockBitplaneState {
     QMArithmeticDecoder arithmetic_decoder;
 
     Vector<ReadonlyBytes> layer_data;
+    u32 original_p { 0 };
+    int total_number_of_coding_passes { 0 };
 
     void reset_contexts()
     {
@@ -2193,7 +2195,11 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
 
+            if (current_block.is_included_for_the_first_time)
+                state.original_p = current_block.p;
+
             state.layer_data.append(current_block.data);
+            state.total_number_of_coding_passes += current_block.number_of_coding_passes;
 
             size_t total_size = 0;
             for (auto& data : state.layer_data)
@@ -2222,7 +2228,8 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
                 TRY(state.was_coded_in_pass.try_resize(0));
                 TRY(state.was_coded_in_pass.try_resize(w * h));
 
-                state.current_bitplane = current_block.p;
+                // state.current_bitplane = current_block.p;
+                state.current_bitplane = state.original_p;
                 state.reset_contexts();
 
                 // state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
@@ -2853,7 +2860,8 @@ if (x == 15 && (y + coefficient_index) == 31) {
     // pass = 2;
     // pass = 0;
 dbgln("pass on entry {}, {} passes, p {}, {} bytes", pass, current_block.number_of_coding_passes, current_block.p, current_block.length_of_data);
-    for (int pass_i = 0; pass_i < current_block.number_of_coding_passes - (int)current_block.p; ++pass_i, ++pass) {
+    // for (int pass_i = 0; pass_i < current_block.number_of_coding_passes - (int)current_block.p; ++pass_i, ++pass) {
+    for (int pass_i = 0; pass_i < state.total_number_of_coding_passes - (int)state.original_p; ++pass_i, ++pass) {
 dbgln("pass {} bitplane {}", pass, current_bitplane);
 
         // D0, Is this the first bit-plane for the code-block?
