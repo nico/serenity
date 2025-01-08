@@ -2191,9 +2191,13 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
         }
 
         int M_b = quantization_parameters.number_of_guard_bits + exponent - 1;
+dbgln("exponent: {}, M_b: {}", exponent, M_b);
 
         // Read bitplanes of all code-blocks.
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
+            if (!current_block.is_included)
+                continue;
+
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
 
             if (current_block.is_included_for_the_first_time)
@@ -2249,8 +2253,6 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
                 // state.arithmetic_decoder.flush();
             }
 
-            if (!current_block.is_included)
-                continue;
 // if (current_block.is_included_for_the_first_time)
             TRY(decode_code_block(state, M_b, current_block));
         }
@@ -2874,10 +2876,9 @@ dbgln("pass on entry {}, {} passes, p {}, {} bytes", pass, current_block.number_
 
 // state.original_p stores the number of zero bitplanes.
 
-bool done = false;
     // for (int pass_i = 0; pass_i < current_block.number_of_coding_passes - (int)current_block.p; ++pass_i, ++pass) {
     // for (int pass_i = 0; pass_i < state.total_number_of_coding_passes - (int)state.original_p; ++pass_i, ++pass) {
-    for (int pass_i = 0; pass_i < state.total_number_of_coding_passes && !done; ++pass_i, ++pass) {
+    for (int pass_i = 0; pass_i < state.total_number_of_coding_passes && current_bitplane < M_b; ++pass_i, ++pass) {
     // for (int pass_i = 0; pass_i < state.total_number_of_coding_passes; ++pass_i, ++pass) {
 dbgln("pass {} bitplane {}", pass, current_bitplane);
 
@@ -2900,9 +2901,6 @@ dbgln("pass {} bitplane {}", pass, current_bitplane);
                 // done = true;
             // }
             // if (current_bitplane == M_b + 1) {
-            if (current_bitplane == M_b) {
-                done = true;
-            }
             break;
         }
 
