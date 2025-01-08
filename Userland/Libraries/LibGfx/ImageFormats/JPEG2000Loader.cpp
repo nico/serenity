@@ -2153,7 +2153,7 @@ dbgln("empty packet per header; skipping");
 
 auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutionlevel-{}-component-{}-precinct-{}-subband-{}-codeblock-{}.bin",
     tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct, i, current_block_index));
-    TRY(TRY(Core::File::open(filename, Core::File::OpenMode::ReadWrite))->write_until_depleted(current_block.data));
+    TRY(TRY(Core::File::open(filename, Core::File::OpenMode::ReadWrite | Core::File::OpenMode::Truncate))->write_until_depleted(current_block.data));
 #endif
         }
     }
@@ -2235,6 +2235,7 @@ dbgln("exponent: {}, M_b: {}", exponent, M_b);
 
                 // state.current_bitplane = current_block.p;
                 state.current_bitplane = state.original_p;
+                // state.current_bitplane = state.original_p - 1;
                 state.pass = 0;
                 state.reset_contexts();
 
@@ -2277,6 +2278,30 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
             // XXX oh! only do this the last time round!
             decoded_block_to_coefficients(state, current_block, precinct_coefficents, clipped_precinct_rect);
+
+#if 1
+// store decompressed data in file for debugging
+// XXX this writes the whole precinct, not just the codeblock :/
+auto filename = MUST(String::formatted("jp2k-decompressed-tile-{}-r-{}-component-{}-precinct-{}-subband-{}-codeblock-{}.bin",
+    tile.index, progression_data.resolution_level, progression_data.component, progression_data.precinct, i, code_block_index));
+    auto file = MUST(Core::File::open(filename, Core::File::OpenMode::ReadWrite | Core::File::OpenMode::Truncate));
+
+dbgln("writing uncompressed {} * {} = {}", current_block.rect.width(), current_block.rect.height(), current_block.rect.width() * current_block.rect.height());
+    for (int y = 0; y < current_block.rect.height(); ++y) {
+        for (int x = 0; x < current_block.rect.width(); ++x) {
+            // dbgln("x {} y {}", x, y);
+            i16 val = precinct_coefficents[(y + current_block.rect.top() - clipped_precinct_rect.top()) * clipped_precinct_rect.width() + (x + current_block.rect.left() - clipped_precinct_rect.left())];
+            i32 val32 = val;
+            MUST(file->write_value(val32));
+        }
+    }
+
+    // for (i16 val : precinct_coefficents) {
+    //     i32 val32 = val;
+    //     MUST(file->write_value(val32));
+    // }
+#endif
+
         }
 
         // Convert precinct i16 coefficients into dequantized floats, and put into the subband buffer (which can have several precincts).
@@ -2663,6 +2688,7 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
 
     // int num_bits = (current_block.number_of_coding_passes - 1) / 3 + 1; // /shruggie
     int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
+    // int num_bits = M_b;
     dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
     auto significance_propagation_pass = [&](int current_bitplane, int pass) {
@@ -3424,6 +3450,7 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
             if (context.siz.components[component_index].bit_depth() != 8) {
                 for (auto& coefficient : component.nLL.coefficients)
                     coefficient = 255 * coefficient / (1u << context.siz.components[component_index].bit_depth());
+                    // coefficient = 255 * coefficient / ((1u << (context.siz.components[component_index].bit_depth() + 1)) - 1);
             }
         }
     }
