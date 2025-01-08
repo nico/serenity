@@ -2208,7 +2208,7 @@ dbgln("empty packet per header; skipping");
             current_block.data = data.slice(offset, current_block.length_of_data);
             offset += current_block.length_of_data;
 
-#if 1
+#if 0
 // store current block's data in a file for debugging
     // dbgln("progression order: tile {} layer {}, resolution level: {}, component: {}, precinct {}", tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
 
@@ -2261,10 +2261,19 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
                 int w = current_block.rect.width();
                 int h = current_block.rect.height();
                 int num_strips = ceil_div(h, 4);
+
+                TRY(state.significance_and_sign.try_resize(0));
                 TRY(state.significance_and_sign.try_resize(w * num_strips));
+
+                TRY(state.magnitudes.try_resize(0));
                 TRY(state.magnitudes.try_resize(w * h));
+
+                TRY(state.became_significant_in_pass.try_resize(0));
                 TRY(state.became_significant_in_pass.try_resize(w * h));
+
+                TRY(state.was_coded_in_pass.try_resize(0));
                 TRY(state.was_coded_in_pass.try_resize(w * h));
+
                 state.current_bitplane = current_block.p;
                 state.reset_contexts();
                 state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
@@ -2272,15 +2281,17 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
                 // state.arithmetic_decoder.INITDEC();
             } else if (current_block.is_included && current_block.data.size() > 0) {
 dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
-                // state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
-
+#if 0
+                state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
+#else
                 state.arithmetic_decoder.data().append(current_block.data);
+#endif
                 // state.arithmetic_decoder.flush();
             }
 
             if (!current_block.is_included)
                 continue;
-
+// if (current_block.is_included_for_the_first_time)
             TRY(decode_code_block(state, M_b, current_block));
         }
 
@@ -2914,6 +2925,9 @@ dbgln("pass {} bitplane {}", pass, current_bitplane);
                 // state.reset_contexts();
 
     }
+
+// (This does nothing; all blocks are independent and we won't see this block again.)
+// current_block.p += current_block.number_of_coding_passes;
 
 #if 0
 {
