@@ -866,6 +866,8 @@ struct CodeblockBitplaneState {
 
     QMArithmeticDecoder arithmetic_decoder;
 
+    Vector<ReadonlyBytes> layer_data;
+
     void reset_contexts()
     {
         // Table D.7 – Initial states for all contexts
@@ -2191,7 +2193,19 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
 
-            if (current_block.is_included_for_the_first_time) {
+            state.layer_data.append(current_block.data);
+
+            size_t total_size = 0;
+            for (auto& data : state.layer_data)
+                total_size += data.size();
+            ByteBuffer combined_data = TRY(ByteBuffer::create_uninitialized(total_size));
+            size_t offset = 0;
+            for (auto& data : state.layer_data) {
+                memcpy(combined_data.offset_pointer(offset), data.data(), data.size());
+                offset += data.size();
+            }
+
+            if (current_block.is_included_for_the_first_time || true) {
                 int w = current_block.rect.width();
                 int h = current_block.rect.height();
                 int num_strips = ceil_div(h, 4);
@@ -2210,7 +2224,10 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
 
                 state.current_bitplane = current_block.p;
                 state.reset_contexts();
-                state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
+
+                // state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(current_block.data));
+                state.arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(combined_data));
+
                 // state.arithmetic_decoder.data().enqueue(current_block.data);
                 // state.arithmetic_decoder.INITDEC();
             } else if (current_block.is_included && current_block.data.size() > 0) {
