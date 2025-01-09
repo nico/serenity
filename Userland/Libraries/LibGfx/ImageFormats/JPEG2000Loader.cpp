@@ -2298,7 +2298,7 @@ auto filename = MUST(String::formatted("jp2k-decompressed-tile-{}-r-{}-component
     tile.index, progression_data.resolution_level, progression_data.component, progression_data.precinct, i, code_block_index));
     auto file = MUST(Core::File::open(filename, Core::File::OpenMode::ReadWrite | Core::File::OpenMode::Truncate));
 
-dbgln("writing uncompressed {} * {} = {}", current_block.rect.width(), current_block.rect.height(), current_block.rect.width() * current_block.rect.height());
+// dbgln("writing uncompressed {} * {} = {}", current_block.rect.width(), current_block.rect.height(), current_block.rect.width() * current_block.rect.height());
     for (int y = 0; y < current_block.rect.height(); ++y) {
         for (int x = 0; x < current_block.rect.width(); ++x) {
             // dbgln("x {} y {}", x, y);
@@ -2443,9 +2443,6 @@ static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlo
             auto sign = get_sign(x, y);
             auto magnitude = magnitudes[y * w + x];
             auto value = magnitude * (sign ? -1 : 1);
-
-if (x == 15 && y == 31)
-    dbgln("final value: {}", value);
 
             // XXX make relative to subband origin?
             // output.coefficients[(y + current_block.rect.top()) * output.subband_rect.width() + (x + current_block.rect.left())] = value;
