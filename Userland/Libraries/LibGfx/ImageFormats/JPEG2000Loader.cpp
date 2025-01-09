@@ -935,6 +935,7 @@ struct CodeblockBitplaneState {
     Vector<ReadonlyBytes> layer_data;
     u32 original_p { 0 };
     int total_number_of_coding_passes { 0 };
+    SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
 
     void reset_contexts()
     {
@@ -1792,7 +1793,7 @@ dbgln("code-block rect: {}", current_block.rect);
                 dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
                 current_block_state.has_been_included_in_previous_packet = true;
-                current_block.sub_band = sub_band;
+                current_block.sub_band = sub_band; // XXX eek we only set this for the first layer D: => moved to state
             }
 
             // B.10.6 Number of coding passes
@@ -2260,17 +2261,24 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
 dbgln("exponent: {}, M_b: {}", exponent, M_b);
 
         // Read bitplanes of all code-blocks.
+    auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
-            if (!current_block.is_included)
-                continue;
 
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
 
-            if (current_block.is_included_for_the_first_time)
+            if (current_block.is_included_for_the_first_time) {
                 state.original_p = current_block.p;
+                state.sub_band = current_block.sub_band;
+            }
 
             state.layer_data.append(current_block.data);
             state.total_number_of_coding_passes += current_block.number_of_coding_passes;
+
+            // if (!current_block.is_included)
+                // continue;
+
+            if (state.layer_data.size() != number_of_layers)
+                continue;
 
             size_t total_size = 0;
             for (auto& data : state.layer_data)
@@ -2324,11 +2332,14 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
             TRY(decode_code_block(state, M_b, current_block));
         }
 
+        if (progression_data.layer != number_of_layers - 1)
+            continue;
+
         // Assemble bitplanes from all code-blocks into coefficients of the whole precinct.
 
         // XXX: the following comment is outdated
         // XXX: only do this for the first precinct, so that additional precincts don't clobber earlier precincts
-        // or alternatively, only return one precint's worth of data here adn assemble outside
+        // or alternatively, only return one precint's worth of data here and assemble outside
         // if (header.sub_bands[i].coefficients.is_empty())
             // header.sub_bands[i].coefficients.resize(header.sub_bands[i].subband_rect.width() * header.sub_bands[i].subband_rect.height());
         // ...I think this only does one precinct of data now, but it does the resize once per layer, which is at best wasteful.
@@ -2337,17 +2348,18 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
         Vector<i16> precinct_coefficents;
         precinct_coefficents.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
         for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
-            if (!current_block.is_included)
-                continue;
+            // if (!current_block.is_included)
+                // continue;
 
             // XXX: this never creates; have a non-creating getter too?
             auto& state = *TRY(get_or_create_code_block_bitplane_state(context, tile, progression_data, sub_band, code_block_index, packet_context.num_precincts, header.sub_bands[i].codeblock_x_count, header.sub_bands[i].codeblock_y_count));
+
             // XXX oh! only do this the last time round!
             decoded_block_to_coefficients(state, current_block, precinct_coefficents, clipped_precinct_rect);
 
 #if 1
 // store decompressed data in file for debugging
-// XXX this writes the whole precinct, not just the codeblock :/
+// XXX this writes the whole precinct, not just the codeblock :/ => fixed
 auto filename = MUST(String::formatted("jp2k-decompressed-tile-{}-r-{}-component-{}-precinct-{}-subband-{}-codeblock-{}.bin",
     tile.index, progression_data.resolution_level, progression_data.component, progression_data.precinct, i, code_block_index));
     auto file = MUST(Core::File::open(filename, Core::File::OpenMode::ReadWrite | Core::File::OpenMode::Truncate));
@@ -2368,6 +2380,7 @@ dbgln("writing uncompressed {} * {} = {}", current_block.rect.width(), current_b
     // }
 #endif
 
+// exit(0); // right exit
         }
 
         // Convert precinct i16 coefficients into dequantized floats, and put into the subband buffer (which can have several precincts).
@@ -2478,6 +2491,8 @@ static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlo
     Vector<u8>& significance_and_sign = state.significance_and_sign;
     Vector<u16>& magnitudes = state.magnitudes;
 
+// dbgln("decoded block to coefficients: {}x{}; size {}, {}", w, h, significance_and_sign.size(), magnitudes.size());
+
     // XXX: make method on state
     auto get_sign = [&](int x, int y) {
         auto strip_index = y / 4;
@@ -2510,7 +2525,7 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
         // return Error::from_string_literal("Cannot handle non-included codeblocks yet");
-    VERIFY(current_block.is_included);
+    // VERIFY(current_block.is_included);
 
     QMArithmeticDecoder& arithmetic_decoder = state.arithmetic_decoder;
 
@@ -2668,8 +2683,10 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
     };
 
     auto compute_context = [&](int x, int y) -> unsigned {
-        switch (current_block.sub_band) {
+        // switch (current_block.sub_band) {
+        switch (state.sub_band) {
         case SubBand::HorizontalLowpassVerticalLowpass:
+        // case SubBand::HorizontalLowpassVerticalLowpass:
         case SubBand::HorizontalLowpassVerticalHighpass:
             return compute_context_ll_lh(x, y);
         case SubBand::HorizontalHighpassVerticalLowpass:
@@ -2763,8 +2780,10 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
             int y_end = min(y + 4, h);
             int num_rows = y_end - y;
             for (int x = 0; x < w; ++x) {
+                bool do_log = x == 0 && y == 0 && false;
+
                 for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
-                    // dbgln("sigprop x: {}, y: {}", x, y + coefficient_index);
+                    if (do_log) dbgln("sigprop x: {}, y: {}, before magnitude: {}", x, y + coefficient_index, magnitudes[(y + coefficient_index) * w + x]);
 
                     // D1, Is the current coefficient already significant?
                     if (!is_significant(x, y + coefficient_index)) {
@@ -2774,7 +2793,7 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
                             // C1, Decode significance bit of current coefficient (See D.3.1)
                             // u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                             bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                            // dbgln("sigprop is_newly_significant: {} (context {})", is_newly_significant, context);
+                            if (do_log) dbgln("sigprop is_newly_significant: {} (context {})", is_newly_significant, context);
                             // is_current_coefficient_significant = is_newly_significant;
                             set_significant(x, y + coefficient_index, is_newly_significant);
                             if (is_newly_significant) {
@@ -2804,8 +2823,9 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
             int num_rows = y_end - y;
             // XXX maybe store a "is any pixel significant in this scanline" flag to skip entire scanlines? measure if that's worth it.
             for (int x = 0; x < w; ++x) {
+                bool do_log = x == 0 && y == 0 && false;
                 for (u8 coefficient_index = 0; coefficient_index < num_rows; ++coefficient_index) {
-                    // dbgln("magnitude x: {}, y: {}", x, y + coefficient_index);
+                    if (do_log) dbgln("magnitude refinement x: {}, y: {}, before magnitude: {}", x, y + coefficient_index, magnitudes[(y + coefficient_index) * w + x]);
 
                     // D5, Is the coefficient insignificant?
                     if (!is_significant(x, y + coefficient_index))
@@ -2825,10 +2845,10 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
                             context = 16;
                         }
                         bool magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                        // dbgln("magnitude_bit: {} (context {})", magnitude_bit, context);
+                        if (do_log) dbgln("magnitude_bit: {} (context {})", magnitude_bit, context);
                         magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << (num_bits - current_bitplane);
 
-if (x == 15 && (y + coefficient_index) == 31) {
+if (do_log) {
     dbgln("bit {} at {} ({} - {}), {:#x}", magnitude_bit, num_bits - current_bitplane, num_bits, current_bitplane, magnitudes[(y + coefficient_index) * w + x]);
 }
 
@@ -2848,13 +2868,14 @@ if (x == 15 && (y + coefficient_index) == 31) {
             int y_end = min(y + 4, h);
             int num_rows = y_end - y;
             for (int x = 0; x < w; ++x) {
-                // dbgln("cleanup x: {}, y: {}", x, y);
+                bool do_log = x == 0 && y == 0 && false;
+                if (do_log) dbgln("cleanup x: {}, y: {}, before magnitude: {}", x, y, magnitudes[(y + 0) * w + x]);
 
                 Array<u8, 4> contexts {};
                 int num_undecoded = 0;
                 for (int i = 0; i < 4; ++i) {
                     contexts[i] = compute_context(x, y + i);
-                    // dbgln("context[{}]: {}", i, contexts[i]);
+                    if (do_log) dbgln("context[{}]: {}", i, contexts[i]);
                     if (!is_significant(x, y + i))
                         ++num_undecoded;  // XXX probably redundant since this would imply a context being non-0
                 }
@@ -2864,7 +2885,7 @@ if (x == 15 && (y + coefficient_index) == 31) {
                 if (are_four_contiguous_undecoded_coefficients_in_a_column_each_with_a_0_context) {
                     // C4, Run-length context label
                     auto not_four_zeros = arithmetic_decoder.get_next_bit(run_length_context);
-                    // dbgln("cleanup not_four_zeros: {} (run_length_context)", not_four_zeros);
+                    if (do_log) dbgln("cleanup not_four_zeros: {} (run_length_context)", not_four_zeros);
 
                     // D11, Are the four contiguous bits all zero?
                     bool are_the_four_contiguous_bits_all_zero = !not_four_zeros;
@@ -2872,7 +2893,7 @@ if (x == 15 && (y + coefficient_index) == 31) {
                         // C5
                         u8 first_coefficient_index = arithmetic_decoder.get_next_bit(uniform_context);
                         first_coefficient_index = (first_coefficient_index << 1) | arithmetic_decoder.get_next_bit(uniform_context);
-                        // dbgln("cleanup first_coefficient_index: {} (uniform context 2x)", first_coefficient_index);
+                        if (do_log) dbgln("cleanup first_coefficient_index: {} (uniform context 2x)", first_coefficient_index);
                         u8 coefficient_index = first_coefficient_index;
 
                         bool is_first_coefficient = true;
@@ -2889,7 +2910,7 @@ if (x == 15 && (y + coefficient_index) == 31) {
                                 // C1, Decode significance bit of current coefficient (See D.3.1)
                                 u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
                                 bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                                // dbgln("cleanup is_newly_significant: {} (context: {})", is_newly_significant, context);
+                                if (do_log) dbgln("cleanup {} is_newly_significant: {} (context: {})", coefficient_index, is_newly_significant, context);
                                 is_current_coefficient_significant = is_newly_significant;
                                 set_significant(x, y + coefficient_index, is_newly_significant);
                                 if (is_newly_significant) {
@@ -2925,14 +2946,17 @@ if (x == 15 && (y + coefficient_index) == 31) {
                         if (!is_significant_or_coded && !has_already_been_coded) {
                             // C1, Decode significance bit of current coefficient
                             u8 context = compute_context(x, y + coefficient_index); // PERF: could use `contexts` cache (needs invalidation then).
-                            // dbgln("alt context {}", context);
+                            if (do_log) dbgln("alt context {}", context);
+// if (context != 0) { // sigprop has this check, but it makes things look very broken
                             bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
-                            // dbgln("cleanup alt is_newly_significant: {} (context {})", is_newly_significant, context);
+                            if (do_log) dbgln("cleanup alt is_newly_significant: {} (context {})", is_newly_significant, context);
                             set_significant(x, y + coefficient_index, is_newly_significant);
                             if (is_newly_significant) {
                                 became_significant_in_pass[(y + coefficient_index) * w + x] = current_bitplane;
                                 magnitudes[(y + coefficient_index) * w + x] |= 1 << (num_bits - current_bitplane); // XXX: correct?
                             }
+                            // XXX sigprop has this; should it be here too? => no, we only check this in here with == pass -2, so not needed.
+                            // was_coded_in_pass[(y + coefficient_index) * w + x] = pass;
 
                             // D3, Did the current coefficient just become significant?
                             if (is_newly_significant) {
@@ -2940,6 +2964,7 @@ if (x == 15 && (y + coefficient_index) == 31) {
                                 set_sign(x, y + coefficient_index, sign_bit);
                             }
                         }
+// }
                         // D10, Are there more coefficients remaining of the four column coefficients?
                     } while (coefficient_index + 1 < num_rows);
                 }
@@ -2971,8 +2996,10 @@ dbgln("pass on entry {}, {} passes, p {}, {} bytes", pass, current_block.number_
     // for (int pass_i = 0; pass_i < current_block.number_of_coding_passes - (int)current_block.p; ++pass_i, ++pass) {
     // for (int pass_i = 0; pass_i < state.total_number_of_coding_passes - (int)state.original_p; ++pass_i, ++pass) {
     for (int pass_i = 0; pass_i < state.total_number_of_coding_passes && current_bitplane < M_b; ++pass_i, ++pass) {
+    // for (int pass_i = 0; pass_i <= state.total_number_of_coding_passes && current_bitplane <= M_b; ++pass_i, ++pass) {
+    // for (int pass_i = 0; pass_i < state.total_number_of_coding_passes && current_bitplane <= M_b; ++pass_i, ++pass) {
     // for (int pass_i = 0; pass_i < state.total_number_of_coding_passes; ++pass_i, ++pass) {
-dbgln("pass {} bitplane {}", pass, current_bitplane);
+dbgln("pass {} / {}, bitplane {}", pass, state.total_number_of_coding_passes, current_bitplane);
 
         // D0, Is this the first bit-plane for the code-block?
         switch ((pass + 2) % 3) {
@@ -3031,6 +3058,8 @@ dbgln("pass {} bitplane {}", pass, current_bitplane);
     TRY(file->write_until_depleted(bytes));
 }
 #endif
+
+// exit(0);
 
     return {};
 }
