@@ -3326,10 +3326,10 @@ static void _1D_EXTR(CodingStyleParameters::Transformation transformation, Decod
     // Table F.3 – Extension to the right
     int i_right;
     if (transformation == CodingStyleParameters::Transformation::Reversible_5_3_Filter) {
-        i_right = higher % 2 == 0 ? 1 : 2;
+        i_right = higher % 2 == 0 ? 2 : 1;
     } else {
         VERIFY(transformation == CodingStyleParameters::Transformation::Irreversible_9_7_Filter);
-        i_right = higher % 2 == 0 ? 3 : 4;
+        i_right = higher % 2 == 0 ? 4 : 3;
     }
 
     // (F-4)
