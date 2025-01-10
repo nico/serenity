@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
-#define JPEG2000_DEBUG 1
+// #define JPEG2000_DEBUG 1
 
 #include <AK/BitStream.h>
 #include <AK/Debug.h>
@@ -1184,7 +1184,7 @@ static ErrorOr<void> parse_codestream_tile_header(JPEG2000LoadingContext& contex
     if (start_of_tile.tile_part_index == 0) {
         auto pq = context.siz.tile_2d_index_from_1d_index(tile.index);
         tile.rect = context.siz.reference_grid_coordinates_for_tile(pq);
-dbgln("tile {} .rect: {}", tile.index, tile.rect);
+// dbgln("tile {} .rect: {}", tile.index, tile.rect);
         tile.progression_iterator = TRY(make_progression_iterator(context, tile));
     }
 
@@ -1660,17 +1660,17 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
 
         auto rect_covered_by_codeblocks = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
 
-dbgln("n_b: {}", n_b);
-dbgln("sub-band rect: {}", rect);
-dbgln("precinct rect: {}", packet_context.precinct_rect); // XXX grok clips this to the tile rect; we only clip the codeblock rect further down
-dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
+// dbgln("n_b: {}", n_b);
+// dbgln("sub-band rect: {}", rect);
+// dbgln("precinct rect: {}", packet_context.precinct_rect); // XXX grok clips this to the tile rect; we only clip the codeblock rect further down
+// dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
 
         auto codeblock_x_count = rect_covered_by_codeblocks.width() / (1 << packet_context.xcb_prime);
         auto codeblock_y_count = rect_covered_by_codeblocks.height() / (1 << packet_context.ycb_prime);
 
         header.sub_bands[sub_band_index].codeblock_x_count = codeblock_x_count;
         header.sub_bands[sub_band_index].codeblock_y_count = codeblock_y_count;
-    dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
+    // dbgln("code-blocks per precinct: {}x{}", codeblock_x_count, codeblock_y_count);
 
         if (codeblock_x_count == 0 || codeblock_y_count == 0)
             continue;
@@ -1693,7 +1693,7 @@ dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
 
             auto code_block_rect = IntRect { { rect_covered_by_codeblocks.x() + code_block_x * (1 << packet_context.xcb_prime), rect_covered_by_codeblocks.y() + code_block_y * (1 << packet_context.ycb_prime) }, { 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime } };
             current_block.rect = code_block_rect.intersected(rect);
-dbgln("code-block rect: {}", current_block.rect);
+// dbgln("code-block rect: {}", current_block.rect);
 
             // B.10.4 Code-block inclusion
             bool is_included;
@@ -1724,7 +1724,7 @@ dbgln("code-block rect: {}", current_block.rect);
             current_block.is_included_for_the_first_time = is_included && !current_block_state.has_been_included_in_previous_packet;
             if (current_block.is_included_for_the_first_time) {
                 u32 p = TRY(p_tree.read_value(code_block_x, code_block_y, read_bit));
-                dbgln("zero bit-plane information: {}", p);
+                // dbgln("zero bit-plane information: {}", p);
                 current_block.p = p;
                 current_block_state.has_been_included_in_previous_packet = true;
                 current_block.sub_band = sub_band; // XXX eek we only set this for the first layer D: => moved to state
@@ -1760,7 +1760,7 @@ dbgln("code-block rect: {}", current_block.rect);
                 bits = (bits << 1) | TRY(read_bit());
                 return 37 + bits;
             }());
-            dbgln("number of coding passes: {} ({} bitplanes)", number_of_coding_passes, (number_of_coding_passes - 1) / 3 + 1);
+            // dbgln("number of coding passes: {} ({} bitplanes)", number_of_coding_passes, (number_of_coding_passes - 1) / 3 + 1);
             current_block.number_of_coding_passes = number_of_coding_passes;
 
             // B.10.7 Length of the compressed image data from a given code-block
@@ -1789,7 +1789,7 @@ dbgln("code-block rect: {}", current_block.rect);
                 bool bit = TRY(read_bit());
                 length = (length << 1) | bit;
             }
-            dbgln("length of codeword segment: {} bytes", length);
+            // dbgln("length of codeword segment: {} bytes", length);
             current_block.length_of_data = length;
 
             // B.10.7.2 Multiple codeword segments
@@ -1806,7 +1806,7 @@ dbgln("code-block rect: {}", current_block.rect);
     }
 
     if (last_full_byte == 0xFF) {
-dbgln("final stuff!");
+// dbgln("final stuff!");
         bool stuff_bit = TRY(read_bit());
         if (stuff_bit)
             return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Invalid bit-stuffing");
@@ -1921,11 +1921,11 @@ static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& 
 {
     auto& decoded_tile = context.decoded_tiles[tile.index];
     if (decoded_tile.components.is_empty()) {
-        dbgln("tile {} rect {}, making {} componennts", tile.index, tile.rect, context.siz.components.size());
+        // dbgln("tile {} rect {}, making {} componennts", tile.index, tile.rect, context.siz.components.size());
         decoded_tile.components.resize(context.siz.components.size());
         for (auto [component_index, component] : enumerate(decoded_tile.components)) {
             int num_decomposition_levels = number_of_decomposition_levels_for_component(context, tile, component_index);
-            dbgln("making {} sub-bands", num_decomposition_levels);
+            // dbgln("making {} sub-bands", num_decomposition_levels);
             component.decompositions.resize(num_decomposition_levels);
             component.decompositions_packet_state.resize(num_decomposition_levels);
             component.rect = context.siz.reference_grid_coordinates_for_tile_component(tile.rect, component_index);
@@ -1936,7 +1936,7 @@ static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& 
             for (int r = 2; r <= num_decomposition_levels + 1; ++r) {
                 int n_b = r == 0 ? N_L : (N_L + 1 - r); // always right branch
                 auto rect = context.siz.reference_grid_coordinates_for_sub_band(tile.rect, component_index, n_b, SubBand::HorizontalLowpassVerticalLowpass);
-dbgln("r {} llrect {}", r, rect);
+// dbgln("r {} llrect {}", r, rect);
                 component.nLL_rects.append(rect);
             }
         }
@@ -2013,7 +2013,7 @@ static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& til
 
     } while (progression_data.resolution_level > number_of_decomposition_levels_for_component(context, tile, progression_data.component));
 
-    dbgln("progression order: tile {} layer {}, resolution level: {}, component: {}, precinct {}", tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
+    // dbgln("progression order: tile {} layer {}, resolution level: {}, component: {}, precinct {}", tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
 
     // Compute tile size at resolution level r.
     int r = progression_data.resolution_level;
@@ -2111,7 +2111,7 @@ dbgln();
     FixedMemoryStream stream { data };
     auto header = TRY(read_packet_header(context, stream, packet_context, tile, coding_parameters, progression_data));
     if (header.is_empty) {
-dbgln("empty packet per header; skipping");
+// dbgln("empty packet per header; skipping");
         return stream.offset();
     }
 
@@ -2148,7 +2148,7 @@ dbgln("empty packet per header; skipping");
             current_block.data = data.slice(offset, current_block.length_of_data);
             offset += current_block.length_of_data;
 
-#if 1
+#if 0
 // store current block's data in a file for debugging
     // dbgln("progression order: tile {} layer {}, resolution level: {}, component: {}, precinct {}", tile.index, progression_data.layer, progression_data.resolution_level, progression_data.component, progression_data.precinct);
 
@@ -2171,7 +2171,7 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
         auto& coefficients = *TRY(get_or_create_decoded_coefficients(context, tile, progression_data, sub_band, header.sub_bands[i].subband_rect));
 
         if (header.sub_bands[i].codeblock_x_count == 0 || header.sub_bands[i].codeblock_y_count == 0) {
-            dbgln("skipping sub-band {} with no code-blocks", i);
+            // dbgln("skipping sub-band {} with no code-blocks", i);
             continue;
         }
 
@@ -2192,7 +2192,7 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
         }
 
         int M_b = quantization_parameters.number_of_guard_bits + exponent - 1;
-dbgln("exponent: {}, M_b: {}", exponent, M_b);
+// dbgln("exponent: {}, M_b: {}", exponent, M_b);
 
         // Read bitplanes of all code-blocks.
     auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
@@ -2291,7 +2291,7 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
             // XXX oh! only do this the last time round!
             decoded_block_to_coefficients(state, current_block, precinct_coefficents, clipped_precinct_rect);
 
-#if 1
+#if 0
 // store decompressed data in file for debugging
 // XXX this writes the whole precinct, not just the codeblock :/ => fixed
 auto filename = MUST(String::formatted("jp2k-decompressed-tile-{}-r-{}-component-{}-precinct-{}-subband-{}-codeblock-{}.bin",
@@ -2366,8 +2366,8 @@ auto filename = MUST(String::formatted("jp2k-decompressed-tile-{}-r-{}-component
                 // if (i == 0) dbgln("index {} bounds {} / {}", y * w + h, coefficients.size, coefficients.coefficients.size());
                 // coefficients.coefficients[y * w + x] = value; // XXX precinct bounds!
 
-if (x == 15 && y == 31)
-    dbgln("coefficient value: {}", value);
+// if (x == 15 && y == 31)
+    // dbgln("coefficient value: {}", value);
 
                 auto subband_origin = header.sub_bands[i].subband_rect.location();
                 coefficients.coefficients[(y + clipped_precinct_rect.top() - subband_origin.y()) * header.sub_bands[i].subband_rect.width() + (x + clipped_precinct_rect.left() - subband_origin.x())] = value; // XXX precinct bounds!
@@ -2703,7 +2703,7 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
     // int num_bits = (current_block.number_of_coding_passes - 1) / 3 + 1; // /shruggie
     int num_bits = M_b - 1; // Spec indexes i starting 1, we (morally) start current_bitplane at 0.
     // int num_bits = M_b;
-    dbgln("num_bits: {} (p {})", num_bits, current_block.p);
+    // dbgln("num_bits: {} (p {})", num_bits, current_block.p);
 
     auto significance_propagation_pass = [&](int current_bitplane, int pass) {
         // D.3.1 Significance propagation decoding pass
@@ -2911,7 +2911,7 @@ if (do_log) {
     int& pass = state.pass;
     // pass = 2;
     // pass = 0;
-dbgln("pass on entry {}, {} passes, p {}, {} bytes", pass, current_block.number_of_coding_passes, current_block.p, current_block.length_of_data);
+// dbgln("pass on entry {}, {} passes, p {}, {} bytes", pass, current_block.number_of_coding_passes, current_block.p, current_block.length_of_data);
 
             // B.10.5 Zero bit-plane information
             // "If a code-block is included for the first time,
@@ -2930,7 +2930,7 @@ dbgln("pass on entry {}, {} passes, p {}, {} bytes", pass, current_block.number_
     // for (int pass_i = 0; pass_i <= state.total_number_of_coding_passes && current_bitplane <= M_b; ++pass_i, ++pass) {
     // for (int pass_i = 0; pass_i < state.total_number_of_coding_passes && current_bitplane <= M_b; ++pass_i, ++pass) {
     // for (int pass_i = 0; pass_i < state.total_number_of_coding_passes; ++pass_i, ++pass) {
-dbgln("pass {} / {}, bitplane {}", pass, state.total_number_of_coding_passes, current_bitplane);
+// dbgln("pass {} / {}, bitplane {}", pass, state.total_number_of_coding_passes, current_bitplane);
 
         // D0, Is this the first bit-plane for the code-block?
         switch ((pass + 2) % 3) {
@@ -3374,7 +3374,7 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
 #else
     for (size_t component_index = 0; component_index < context.siz.components.size(); ++component_index) {
         // XXX instead of this, take max over all tile components since this can vary per tile and per component
-        TRY(save_pyramid(context, component_index));
+        // TRY(save_pyramid(context, component_index));
         for (size_t r_minus_1 = 0; r_minus_1 < context.cod.parameters.number_of_decomposition_levels; ++r_minus_1) {
             for (size_t tile_index = 0; tile_index < context.tiles.size(); ++tile_index) {
                 auto& tile = context.tiles[tile_index];
@@ -3385,13 +3385,13 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
 
                 auto& decomposition = component.decompositions[r_minus_1];
 
-dbgln("idwt for tile {} component {}", tile.index, component_index);
+// dbgln("idwt for tile {} component {}", tile.index, component_index);
                 auto transformation = coding_style_parameters_for_component(context, tile, component_index).transformation;
 
                 auto rect = component.nLL_rects[r_minus_1];
                 component.nLL = TRY(_2D_SR(rect, transformation, move(component.nLL), decomposition[0], decomposition[1], decomposition[2]));
             }
-            TRY(save_pyramid(context, component_index));
+            // TRY(save_pyramid(context, component_index));
         }
     }
 #endif
