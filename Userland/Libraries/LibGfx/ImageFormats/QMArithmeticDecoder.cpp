@@ -104,7 +104,7 @@ u8 QMArithmeticDecoder::B(size_t offset)
 {
     if (BP >= m_current_data.size()) {
         if (!m_data.is_empty()) {
-dbgln("reloading arithmetic decoder data");
+// dbgln("reloading arithmetic decoder data");
             m_current_data = m_data[0];
             m_data.remove(0);
             BP = 0;
@@ -119,7 +119,7 @@ dbgln("reloading arithmetic decoder data");
         // to worry about BP being in one part of the queue and + 1 in the next.
         VERIFY(BP >= m_current_data.size() || m_data.is_empty());
 
-dbgln("returning fill data, offset {}", offset);
+// dbgln("returning fill data, offset {}", offset);
         return 0xFF;
     }
 
