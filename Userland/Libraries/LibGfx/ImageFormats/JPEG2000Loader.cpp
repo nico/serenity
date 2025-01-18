@@ -267,7 +267,6 @@ struct ImageAndTileSize {
 
         return { trx0, try0, trx1 - trx0, try1 - try0 };
     }
-<<<<<<< HEAD
 
     IntRect reference_grid_coordinates_for_sub_band(IntRect tile_rect, int component_index, int n_b, SubBand sub_band) const
     {
@@ -298,41 +297,6 @@ struct ImageAndTileSize {
         auto tile_rect = reference_grid_coordinates_for_tile(tile_2d_index);
         return reference_grid_coordinates_for_sub_band(tile_rect, component_index, n_b, sub_band);
     }
-||||||| parent of 96a459873a9 (tweaks (reference_grid_coordinates_for_sub_band(); pass coding params and progression data to read_packet_header)
-=======
-
-    IntRect reference_grid_coordinates_for_sub_band(IntRect tile_rect, int component_index, int n_b, SubBand sub_band) const
-    {
-        // B.5
-        // Table B.1 – Quantities (xob, yob) for sub-band b
-        int xob = 0;
-        int yob = 0;
-        if (sub_band == SubBand::HorizontalHighpassVerticalLowpass || sub_band == SubBand::HorizontalHighpassVerticalHighpass)
-            xob = 1;
-        if (sub_band == SubBand::HorizontalLowpassVerticalHighpass || sub_band == SubBand::HorizontalHighpassVerticalHighpass)
-            yob = 1;
-        VERIFY(n_b >= 1 || (n_b == 0 && sub_band == SubBand::HorizontalLowpassVerticalLowpass));
-        int o_scale = 1 << (n_b - 1);
-
-        // (B-15)
-        auto component_rect = reference_grid_coordinates_for_tile_component(tile_rect, component_index);
-        int denominator = 1 << n_b;
-        int tbx0 = ceil_div(component_rect.left() - o_scale * xob, denominator);
-        int tby0 = ceil_div(component_rect.top() - o_scale * yob, denominator);
-        int tbx1 = ceil_div(component_rect.right() - o_scale * xob, denominator);
-        int tby1 = ceil_div(component_rect.bottom() - o_scale * yob, denominator);
-
-        return { tbx0, tby0, tbx1 - tbx0, tby1 - tby0 };
-
-    }
-
-    IntRect reference_grid_coordinates_for_sub_band(IntPoint tile_2d_index, int component_index, int n_b, SubBand sub_band) const
-    {
-        auto tile_rect = reference_grid_coordinates_for_tile(tile_2d_index);
-        return reference_grid_coordinates_for_sub_band(tile_rect, component_index, n_b, sub_band);
-    }
-
->>>>>>> 96a459873a9 (tweaks (reference_grid_coordinates_for_sub_band(); pass coding params and progression data to read_packet_header)
 };
 
 static ErrorOr<ImageAndTileSize> read_image_and_tile_size(ReadonlyBytes data)
