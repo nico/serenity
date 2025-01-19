@@ -42,10 +42,16 @@ struct JPEG2000BitsPerComponentBox final : public Box {
 struct JPEG2000ColorSpecificationBox final : public Box {
     BOX_SUBTYPE(JPEG2000ColorSpecificationBox);
 
+    // T.800, Table I.9 – Legal METH values
+    // T.801, Table M.22 – Legal METH values
     u8 method { 0 };
     i8 precedence { 0 };
     u8 approximation { 0 };
+
+    // T.800, Table I.10 – Legal EnumCS values
+    // T.801, Table M.25 – Additional legal EnumCS values
     u32 enumerated_color_space { 0 }; // Only set if method == 1
+
     ByteBuffer icc_data;              // Only set if method == 2
 };
 
