@@ -870,6 +870,7 @@ struct CodeblockBitplaneState {
     u32 original_p { 0 };
     int total_number_of_coding_passes { 0 };
     SubBand sub_band { SubBand::HorizontalLowpassVerticalLowpass };
+    IntRect rect;
 
     void reset_contexts()
     {
@@ -1831,7 +1832,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
 
 static ErrorOr<void> decode_tile_part(JPEG2000LoadingContext& context, TileData& tile, TilePartData& tile_part);
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data);
-static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block   );
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b/*, CodeBlockPacketData& current_block   */);
 static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlockPacketData& current_block, Vector<i16>& output, IntRect precinct_rect);
 
 ErrorOr<void> decode_tile(JPEG2000LoadingContext& context, TileData& tile)
@@ -2221,12 +2222,29 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
 
             state.layer_data.append(current_block.data);
             state.total_number_of_coding_passes += current_block.number_of_coding_passes;
+            if (!state.rect.is_empty())
+                VERIFY(state.rect == current_block.rect);
+            else
+                state.rect = current_block.rect;
 
             // if (!current_block.is_included)
                 // continue;
+        }
 
-            if (state.layer_data.size() != number_of_layers)
-                continue;
+        if (progression_data.layer != number_of_layers - 1)
+            continue;
+
+        // Assemble bitplanes from all code-blocks into coefficients of the whole precinct.
+        // coefficients.
+
+        auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
+        auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
+
+        int const r = progression_data.resolution_level;
+        PacketDecodingState& packet_coefficients = r == 0 ? decoded_tile.components[progression_data.component].nLL_packet_state : decoded_tile.components[progression_data.component].decompositions_packet_state[r - 1][(int)sub_band - 1];
+
+        // for (auto [code_block_index, current_block] : enumerate(header.sub_bands[i].code_blocks)) {
+        for (auto [state_index, state] : enumerate(packet_coefficients.codeblock_bitplane_state[progression_data.precinct])) {
 
             size_t total_size = 0;
             for (auto& data : state.layer_data)
@@ -2238,9 +2256,11 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
                 offset += data.size();
             }
 
-            if (current_block.is_included_for_the_first_time || true) {
-                int w = current_block.rect.width();
-                int h = current_block.rect.height();
+            if (/*current_block.is_included_for_the_first_time || */ true) {
+                // int w = current_block.rect.width();
+                int w = state.rect.width();
+                // int h = current_block.rect.height();
+                int h = state.rect.height();
                 int num_strips = ceil_div(h, 4);
 
                 TRY(state.significance_and_sign.try_resize(0));
@@ -2266,6 +2286,7 @@ auto filename = TRY(String::formatted("jp2k-codeblock-tile-{}-layer-{}-resolutio
 
                 // state.arithmetic_decoder.data().enqueue(current_block.data);
                 // state.arithmetic_decoder.INITDEC();
+#if 0
             } else if (current_block.is_included && current_block.data.size() > 0) {
 dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
 #if 0
@@ -2274,16 +2295,14 @@ dbgln("enqueuing arithmetic decoder data size {}", current_block.data.size());
                 state.arithmetic_decoder.data().append(current_block.data);
 #endif
                 // state.arithmetic_decoder.flush();
+#endif
             }
-
-// if (current_block.is_included_for_the_first_time)
-            TRY(decode_code_block(state, M_b, current_block));
+            TRY(decode_code_block(state, M_b/*, current_block*/));
         }
 
-        if (progression_data.layer != number_of_layers - 1)
-            continue;
+// if (current_block.is_included_for_the_first_time)
 
-        // Assemble bitplanes from all code-blocks into coefficients of the whole precinct.
+
 
         // XXX: the following comment is outdated
         // XXX: only do this for the first precinct, so that additional precincts don't clobber earlier precincts
@@ -2465,7 +2484,7 @@ static void decoded_block_to_coefficients(CodeblockBitplaneState& state, CodeBlo
     }
 }
 
-static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, CodeBlockPacketData& current_block)
+static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b/*, CodeBlockPacketData& current_block*/)
 {
     // Only have to early-return on these I think, but can also only happen in some multi-layer scenarios, which have other parts missing too.
     // if (!current_block.is_included)
@@ -2489,8 +2508,10 @@ static ErrorOr<void> decode_code_block(CodeblockBitplaneState& state, int M_b, C
     // "NOTE – Code-blocks in the partition may extend beyond the boundaries of the sub-band coefficients. When this happens, only the
     //  coefficients lying within the sub-band are coded using the method described in Annex D. The first stripe coded using this method
     //  corresponds to the first four rows of sub-band coefficients in the code-block or to as many such rows as are present."
-    int w = current_block.rect.width();
-    int h = current_block.rect.height();
+    // int w = current_block.rect.width();
+    int w = state.rect.width();
+    // int h = current_block.rect.height();
+    int h = state.rect.height();
     // dbgln("code-block rect: {}, sub-band {}", current_block.rect, (int)current_block.sub_band);
 
     Vector<u8>& significance_and_sign = state.significance_and_sign;
