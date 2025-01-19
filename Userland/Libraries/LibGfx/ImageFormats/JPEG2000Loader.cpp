@@ -928,6 +928,8 @@ struct JPEG2000LoadingContext {
     ReadonlyBytes codestream_data;
     size_t codestream_cursor { 0 };
     Optional<ReadonlyBytes> icc_data;
+    Optional<ISOBMFF::JPEG2000ColorSpecificationBox const&> color_box; // This is always set for box-based files.
+    Optional<ISOBMFF::JPEG2000PaletteBox const&> palette_box;
 
     IntSize size;
 
@@ -1337,6 +1339,7 @@ static ErrorOr<void> decode_jpeg2000_header(JPEG2000LoadingContext& context, Rea
 
     Optional<size_t> image_header_box_index;
     Optional<size_t> color_header_box_index;
+    Optional<size_t> palette_box_index;
     auto const& header_box = static_cast<ISOBMFF::JPEG2000HeaderBox const&>(*context.boxes[jp2_header_box_index.value()]);
     for (size_t i = 0; i < header_box.child_boxes().size(); ++i) {
         auto const& subbox = header_box.child_boxes()[i];
@@ -1344,6 +1347,7 @@ static ErrorOr<void> decode_jpeg2000_header(JPEG2000LoadingContext& context, Rea
             if (image_header_box_index.has_value())
                 return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Multiple Image Header boxes");
             image_header_box_index = i;
+            continue;
         }
         if (subbox->box_type() == ISOBMFF::BoxType::JPEG2000ColorSpecificationBox) {
             // T.800 says there should be just one 'colr' box, but T.801 allows several and says to pick the one with highest precedence.
@@ -1358,6 +1362,13 @@ static ErrorOr<void> decode_jpeg2000_header(JPEG2000LoadingContext& context, Rea
 
             if (use_this_color_box)
                 color_header_box_index = i;
+            continue;
+        }
+        if (subbox->box_type() == ISOBMFF::BoxType::JPEG2000PaletteBox) {
+            if (palette_box_index.has_value())
+                return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Multiple Palette boxes");
+            palette_box_index = i;
+            continue;
         }
     }
 
@@ -1369,9 +1380,12 @@ static ErrorOr<void> decode_jpeg2000_header(JPEG2000LoadingContext& context, Rea
     auto const& image_header_box = static_cast<ISOBMFF::JPEG2000ImageHeaderBox const&>(*header_box.child_boxes()[image_header_box_index.value()]);
     context.size = { image_header_box.width, image_header_box.height };
 
-    auto const& color_header_box = static_cast<ISOBMFF::JPEG2000ColorSpecificationBox const&>(*header_box.child_boxes()[color_header_box_index.value()]);
-    if (color_header_box.method == 2 || color_header_box.method == 3)
-        context.icc_data = color_header_box.icc_data.bytes();
+    context.color_box = static_cast<ISOBMFF::JPEG2000ColorSpecificationBox const&>(*header_box.child_boxes()[color_header_box_index.value()]);
+    if (context.color_box->method == 2 || context.color_box->method == 3)
+        context.icc_data = context.color_box->icc_data.bytes();
+
+    if (palette_box_index.has_value())
+        context.palette_box = static_cast<ISOBMFF::JPEG2000PaletteBox const&>(*header_box.child_boxes()[palette_box_index.value()]);
 
     TRY(parse_codestream_main_header(context));
     auto size_from_siz = IntSize { context.siz.width, context.siz.height };
@@ -3096,8 +3110,13 @@ static ErrorOr<DecodedCoefficients> _2D_SR(IntRect rect, CodingStyleParameters::
 // F.3.3 The 2D_INTERLEAVE procedure
 static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(IntRect in_rect, DecodedCoefficients ll, DecodedCoefficients const& hl, DecodedCoefficients const& lh, DecodedCoefficients const& hh)
 {
-    VERIFY(ll.rect.height() == hl.rect.height());
-    VERIFY(ll.rect.width() == lh.rect.width());
+    // dbgln("in_rect: {}", in_rect);
+    // dbgln("ll.rect: {}", ll.rect);
+    // dbgln("hl.rect: {}", hl.rect);
+    // dbgln("lh.rect: {}", lh.rect);
+    // dbgln("hh.rect: {}", hh.rect);
+    VERIFY(ll.rect.height() == hl.rect.height() || hl.rect.is_empty());
+    VERIFY(ll.rect.width() == lh.rect.width() || lh.rect.is_empty());
     VERIFY(hl.rect.width() == hh.rect.width());
     VERIFY(lh.rect.height() == hh.rect.height());
 
@@ -3120,6 +3139,7 @@ static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(IntRect in_rect, DecodedCoeff
     int v1 = in_rect.bottom();
 #endif
 
+    // XXX should this verify that in_rect.location() == ll.rect.location()?
     VERIFY(in_rect.width() == ll.rect.width() + hl.rect.width());
     VERIFY(in_rect.height() == ll.rect.height() + lh.rect.height());
 
@@ -3146,7 +3166,7 @@ static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(IntRect in_rect, DecodedCoeff
         }
     }
 
-    {
+    if (!hl.rect.is_empty()) {
         auto const& b = hl;
         VERIFY(floor_div(u1, 2) - floor_div(u0, 2) == b.rect.width());
         VERIFY(ceil_div(v1, 2) - ceil_div(v0, 2) == b.rect.height());
@@ -3158,7 +3178,7 @@ static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(IntRect in_rect, DecodedCoeff
         }
     }
 
-    {
+    if (!lh.rect.is_empty()) {
         auto const& b = lh;
         VERIFY(ceil_div(u1, 2) - ceil_div(u0, 2) == b.rect.width());
         VERIFY(floor_div(v1, 2) - floor_div(v0, 2) == b.rect.height());
@@ -3173,7 +3193,7 @@ static ErrorOr<DecodedCoefficients> _2D_INTERLEAVE(IntRect in_rect, DecodedCoeff
         }
     }
 
-    {
+    if (!hh.rect.is_empty()) {
         auto const& b = hh;
         VERIFY(floor_div(u1, 2) - floor_div(u0, 2) == b.rect.width());
         VERIFY(floor_div(v1, 2) - floor_div(v0, 2) == b.rect.height());
@@ -3472,7 +3492,7 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
             }
 
             // Convert to 8bpp.
-            // XXX: Don't do this for files with palette.
+            // XXX: Don't do this for files with palette for components that are mapped to the palette.
             if (context.siz.components[component_index].bit_depth() != 8) {
                 for (auto& coefficient : component.nLL.coefficients)
                     coefficient = 255 * coefficient / (1u << context.siz.components[component_index].bit_depth());
@@ -3493,11 +3513,33 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
             for (int x = 0; x < w; ++x) {
                 float value = decoded_tile.components[0].nLL.coefficients[y * w + x];
 
-                u8 byte_value = round_to<u8>(clamp(value, 0.0f, 255.0f));
+                u8 byte_value = round_to<u8>(clamp(value, 0.0f, 255.0f)); // XXX wrong for palette
                 u8 r = byte_value;
                 u8 g = byte_value;
                 u8 b = byte_value;
                 u8 a = 255;
+
+                if (context.palette_box.has_value()) {
+                    // XXX check cmap etc
+                    auto const& entry = context.palette_box->palette_entries[byte_value];
+                    r = entry[0];
+                    g = entry[1];
+                    b = entry[2];
+                    a = entry[3];
+
+                    if (context.color_box->method ==1 && context.color_box->enumerated_color_space == 12) {
+                        // CMYK
+                        // FIXME: Return CMYK data instead of doing a poor conversion here.
+                        u8 c = r;
+                        u8 m = g;
+                        u8 y = b;
+                        u8 k = a;
+                        r = (255 - c) * (255 - k) / 255;
+                        g = (255 - m) * (255 - k) / 255;
+                        b = (255 - y) * (255 - k) / 255;
+                        a = 255;
+                    }
+                }
 
                 // FIXME: look at component configuration
                 if (context.decoded_tiles[0].components.size() == 3) {
