@@ -14,6 +14,7 @@
 #include <LibGfx/ImageFormats/ISOBMFF/Reader.h>
 #include <LibGfx/ImageFormats/JPEG2000Loader.h>
 #include <LibGfx/ImageFormats/QMArithmeticDecoder.h>
+#include <LibGfx/ImageFormats/JPEG2000ProgressionIterators.h>
 #include <LibTextCodec/Decoder.h>
 
 #include <LibCore/File.h>
@@ -661,163 +662,6 @@ static ErrorOr<Comment> read_comment(ReadonlyBytes data)
     return com;
 }
 
-// B.12 Progression order
-struct ProgressionData {
-    int layer { 0 };
-    int resolution_level { 0 };
-    int component { 0 };
-    int precinct { 0 };
-
-    bool operator==(ProgressionData const&) const = default;
-};
-
-class ProgressionIterator {
-public:
-    virtual ~ProgressionIterator() = default;
-
-    virtual bool has_next() const = 0;
-    virtual ProgressionData next() = 0;
-};
-
-// B.12.1.1 Layer-resolution level-component-position progression
-class LayerResolutionLevelComponentPositionProgressionIterator : public ProgressionIterator {
-public:
-    // XXX Supporting POC packets will probably require changes to this
-    LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts);
-    virtual bool has_next() const override;
-    virtual ProgressionData next() override;
-
-private:
-    Function<int(int resolution_level, int component)> m_number_of_precincts;
-    ProgressionData m_next {};
-    ProgressionData m_end {};
-};
-
-LayerResolutionLevelComponentPositionProgressionIterator::LayerResolutionLevelComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts)
-    : m_number_of_precincts(move(number_of_precincts))
-{
-    m_end.layer = number_of_layers;
-    m_end.resolution_level = max_number_of_decomposition_levels + 1;
-    m_end.component = component_count;
-    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-}
-
-bool LayerResolutionLevelComponentPositionProgressionIterator::has_next() const
-{
-    return m_next != ProgressionData { m_end.layer, 0, 0, 0 };
-}
-
-ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
-{
-    ProgressionData current_data = m_next;
-
-    // B.12.1.1 Layer-resolution level-component-position progression
-    // "for each l = 0,..., L – 1
-    //      for each r = 0,..., Nmax
-    //          for each i = 0,..., Csiz – 1
-    //              for each k = 0,..., numprecincts – 1
-    //                  packet for component i, resolution level r, layer l, and precinct k.
-    //  Here, L is the number of layers and Nmax is the maximum number of decomposition levels, N_L, used in any component of the tile."
-    // FIXME: This always iterates up to Nmax, instead of just N_l of each component. That means several of the iteration results will be invalid and skipped.
-    // (This is a performance issue, not a correctness issue.)
-
-    ++m_next.precinct;
-    if (m_next.precinct < m_end.precinct)
-        return current_data;
-
-    m_next.precinct = 0;
-    ++m_next.component;
-    if (m_next.component < m_end.component) {
-        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-        return current_data;
-    }
-
-    m_next.component = 0;
-    ++m_next.resolution_level;
-    if (m_next.resolution_level < m_end.resolution_level) {
-        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-        return current_data;
-    }
-
-    m_next.resolution_level = 0;
-    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-
-    ++m_next.layer;
-    VERIFY(m_next.layer < m_end.layer || !has_next());
-
-    return current_data;
-}
-
-// B.12.1.2 Resolution level-layer-component-position progression
-class ResolutionLevelLayerComponentPositionProgressionIterator : public ProgressionIterator {
-public:
-    // XXX Supporting POC packets will probably require changes to this
-    ResolutionLevelLayerComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts);
-    virtual bool has_next() const override;
-    virtual ProgressionData next() override;
-
-private:
-    Function<int(int resolution_level, int component)> m_number_of_precincts;
-    ProgressionData m_next {};
-    ProgressionData m_end {};
-};
-
-ResolutionLevelLayerComponentPositionProgressionIterator::ResolutionLevelLayerComponentPositionProgressionIterator(int number_of_layers, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> number_of_precincts)
-    : m_number_of_precincts(move(number_of_precincts))
-{
-    m_end.layer = number_of_layers;
-    m_end.resolution_level = max_number_of_decomposition_levels + 1;
-    m_end.component = component_count;
-    m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-}
-
-bool ResolutionLevelLayerComponentPositionProgressionIterator::has_next() const
-{
-    return m_next != ProgressionData { 0, m_end.resolution_level, 0, 0 };
-}
-
-ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
-{
-    ProgressionData current_data = m_next;
-
-    // B.12.1.2 Resolution level-layer-component-position progression
-    // "for each r = 0,..., Nmax
-    //      for each l = 0,..., L – 1
-    //          for each i = 0,..., Csiz – 1
-    //              for each k = 0,..., numprecincts – 1
-    //                  packet for component i, resolution level r, layer l, and precinct k."
-    // FIXME: This always iterates up to Nmax, instead of just N_l of each component. That means several of the iteration results will be invalid and skipped.
-    // (This is a performance issue, not a correctness issue.)
-
-    ++m_next.precinct;
-    if (m_next.precinct < m_end.precinct)
-        return current_data;
-
-    m_next.precinct = 0;
-    ++m_next.component;
-    if (m_next.component < m_end.component) {
-        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-        return current_data;
-    }
-
-    m_next.component = 0;
-    ++m_next.layer;
-    if (m_next.layer < m_end.layer) {
-        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-        return current_data;
-    }
-
-    m_next.layer = 0;
-
-    ++m_next.resolution_level;
-    if (has_next())
-        m_end.precinct = m_number_of_precincts(m_next.resolution_level, m_next.component);
-    VERIFY(m_next.resolution_level < m_end.resolution_level || !has_next());
-
-    return current_data;
-}
-
-
 struct TilePartData {
     StartOfTilePart sot;
     Vector<Comment> coms;
@@ -833,7 +677,7 @@ struct TileData {
     Vector<TilePartData> tile_parts;
 
     // FIXME: This will have to move and be reorganized come POC support.
-    OwnPtr<ProgressionIterator> progression_iterator;
+    OwnPtr<JPEG2000::ProgressionIterator> progression_iterator;
 
     IntRect rect;
 };
@@ -1011,7 +855,7 @@ static int compute_max_number_of_decomposition_levels(JPEG2000LoadingContext con
     return max_number_of_decomposition_levels;
 }
 
-static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000LoadingContext const& context, TileData const& tile)
+static ErrorOr<OwnPtr<JPEG2000::ProgressionIterator>> make_progression_iterator(JPEG2000LoadingContext const& context, TileData const& tile)
 {
     auto number_of_layers = tile.cod.value_or(context.cod).number_of_layers;
 
@@ -1045,9 +889,9 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
 
     switch (tile.cod.value_or(context.cod).progression_order) {
     case CodingStyleDefault::ProgressionOrder::LayerResolutionComponentPosition:
-        return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
+        return make<JPEG2000::LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
     case CodingStyleDefault::ResolutionLayerComponentPosition:
-        return make<ResolutionLevelLayerComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
+        return make<JPEG2000::ResolutionLevelLayerComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
     case CodingStyleDefault::ResolutionPositionComponentLayer:
         return Error::from_string_literal("JPEG200Loader: ResolutionPositionComponentLayer progression order not yet supported");
     case CodingStyleDefault::PositionComponentResolutionLayer:
@@ -1596,9 +1440,9 @@ IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width
 }
 
 static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(
-    JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int code_block_x_count, int code_block_y_count);
+    JPEG2000LoadingContext& context, TileData const& tile, JPEG2000::ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int code_block_x_count, int code_block_y_count);
 
-ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream& stream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, ProgressionData const& data)
+ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream& stream, PacketContext const& packet_context, TileData const& tile, CodingStyleParameters const& coding_parameters, JPEG2000::ProgressionData const& data)
 {
     BigEndianInputBitStream bitstream { MaybeOwned { stream } };
 
@@ -1988,7 +1832,7 @@ static ErrorOr<DecodedTile*> get_or_create_decoded_tile(JPEG2000LoadingContext& 
     return &decoded_tile;
 }
 
-static ErrorOr<DecodedCoefficients*> get_or_create_decoded_coefficients(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, IntRect sub_band_rect)
+static ErrorOr<DecodedCoefficients*> get_or_create_decoded_coefficients(JPEG2000LoadingContext& context, TileData const& tile, JPEG2000::ProgressionData const& progression_data, SubBand sub_band, IntRect sub_band_rect)
 {
     auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
     auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
@@ -2006,7 +1850,7 @@ static ErrorOr<DecodedCoefficients*> get_or_create_decoded_coefficients(JPEG2000
     return &coefficients;
 }
 
-static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int code_block_x_count, int code_block_y_count)
+static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(JPEG2000LoadingContext& context, TileData const& tile, JPEG2000::ProgressionData const& progression_data, SubBand sub_band, int num_precincts, int code_block_x_count, int code_block_y_count)
 {
     auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
     auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
@@ -2026,7 +1870,7 @@ static ErrorOr<PacketDecodingState*> get_or_create_code_block_packet_data(JPEG20
     return &coefficients;
 }
 
-static ErrorOr<CodeblockBitplaneState*> get_or_create_code_block_bitplane_state(JPEG2000LoadingContext& context, TileData const& tile, ProgressionData const& progression_data, SubBand sub_band, int codeblock_index, int num_precincts, int code_block_x_count, int code_block_y_count)
+static ErrorOr<CodeblockBitplaneState*> get_or_create_code_block_bitplane_state(JPEG2000LoadingContext& context, TileData const& tile, JPEG2000::ProgressionData const& progression_data, SubBand sub_band, int codeblock_index, int num_precincts, int code_block_x_count, int code_block_y_count)
 {
     auto const coding_parameters = coding_style_parameters_for_component(context, tile, progression_data.component);
     auto& decoded_tile = *TRY(get_or_create_decoded_tile(context, tile, coding_parameters.number_of_decomposition_levels));
@@ -2047,7 +1891,7 @@ static ErrorOr<CodeblockBitplaneState*> get_or_create_code_block_bitplane_state(
 
 static ErrorOr<u32> decode_packet(JPEG2000LoadingContext& context, TileData& tile, ReadonlyBytes data)
 {
-    ProgressionData progression_data;
+    JPEG2000::ProgressionData progression_data;
     do {
         if (!tile.progression_iterator->has_next())
             return Error::from_string_literal("JPEG2000ImageDecoderPlugin: No more progression orders but packets left");
