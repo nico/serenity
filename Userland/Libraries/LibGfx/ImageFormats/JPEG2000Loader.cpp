@@ -3521,23 +3521,32 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
 
                 if (context.palette_box.has_value()) {
                     // XXX check cmap etc
-                    auto const& entry = context.palette_box->palette_entries[byte_value];
-                    r = entry[0];
-                    g = entry[1];
-                    b = entry[2];
-                    a = entry[3];
+                    if (context.palette_box->bit_depths.size() == 3) {
+                        auto const& entry = context.palette_box->palette_entries[byte_value];
+                        r = entry[0];
+                        g = entry[1];
+                        b = entry[2];
+                    } else if (context.palette_box->bit_depths.size() == 4) {
+                        auto const& entry = context.palette_box->palette_entries[byte_value];
+                        r = entry[0];
+                        g = entry[1];
+                        b = entry[2];
+                        a = entry[3];
 
-                    if (context.color_box->method ==1 && context.color_box->enumerated_color_space == 12) {
-                        // CMYK
-                        // FIXME: Return CMYK data instead of doing a poor conversion here.
-                        u8 c = r;
-                        u8 m = g;
-                        u8 y = b;
-                        u8 k = a;
-                        r = (255 - c) * (255 - k) / 255;
-                        g = (255 - m) * (255 - k) / 255;
-                        b = (255 - y) * (255 - k) / 255;
-                        a = 255;
+                        if (context.color_box->method ==1 && context.color_box->enumerated_color_space == 12) {
+                            // CMYK
+                            // FIXME: Return CMYK data instead of doing a poor conversion here.
+                            u8 c = r;
+                            u8 m = g;
+                            u8 y = b;
+                            u8 k = a;
+                            r = (255 - c) * (255 - k) / 255;
+                            g = (255 - m) * (255 - k) / 255;
+                            b = (255 - y) * (255 - k) / 255;
+                            a = 255;
+                        }
+                    } else {
+                        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Unimplemented palette bit depth");
                     }
                 }
 
