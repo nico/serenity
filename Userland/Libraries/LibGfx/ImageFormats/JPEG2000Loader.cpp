@@ -1591,8 +1591,8 @@ IntRect aligned_enclosing_rect(IntRect outer_rect, IntRect inner_rect, int width
 {
     int new_x = (inner_rect.x() / width_increment) * width_increment;
     int new_y = (inner_rect.y() / height_increment) * height_increment;
-    int new_right = ceil_div(inner_rect.right(), width_increment) * width_increment;
-    int new_bottom = ceil_div(inner_rect.bottom(), height_increment) * height_increment;
+    int new_right = inner_rect.width() == 0 ? new_x : ceil_div(inner_rect.right(), width_increment) * width_increment;
+    int new_bottom = inner_rect.height() == 0 ? new_y : ceil_div(inner_rect.bottom(), height_increment) * height_increment;
     return IntRect::intersection(outer_rect, IntRect::from_two_points({ new_x, new_y }, { new_right, new_bottom }));
 }
 
@@ -1706,7 +1706,7 @@ ErrorOr<PacketHeader> read_packet_header(JPEG2000LoadingContext& context, Stream
         auto rect_covered_by_codeblocks = aligned_enclosing_rect(packet_context.precinct_rect, rect, 1 << packet_context.xcb_prime, 1 << packet_context.ycb_prime);
 
 // dbgln("n_b: {}", n_b);
-// dbgln("sub-band rect: {}", rect);
+// dbgln("sub-band {} rect: {}, rect_covered_by_codeblocks {}", (int)sub_band, rect, rect_covered_by_codeblocks);
 // dbgln("precinct rect: {}", packet_context.precinct_rect); // XXX grok clips this to the tile rect; we only clip the codeblock rect further down
 // dbgln("rect covered by codeblocks: {}", rect_covered_by_codeblocks);
 
