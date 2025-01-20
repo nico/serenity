@@ -3393,7 +3393,9 @@ dbgln("idwt for tile {} component {}", tile.index, component_index);
                 u8 b = byte_value;
                 u8 a = 255;
 
-                if (context.palette_box.has_value()) {
+                // XXX don't want to do palette expansion in PDF files probably
+                // XXX (except if the colorspace is not set, maybe?)
+                if (context.palette_box.has_value() && false) {
                     // XXX check cmap etc
                     if (context.palette_box->bit_depths.size() == 3) {
                         auto const& entry = context.palette_box->palette_entries[byte_value];
