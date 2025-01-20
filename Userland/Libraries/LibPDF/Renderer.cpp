@@ -1153,7 +1153,7 @@ PDFErrorOr<Renderer::LoadedImage> Renderer::load_image(NonnullRefPtr<StreamObjec
     auto width = TRY(m_document->resolve_to<int>(image_dict->get_value(CommonNames::Width)));
     auto height = TRY(m_document->resolve_to<int>(image_dict->get_value(CommonNames::Height)));
 
-#if 0
+#if 1
     auto is_filter = [&](DeprecatedFlyString const& name) -> PDFErrorOr<bool> {
         if (!image_dict->contains(CommonNames::Filter))
             return false;
@@ -1188,6 +1188,9 @@ PDFErrorOr<Renderer::LoadedImage> Renderer::load_image(NonnullRefPtr<StreamObjec
         // XXX JPX does not require this (might be embedded)
         // "If ColorSpace is not present in the image dictionary, the color space informa- tion in the JPEG2000 data is used."
         // e.g. 0000117.pdf page 4
+        if (!image_dict->contains(CommonNames::ColorSpace) && TRY(is_filter(CommonNames::JPXDecode)))
+            return Error(Error::Type::RenderingUnsupported, "using color space from jpeg2000 image not yet implemented");
+
         auto color_space_object = MUST(image_dict->get_object(m_document, CommonNames::ColorSpace));
         color_space = TRY(get_color_space_from_document(color_space_object));
     }
