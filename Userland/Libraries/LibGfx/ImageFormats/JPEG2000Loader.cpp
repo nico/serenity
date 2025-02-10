@@ -360,6 +360,8 @@ struct CodingStyleParameters {
     bool uses_predictable_termination() const { return code_block_style & 0x10; }
     bool uses_segmentation_symbols() const { return code_block_style & 0x20; }
 
+    bool uses_multiple_segments() const { return uses_selective_arithmetic_coding_bypass() || uses_termination_on_each_coding_pass(); }
+
     // If has_explicit_precinct_size is false, this contains the default { 15, 15 } number_of_decomposition_levels + 1 times.
     // If has_explicit_precinct_size is true, this contains number_of_decomposition_levels + 1 explicit values stored in the COD marker segment.
     struct PrecinctSize {
@@ -1492,10 +1494,6 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
     auto const r = progression_data.resolution_level;
     u32 const current_layer_index = progression_data.layer;
 
-    // FIXME: Relax.
-    if (coding_parameters.uses_selective_arithmetic_coding_bypass())
-        return Error::from_string_literal("JPEG2000ImageDecoderPlugin: Selective arithmetic coding bypass not yet implemented");
-
     // B.10 Packet header information coding
     // "The packets have headers with the following information:
     // - zero length packet;
@@ -1651,9 +1649,19 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
             if (coding_parameters.uses_termination_on_each_coding_pass()) {
                 // See Table D.8 – Arithmetic coder termination patterns, 2nd column.
                 number_of_segments = number_of_coding_passes;
-            } else {
-                // FIXME: Handle uses_selective_arithmetic_coding_bypass(), and the combination of the two.
-                // (We currently reject uses_selective_arithmetic_coding_bypass() above.)
+            } else if (coding_parameters.uses_selective_arithmetic_coding_bypass()) {
+                // D.6 Selective arithmetic coding bypass
+                // Table D.9 – Selective arithmetic coding bypass
+                // The first 4 bitplanes == 10 passes use arithmetic coding with a single termination, i.e. a single segment.
+                // After that, significance propagation and magnitude refinement share a segment, and cleanup has its own --
+                // that is, 2 segments for every 3 passes.
+                if (number_of_coding_passes > 10) {
+                    VERIFY((number_of_coding_passes - 10) % 3 == 0);
+                    number_of_segments += 2 * (number_of_coding_passes - 10) / 3;
+                }
+                // "If termination on each coding pass is selected (see A.6.1 and A.6.2), then every pass is
+                //  terminated (including both raw passes)."
+                // This is handled by putting this in the else.
             }
 
             // B.10.7.1 Single codeword segment
@@ -1696,8 +1704,20 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 // number of passes per segment, apparently.
                 // We currently only implement termination on each pass and not yet selective arithmetic coding bypass, so K
                 // is just number_of_segments == number_of_coding_passes.
+                // XXX needs adjusting for selective arithmetic coding bypass with layers
                 for (int i = 0; i < number_of_segments; ++i) {
-                    u32 length = TRY(read_one_codeword_segment_length(1));
+                    int number_of_passes_in_segment = 1;
+                    if (coding_parameters.uses_selective_arithmetic_coding_bypass() && !coding_parameters.uses_termination_on_each_coding_pass()) {
+                        // Table D.9 – Selective arithmetic coding bypass
+                        // 10, 2, 1, 2, 1, 2, 1, ...
+                        // XXX needs tweaking for layers
+                        if (i == 0) {
+                            number_of_passes_in_segment = 10;
+                        } else if (i % 2 == 1) {
+                            number_of_passes_in_segment = 2;
+                        }
+                    }
+                    u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
                     dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
                     temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
                 }
@@ -1734,7 +1754,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 offset += length;
                 TRY(layer.segments.try_append(segment_data));
             }
-            if (!coding_parameters.uses_termination_on_each_coding_pass()) {
+            if (!coding_parameters.uses_multiple_segments()) {
                 if (layer.segments.is_empty())
                     layer.segments.append(data.slice(offset, 0));
                 VERIFY(layer.segments.size() == 1);
@@ -1871,6 +1891,7 @@ static ErrorOr<void> decode_bitplanes_to_coefficients(JPEG2000LoadingContext& co
 
         auto const& coding_style = context.coding_style_parameters_for_component(tile, component_index);
         JPEG2000::BitplaneDecodingOptions bitplane_decoding_options;
+        bitplane_decoding_options.uses_selective_arithmetic_coding_bypass = coding_style.uses_selective_arithmetic_coding_bypass();
         bitplane_decoding_options.reset_context_probabilities_each_pass = coding_style.reset_context_probabilities();
         bitplane_decoding_options.uses_termination_on_each_coding_pass = coding_style.uses_termination_on_each_coding_pass();
         bitplane_decoding_options.uses_vertically_causal_context = coding_style.uses_vertically_causal_context();

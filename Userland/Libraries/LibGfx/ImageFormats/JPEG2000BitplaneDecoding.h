@@ -14,6 +14,7 @@
 namespace Gfx::JPEG2000 {
 
 struct BitplaneDecodingOptions {
+    bool uses_selective_arithmetic_coding_bypass { false };
     bool reset_context_probabilities_each_pass { false };
     bool uses_termination_on_each_coding_pass { false };
     bool uses_vertically_causal_context { false };
@@ -33,7 +34,7 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
 
     if (options.uses_termination_on_each_coding_pass)
         VERIFY(segments.size() == static_cast<size_t>(number_of_coding_passes));
-    else
+    else if (!options.uses_selective_arithmetic_coding_bypass)
         VERIFY(segments.size() == 1);
 
     if (number_of_coding_passes == 0)
