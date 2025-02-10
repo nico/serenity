@@ -701,9 +701,10 @@ struct DecodedCodeBlock {
         return total;
     }
 
-    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(bool uses_termination_on_each_coding_pass, ByteBuffer& maybe_storage) const
+    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(bool uses_multiple_segments, ByteBuffer& maybe_storage) const
     {
-        if (uses_termination_on_each_coding_pass) {
+        if (uses_multiple_segments) {
+            // XXX needs tweaking for selective arithmetic coding bypass w multiple layers
             Vector<ReadonlyBytes, 1> all_segments;
             for (auto const& layer : layers)
                 TRY(all_segments.try_extend(layer.segments));
@@ -1692,6 +1693,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
 
             VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.is_empty());
             if (number_of_segments == 1) {
+                // Note: This can happen even for multiple segments if this codeblock happens to contain just a single segment.
                 u32 length = TRY(read_one_codeword_segment_length(number_of_coding_passes));
                 dbgln_if(JPEG2000_DEBUG, "length {}", length);
                 temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
@@ -1909,7 +1911,7 @@ static ErrorOr<void> decode_bitplanes_to_coefficients(JPEG2000LoadingContext& co
             for (auto& code_block : precinct.code_blocks) {
                 int total_number_of_coding_passes = code_block.number_of_coding_passes();
                 ByteBuffer storage;
-                Vector<ReadonlyBytes, 1> combined_segments = TRY(code_block.segments_for_all_layers(coding_style.uses_termination_on_each_coding_pass(), storage));
+                Vector<ReadonlyBytes, 1> combined_segments = TRY(code_block.segments_for_all_layers(coding_style.uses_multiple_segments(), storage));
 
                 JPEG2000::Span2D<i16> output;
                 output.size = code_block.rect.size();

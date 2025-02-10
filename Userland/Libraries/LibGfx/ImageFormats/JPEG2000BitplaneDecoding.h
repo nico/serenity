@@ -34,7 +34,14 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
 
     if (options.uses_termination_on_each_coding_pass)
         VERIFY(segments.size() == static_cast<size_t>(number_of_coding_passes));
-    else if (!options.uses_selective_arithmetic_coding_bypass)
+    else if (options.uses_selective_arithmetic_coding_bypass) {
+        if (number_of_coding_passes <= 10)
+            VERIFY(segments.size() == 1);
+        else {
+            VERIFY((number_of_coding_passes - 10) % 3 == 0);
+            VERIFY(2 * (number_of_coding_passes - 10u) / 3 + 1 == segments.size());
+        }
+    } else
         VERIFY(segments.size() == 1);
 
     if (number_of_coding_passes == 0)
@@ -87,6 +94,29 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
         all_other_contexts[0] = { 4, 0 }; // "All zero neighbours"
     };
     reset_contexts();
+
+    // Add raw decoder state for bypass mode, tracking current segment
+    size_t current_raw_byte_index = 0;
+    u8 current_raw_bit_position = 0;
+    int current_raw_segment = 1;
+    bool use_bypass = false;
+
+    auto read_raw_bit = [&]() -> bool {
+        // Check if we need to skip a stuffed bit
+        if (current_raw_bit_position == 0 && current_raw_byte_index > 0 &&
+            segments[current_raw_segment][current_raw_byte_index - 1] == 0xFF) {
+            // Skip the stuffed bit (which must be 0) XXX :thonk:
+            current_raw_bit_position = 1;
+        }
+
+        bool bit = (segments[current_raw_segment][current_raw_byte_index] >> (7 - current_raw_bit_position)) & 1;
+        current_raw_bit_position++;
+        if (current_raw_bit_position == 8) {
+            current_raw_bit_position = 0;
+            current_raw_byte_index++;
+        }
+        return bit;
+    };
 
     // State setters and getters.
 
@@ -264,6 +294,9 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
     };
 
     auto read_sign_bit = [&](int x, int y, int y_horizon) {
+        if (use_bypass)
+            return read_raw_bit();
+
         // C2, Decode sign bit of current coefficient
         // Sign bit
         // D.3.2 Sign bit decoding
@@ -305,7 +338,12 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
                         u8 context = compute_context(x, y + coefficient_index, y + 4);
                         if (context != 0) {
                             // C1, Decode significance bit of current coefficient (See D.3.1)
-                            bool is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+                            bool is_newly_significant;
+                            if (use_bypass)
+                                is_newly_significant = read_raw_bit();
+                            else
+                                is_newly_significant = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
+
                             set_significant(x, y + coefficient_index, is_newly_significant);
                             if (is_newly_significant) {
                                 became_significant_at_bitplane[(y + coefficient_index) * w + x] = current_bitplane;
@@ -342,18 +380,23 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
 
                     // D6, Was the coefficient coded in the last significance propagation?
                     if (became_significant_at_bitplane[(y + coefficient_index) * w + x] != current_bitplane) {
-                        // C3, Decode magnitude refinement pass bit of current coefficient
-                        // Table D.4 – Contexts for the magnitude refinement coding passes
-                        u8 context;
-                        if (became_significant_at_bitplane[(y + coefficient_index) * w + x] == current_bitplane - 1) {
-                            u8 sum_h = is_significant(x - 1, y + coefficient_index) + is_significant(x + 1, y + coefficient_index);
-                            u8 sum_v = is_significant(x, y + coefficient_index - 1) + is_significant_with_y_horizon(x, y + coefficient_index + 1, y + 4);
-                            u8 sum_d = is_significant(x - 1, y + coefficient_index - 1) + is_significant_with_y_horizon(x - 1, y + coefficient_index + 1, y + 4) + is_significant(x + 1, y + coefficient_index - 1) + is_significant_with_y_horizon(x + 1, y + coefficient_index + 1, y + 4);
-                            context = (sum_h + sum_v + sum_d) >= 1 ? 15 : 14;
+                        bool magnitude_bit;
+                        if (use_bypass) {
+                            magnitude_bit = read_raw_bit();
                         } else {
-                            context = 16;
+                            // C3, Decode magnitude refinement pass bit of current coefficient
+                            // Table D.4 – Contexts for the magnitude refinement coding passes
+                            u8 context;
+                            if (became_significant_at_bitplane[(y + coefficient_index) * w + x] == current_bitplane - 1) {
+                                u8 sum_h = is_significant(x - 1, y + coefficient_index) + is_significant(x + 1, y + coefficient_index);
+                                u8 sum_v = is_significant(x, y + coefficient_index - 1) + is_significant_with_y_horizon(x, y + coefficient_index + 1, y + 4);
+                                u8 sum_d = is_significant(x - 1, y + coefficient_index - 1) + is_significant_with_y_horizon(x - 1, y + coefficient_index + 1, y + 4) + is_significant(x + 1, y + coefficient_index - 1) + is_significant_with_y_horizon(x + 1, y + coefficient_index + 1, y + 4);
+                                context = (sum_h + sum_v + sum_d) >= 1 ? 15 : 14;
+                            } else {
+                                context = 16;
+                            }
+                            magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                         }
-                        bool magnitude_bit = arithmetic_decoder.get_next_bit(all_other_contexts[context]);
                         magnitudes[(y + coefficient_index) * w + x] |= magnitude_bit << (num_bits - current_bitplane);
                     }
 
@@ -492,11 +535,33 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
             break;
         }
 
+        if (options.uses_selective_arithmetic_coding_bypass && pass + 1 >= 10) {
+            use_bypass = (pass + 1 + 2) % 3 != 2;
+
+            if (options.uses_termination_on_each_coding_pass) {
+                if (pass + 1u < segments.size())
+                    current_raw_segment = pass + 1;
+            } else if ((pass + 2) % 3 == 1) {
+                size_t next_raw = 2 * ((pass - 10) / 3) + 3;
+                if (next_raw < segments.size()) {
+                    current_raw_segment = next_raw;
+                    current_raw_byte_index = 0;
+                    current_raw_bit_position = 0;
+                }
+
+                size_t next_arithmetic = next_raw - 1;
+                if (next_arithmetic < segments.size())
+                    arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[next_arithmetic]));
+            }
+        }
+
         if (options.reset_context_probabilities_each_pass)
             reset_contexts();
 
-        if (options.uses_termination_on_each_coding_pass && pass + 1 < number_of_coding_passes)
-            arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass + 1]));
+        if (options.uses_termination_on_each_coding_pass && pass + 1 < number_of_coding_passes) {
+            if (!options.uses_selective_arithmetic_coding_bypass || pass < 10 || (pass - 10 + 2) % 3 == 2)
+                arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass + 1]));
+        }
     }
 
     // Convert internal state to output.
