@@ -105,7 +105,7 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
         // Check if we need to skip a stuffed bit
         if (current_raw_bit_position == 0 && current_raw_byte_index > 0 &&
             segments[current_raw_segment][current_raw_byte_index - 1] == 0xFF) {
-            // Skip the stuffed bit (which must be 0) XXX :thonk:
+            // Skip the stuffed bit (which must be 0) XXX comment
             current_raw_bit_position = 1;
         }
 
