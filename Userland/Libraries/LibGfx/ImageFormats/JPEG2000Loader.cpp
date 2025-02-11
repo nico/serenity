@@ -1693,7 +1693,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
 
             VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.is_empty());
             if (number_of_segments == 1) {
-                // Note: This can happen even for multiple segments if this codeblock happens to contain just a single segment.
+                // Note: This can happen even for multiple segments if this codeblock happens to contain just a single segment (with bypass).
                 u32 length = TRY(read_one_codeword_segment_length(number_of_coding_passes));
                 dbgln_if(JPEG2000_DEBUG, "length {}", length);
                 temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
