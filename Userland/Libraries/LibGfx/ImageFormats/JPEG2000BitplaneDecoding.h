@@ -558,13 +558,13 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
             }
         }
 
-        if (options.reset_context_probabilities_each_pass)
-            reset_contexts();
-
         if (options.uses_termination_on_each_coding_pass && pass + 1 < number_of_coding_passes) {
             if (!options.uses_selective_arithmetic_coding_bypass || pass < 10 || (pass + 1 + 2) % 3 == 2)
                 arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass + 1]));
         }
+
+        if (options.reset_context_probabilities_each_pass)
+            reset_contexts();
     }
 
     // Convert internal state to output.
