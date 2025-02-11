@@ -539,8 +539,11 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
             use_bypass = (pass + 1 + 2) % 3 != 2;
 
             if (options.uses_termination_on_each_coding_pass) {
-                if (pass + 1u < segments.size())
+                if (pass + 1u < segments.size()) {
                     current_raw_segment = pass + 1;
+                    current_raw_byte_index = 0;
+                    current_raw_bit_position = 0;
+                }
             } else if ((pass + 2) % 3 == 1) {
                 size_t next_raw = 2 * ((pass - 10) / 3) + 3;
                 if (next_raw < segments.size()) {
@@ -559,7 +562,7 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
             reset_contexts();
 
         if (options.uses_termination_on_each_coding_pass && pass + 1 < number_of_coding_passes) {
-            if (!options.uses_selective_arithmetic_coding_bypass || pass < 10 || (pass - 10 + 2) % 3 == 2)
+            if (!options.uses_selective_arithmetic_coding_bypass || pass < 10 || (pass + 1 + 2) % 3 == 2)
                 arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass + 1]));
         }
     }
