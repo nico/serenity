@@ -1646,6 +1646,9 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
 
             // B.10.7 Length of the compressed image data from a given code-block
             // "Multiple codeword segments arise when a termination occurs between coding passes which are included in the packet"
+
+            u32 passes_from_previous_layers = precinct.code_blocks[code_block_index].number_of_coding_passes();
+
             int number_of_segments = 1;
             if (coding_parameters.uses_termination_on_each_coding_pass()) {
                 // See Table D.8 – Arithmetic coder termination patterns, 2nd column.
@@ -1656,9 +1659,21 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 // The first 4 bitplanes == 10 passes use arithmetic coding with a single termination, i.e. a single segment.
                 // After that, significance propagation and magnitude refinement share a segment, and cleanup has its own --
                 // that is, 2 segments for every 3 passes.
-                if (number_of_coding_passes > 10) {
-                    VERIFY((number_of_coding_passes - 10) % 3 == 0);
-                    number_of_segments += 2 * (number_of_coding_passes - 10) / 3;
+                if (passes_from_previous_layers + number_of_coding_passes > 10) {
+                    number_of_segments = 0;
+                    u32 threeple_count = number_of_coding_passes;
+
+                    // segment ends missing from previous layer
+                    if (passes_from_previous_layers < 10) {
+                        number_of_segments += 1;
+                        threeple_count -= min(10 - passes_from_previous_layers, threeple_count);
+                    } else if ((passes_from_previous_layers - 10) % 3 == 1) {
+                        number_of_segments += 1;
+                        threeple_count -= min(1, threeple_count);
+                    }
+
+                    // threeple_count is now how many passes are left after using the first few passes to fill up the missing passes in the last cb-segment in the previous layer.
+                    number_of_segments += 2 * (threeple_count / 3) + (threeple_count % 3 > 0);
                 }
                 // "If termination on each coding pass is selected (see A.6.1 and A.6.2), then every pass is
                 //  terminated (including both raw passes)."
@@ -1707,21 +1722,43 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 // We currently only implement termination on each pass and not yet selective arithmetic coding bypass, so K
                 // is just number_of_segments == number_of_coding_passes.
                 // XXX needs adjusting for selective arithmetic coding bypass with layers
+                int number_of_passes_used = 0;
                 for (int i = 0; i < number_of_segments; ++i) {
                     int number_of_passes_in_segment = 1;
+
                     if (coding_parameters.uses_selective_arithmetic_coding_bypass() && !coding_parameters.uses_termination_on_each_coding_pass()) {
+                        u32 segment_index = 0;
+                        if (passes_from_previous_layers >= 10)
+                            segment_index = 1 + 2 * ((passes_from_previous_layers - 10) / 3) + ((passes_from_previous_layers - 10) % 3 == 2 ? 1 : 0);
+
+                        u32 pending_passes = 0; // how many passes from previous layer are part of an as-of-yet incomplete segment
+                        if (segment_index == 0 && i == 0)
+                            pending_passes = passes_from_previous_layers;
+                        else if (segment_index % 2 == 1 && i == 0)
+                            pending_passes = (passes_from_previous_layers - 10) % 3;
+
                         // Table D.9 – Selective arithmetic coding bypass
                         // 10, 2, 1, 2, 1, 2, 1, ...
-                        // XXX needs tweaking for layers
-                        if (i == 0) {
-                            number_of_passes_in_segment = 10;
-                        } else if (i % 2 == 1) {
-                            number_of_passes_in_segment = 2;
+
+                        if (segment_index + i == 0)
+                            number_of_passes_in_segment = 10 - pending_passes;
+                        else if ((segment_index + i) % 2 == 1)
+                            number_of_passes_in_segment = 2 - pending_passes;
+
+                        if (current_layer_index == 1 && r == 4 && sub_band_index == 2 && code_block_index == 5) {
+                            // dbgln("segment_index: {} i: {} passes_from_previous_layers: {}, pending_passes: {} number_of_passes_in_segment: {}", segment_index, i, passes_from_previous_layers, pending_passes, number_of_passes_in_segment);
                         }
+
+                        if (i == number_of_segments - 1)
+                            number_of_passes_in_segment = min(number_of_coding_passes - number_of_passes_used, number_of_passes_in_segment);
+
                     }
                     u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
                     dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
                     temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
+                    // XXX also store number_of_passes_in_segment in the layer?
+                    number_of_passes_used += number_of_passes_in_segment;
+                    VERIFY(number_of_passes_used <= number_of_coding_passes);
                 }
             }
         }
