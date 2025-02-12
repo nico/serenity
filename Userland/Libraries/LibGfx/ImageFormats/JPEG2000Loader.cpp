@@ -701,14 +701,117 @@ struct DecodedCodeBlock {
         return total;
     }
 
-    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(bool uses_multiple_segments, ByteBuffer& maybe_storage) const
+    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(bool uses_selective_arithmetic_coding_bypass, bool uses_termination_on_each_coding_pass, ByteBuffer& maybe_storage) const
     {
-        if (uses_multiple_segments) {
-            // XXX needs tweaking for selective arithmetic coding bypass w multiple layers
+        if (uses_termination_on_each_coding_pass) {
             Vector<ReadonlyBytes, 1> all_segments;
             for (auto const& layer : layers)
                 TRY(all_segments.try_extend(layer.segments));
             return all_segments;
+        }
+
+        // dbgln("start");
+
+        if (uses_selective_arithmetic_coding_bypass) {
+            // Go through all layers, keep segments that are already complete, merge the partial ones into maybe_storage.
+            Vector<ReadonlyBytes, 1> all_segments;
+
+            // Find how many layers we need for the first 10 passes, which need to be in one segment.
+            int total_number_of_coding_passes_until_10 = 0;
+            int number_of_layers_for_first_10_passes = 0;
+            for (auto const& layer : layers) {
+                // dbgln("layer.number_of_coding_passes = {}", layer.number_of_coding_passes);
+                total_number_of_coding_passes_until_10 += layer.number_of_coding_passes;
+                ++number_of_layers_for_first_10_passes;
+                if (total_number_of_coding_passes_until_10 >= 10)
+                    break;
+            }
+            if (total_number_of_coding_passes_until_10 < 10) {
+                // data ends before filling the first 10. That's fine.
+                for (auto const& layer : layers) {
+                    if (!layer.segments.is_empty()) {
+                    // if (layer.number_of_coding_passes > 0) {
+                        VERIFY(layer.segments.size() == 1);
+                        TRY(all_segments.try_extend(layer.segments));
+                        return all_segments;
+                    }
+                }
+                VERIFY_NOT_REACHED();
+            }
+
+            size_t total_size = 0;
+            for (auto const& layer : layers)
+                for (auto const& segment : layer.segments)
+                    total_size += segment.size(); // XXX super overcount. (can't dynamically realloc since that invalidates old ReadonlyBytes we already added to all_segments)
+            maybe_storage = TRY(ByteBuffer::create_uninitialized(total_size));
+            int scratch_offset = 0;
+
+            if (number_of_layers_for_first_10_passes == 1) {
+                TRY(all_segments.try_append(layers[0].segments[0]));
+            } else {
+                // copy
+                int sum = 0;
+                for (int i = 0; i < number_of_layers_for_first_10_passes - 1; ++i) {
+                    if (layers[i].segments.is_empty())
+                        continue;
+                    VERIFY(layers[i].segments.size() == 1);
+                    memcpy(maybe_storage.offset_pointer(scratch_offset), layers[i].segments[0].data(), layers[i].segments[0].size());
+                    scratch_offset += layers[i].segments[0].size();
+                    sum += layers[i].number_of_coding_passes;
+                }
+
+                VERIFY(layers[number_of_layers_for_first_10_passes - 1].segments.size() >= 1);
+                memcpy(maybe_storage.offset_pointer(scratch_offset), layers[number_of_layers_for_first_10_passes - 1].segments[0].data(), layers[number_of_layers_for_first_10_passes - 1].segments[0].size());
+                scratch_offset += layers[number_of_layers_for_first_10_passes - 1].segments[0].size();
+                VERIFY(sum < 10);
+                VERIFY(sum + layers[number_of_layers_for_first_10_passes - 1].number_of_coding_passes >= 10);
+                TRY(all_segments.try_append(maybe_storage.bytes().slice(0, scratch_offset)));
+            }
+
+            int passes_available = total_number_of_coding_passes_until_10;
+            int passes_used = 10;
+            int current_layer = number_of_layers_for_first_10_passes - 1;
+            // int current_layer_segment = 1;
+            int current_segment = 1, current_segment_in_layer = 1;
+            for (; current_layer < (int)layers.size(); ++current_layer) {
+                while (passes_used < passes_available) {
+                    int passes_needed = current_segment % 2 == 1 ? 2 : 1;
+                    if (passes_available - passes_used >= passes_needed) {
+                        TRY(all_segments.try_append(layers[current_layer].segments[current_segment_in_layer]));
+                        ++current_segment;
+                        ++current_segment_in_layer;
+                        passes_used += passes_needed;
+                    } else {
+                        // TODO(); // XXX copy; combine with first segment in next layer
+                        VERIFY(current_layer + 1 < (int)layers.size());
+                        VERIFY(layers[current_layer + 1].segments.size() > 0);
+
+                        int start = scratch_offset;
+                        memcpy(maybe_storage.offset_pointer(scratch_offset), layers[current_layer].segments[current_segment_in_layer].data(), layers[current_layer].segments[current_segment_in_layer].size());
+                        scratch_offset += layers[current_layer].segments[current_segment_in_layer].size();
+                        memcpy(maybe_storage.offset_pointer(scratch_offset), layers[current_layer + 1].segments[0].data(), layers[current_layer + 1].segments[0].size());
+                        scratch_offset += layers[current_layer + 1].segments[0].size();
+
+                        TRY(all_segments.try_append(maybe_storage.bytes().slice(start, scratch_offset - start)));
+
+                        ++current_segment;
+                        current_segment_in_layer = 1;
+                        passes_available += layers[current_layer + 1].number_of_coding_passes;
+                        passes_used += passes_needed; // always 2
+                        goto yurch;
+                    }
+                }
+
+                VERIFY (passes_used == passes_available);
+                if (current_layer + 1 < (int)layers.size()) {
+                    passes_available += layers[current_layer + 1].number_of_coding_passes;
+                    current_segment_in_layer = 0;
+                    continue;
+                }
+yurch:
+            }
+            return all_segments;
+
         }
 
         size_t total_size = 0;
