@@ -720,23 +720,11 @@ struct DecodedCodeBlock {
             int total_number_of_coding_passes_until_10 = 0;
             int number_of_layers_for_first_10_passes = 0;
             for (auto const& layer : layers) {
-                // dbgln("layer.number_of_coding_passes = {}", layer.number_of_coding_passes);
+                // if (log) dbgln("layer.number_of_coding_passes = {}", layer.number_of_coding_passes);
                 total_number_of_coding_passes_until_10 += layer.number_of_coding_passes;
                 ++number_of_layers_for_first_10_passes;
                 if (total_number_of_coding_passes_until_10 >= 10)
                     break;
-            }
-            if (total_number_of_coding_passes_until_10 < 10) {
-                // data ends before filling the first 10. That's fine.
-                for (auto const& layer : layers) {
-                    if (!layer.segments.is_empty()) {
-                    // if (layer.number_of_coding_passes > 0) {
-                        VERIFY(layer.segments.size() == 1);
-                        TRY(all_segments.try_extend(layer.segments));
-                        return all_segments;
-                    }
-                }
-                VERIFY_NOT_REACHED();
             }
 
             size_t total_size = 0;
@@ -745,6 +733,20 @@ struct DecodedCodeBlock {
                     total_size += segment.size(); // XXX super overcount. (can't dynamically realloc since that invalidates old ReadonlyBytes we already added to all_segments)
             maybe_storage = TRY(ByteBuffer::create_uninitialized(total_size));
             int scratch_offset = 0;
+
+            if (total_number_of_coding_passes_until_10 < 10) {
+                // data ends before filling the first 10. That's fine.
+                // can also do this codepath if we have exactly 10...XXX or not? why does this assert then?
+                for (auto const& layer : layers) {
+                    if (!layer.segments.is_empty()) {
+                        VERIFY(layer.segments.size() == 1);
+                        memcpy(maybe_storage.offset_pointer(scratch_offset), layer.segments[0].data(), layer.segments[0].size());
+                        scratch_offset += layer.segments[0].size();
+                    }
+                }
+                TRY(all_segments.try_append(maybe_storage.bytes().slice(0, scratch_offset)));
+                return all_segments;
+            }
 
             if (number_of_layers_for_first_10_passes == 1) {
                 TRY(all_segments.try_append(layers[0].segments[0]));
