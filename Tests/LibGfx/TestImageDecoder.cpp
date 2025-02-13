@@ -716,6 +716,7 @@ TEST_CASE(test_jpeg2000_decode)
     };
 
     for (auto test_input : test_inputs) {
+        dbgln("Testing {}", test_input);
         auto file = TRY_OR_FAIL(Core::MappedFile::map(test_input));
         EXPECT(Gfx::JPEG2000ImageDecoderPlugin::sniff(file->bytes()));
         auto plugin_decoder = TRY_OR_FAIL(Gfx::JPEG2000ImageDecoderPlugin::create(file->bytes()));

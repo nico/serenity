@@ -710,8 +710,11 @@ struct DecodedCodeBlock {
             return all_segments;
         }
 
-        // dbgln("start");
+        // if (log) dbgln("start");
 
+        // for (auto const& layer : layers) {
+            // if (log) dbgln("layer.number_of_coding_passes = {}", layer.number_of_coding_passes);
+        // }
         if (uses_selective_arithmetic_coding_bypass) {
             // Go through all layers, keep segments that are already complete, merge the partial ones into maybe_storage.
             Vector<ReadonlyBytes, 1> all_segments;
@@ -1816,6 +1819,9 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 // Note: This can happen even for multiple segments if this codeblock happens to contain just a single segment (with bypass).
                 u32 length = TRY(read_one_codeword_segment_length(number_of_coding_passes));
                 dbgln_if(JPEG2000_DEBUG, "length {}", length);
+
+                // dbgln("c {} layer {} res {} band {} block {} length({}) passes: {} bytes: {}", progression_data.component, current_layer_index, r, sub_band_index, code_block_index, 0, number_of_coding_passes, length);
+
                 temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
             } else {
                 // B.10.7.2 Multiple codeword segments
@@ -1860,6 +1866,9 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                     }
                     u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
                     dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
+
+                    // dbgln("c {} layer {} res {} band {} block {} length({}) passes: {} bytes: {}", progression_data.component, current_layer_index, r, sub_band_index, code_block_index, i, number_of_passes_in_segment, length);
+
                     temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
                     // XXX also store number_of_passes_in_segment in the layer?
                     number_of_passes_used += number_of_passes_in_segment;
@@ -2050,10 +2059,11 @@ static ErrorOr<void> decode_bitplanes_to_coefficients(JPEG2000LoadingContext& co
             auto clipped_precinct_rect = precinct.rect.intersected(sub_band.rect);
             precinct_coefficients.resize(clipped_precinct_rect.width() * clipped_precinct_rect.height());
 
-            for (auto& code_block : precinct.code_blocks) {
+            for (auto const& [code_block_index, code_block] : enumerate(precinct.code_blocks)) {
                 int total_number_of_coding_passes = code_block.number_of_coding_passes();
                 ByteBuffer storage;
-                Vector<ReadonlyBytes, 1> combined_segments = TRY(code_block.segments_for_all_layers(coding_style.uses_multiple_segments(), storage));
+                if (component_index == 3) dbgln("res {} band {} block {}", r, (int)sub_band_type, code_block_index);
+                Vector<ReadonlyBytes, 1> combined_segments = TRY(code_block.segments_for_all_layers(coding_style.uses_selective_arithmetic_coding_bypass(), coding_style.uses_termination_on_each_coding_pass(), storage));
 
                 JPEG2000::Span2D<i16> output;
                 output.size = code_block.rect.size();
