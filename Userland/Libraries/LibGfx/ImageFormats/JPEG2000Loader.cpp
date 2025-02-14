@@ -1826,9 +1826,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                     int number_of_passes_in_segment = 1;
 
                     if (coding_parameters.uses_selective_arithmetic_coding_bypass() && !coding_parameters.uses_termination_on_each_coding_pass()) {
-                        u32 segment_index = 0;
-                        if (passes_from_previous_layers >= 10)
-                            segment_index = 1 + 2 * ((passes_from_previous_layers - 10) / 3) + ((passes_from_previous_layers - 10) % 3 == 2 ? 1 : 0);
+                        u32 segment_index = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
 
                         u32 pending_passes = 0; // how many passes from previous layer are part of an as-of-yet incomplete segment
                         if (segment_index == 0 && i == 0)

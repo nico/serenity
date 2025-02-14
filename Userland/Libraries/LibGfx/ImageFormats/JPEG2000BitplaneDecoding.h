@@ -21,6 +21,23 @@ struct BitplaneDecodingOptions {
     bool uses_segmentation_symbols { false };
 };
 
+inline auto segment_index_from_pass_index_in_bypass_mode(unsigned pass)
+{
+    if (pass < 10)
+        return 0u;
+    // After the first 10 passes, this mode alternates between 1 segment for 2 passes and 1 segment for 1 pass.
+    return 1u + (2u * ((pass - 10) / 3u)) + (((pass - 10) % 3u) == 2u ? 1 : 0);
+}
+
+inline auto segment_index_from_pass_index(BitplaneDecodingOptions options, unsigned pass)
+{
+    if (options.uses_termination_on_each_coding_pass)
+        return pass;
+    if (options.uses_selective_arithmetic_coding_bypass)
+        return segment_index_from_pass_index_in_bypass_mode(pass);
+    return 0u;
+}
+
 inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int number_of_coding_passes, Vector<ReadonlyBytes, 1> segments, int M_b, int p, BitplaneDecodingOptions options = {})
 {
     // This is an implementation of the bitplane decoding algorithm described in Annex D of the JPEG2000 spec.
@@ -32,20 +49,10 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
     int const h = result.size.height();
     int const num_strips = ceil_div(h, 4);
 
-    if (options.uses_termination_on_each_coding_pass)
-        VERIFY(segments.size() == static_cast<size_t>(number_of_coding_passes));
-    else if (options.uses_selective_arithmetic_coding_bypass) {
-        if (number_of_coding_passes <= 10)
-            VERIFY(segments.size() == 1);
-        else {
-            VERIFY((number_of_coding_passes - 10) % 3 == 0);
-            VERIFY(2 * (number_of_coding_passes - 10u) / 3 + 1 == segments.size());
-        }
-    } else
-        VERIFY(segments.size() == 1);
-
     if (number_of_coding_passes == 0)
         return {};
+
+    VERIFY(segment_index_from_pass_index(options, number_of_coding_passes - 1) == segments.size() - 1);
 
     // Decoder state.
 
@@ -554,7 +561,7 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
                 arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass + 1]));
             }
         } else if (options.uses_selective_arithmetic_coding_bypass && pass + 1 >= 10 && pass_type(pass) == Pass::MagnitudeRefinement) {
-            size_t next_raw = 2 * ((pass - 10) / 3) + 3;
+            size_t next_raw = segment_index_from_pass_index_in_bypass_mode(pass + 2);
             if (next_raw < segments.size()) {
                 current_raw_segment = next_raw;
                 current_raw_byte_index = 0;
