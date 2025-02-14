@@ -528,11 +528,10 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
             SignificancePropagation,
             MagnitudeRefinement,
             Cleanup,
-        };
-        auto pass_type = [](int pass) { return static_cast<Pass>((pass + 2) % 3); };
+        } pass_type = static_cast<Pass>((pass + 2) % 3);
 
         if (options.uses_selective_arithmetic_coding_bypass)
-            use_bypass = pass >= 10 && pass_type(pass) != Pass::Cleanup;
+            use_bypass = pass >= 10 && pass_type != Pass::Cleanup;
 
         if (options.uses_termination_on_each_coding_pass) {
             if (options.uses_selective_arithmetic_coding_bypass && use_bypass) {
@@ -543,17 +542,17 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
                 arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass]));
             }
         } else if (options.uses_selective_arithmetic_coding_bypass && pass >= 10) {
-            if (pass_type(pass) == Pass::SignificancePropagation) {
+            if (pass_type == Pass::SignificancePropagation) {
                 current_raw_segment = segment_index_from_pass_index_in_bypass_mode(pass);
                 current_raw_byte_index = 0;
                 current_raw_bit_position = 0;
-            } else if (pass_type(pass) == Pass::Cleanup) {
+            } else if (pass_type == Pass::Cleanup) {
                 arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[segment_index_from_pass_index_in_bypass_mode(pass)]));
             }
         }
 
         // D0, Is this the first bit-plane for the code-block?
-        switch (pass_type(pass)) {
+        switch (pass_type) {
         case Pass::SignificancePropagation:
             significance_propagation_pass(current_bitplane, pass);
             break;
