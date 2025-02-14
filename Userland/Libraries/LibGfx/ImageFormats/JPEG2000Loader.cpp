@@ -689,6 +689,7 @@ struct DecodedCodeBlock {
 
     struct Layer {
         Vector<ReadonlyBytes, 1> segments;
+        Vector<u32, 1> segment_ids;
         u8 number_of_coding_passes { 0 };
     };
     Vector<Layer, 1> layers;
@@ -701,128 +702,50 @@ struct DecodedCodeBlock {
         return total;
     }
 
-    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(bool uses_selective_arithmetic_coding_bypass, bool uses_termination_on_each_coding_pass, ByteBuffer& maybe_storage) const
+    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(ByteBuffer& maybe_storage) const
     {
-        if (uses_termination_on_each_coding_pass) {
-            Vector<ReadonlyBytes, 1> all_segments;
-            for (auto const& layer : layers)
-                TRY(all_segments.try_extend(layer.segments));
-            return all_segments;
-        }
-
-        if (uses_selective_arithmetic_coding_bypass) {
-            // Go through all layers, keep segments that are already complete, merge the partial ones into maybe_storage.
-            Vector<ReadonlyBytes, 1> all_segments;
-
-            // Find how many layers we need for the first 10 passes, which need to be in one segment.
-            int total_number_of_coding_passes_until_10 = 0;
-            int number_of_layers_for_first_10_passes = 0;
-            for (auto const& layer : layers) {
-                total_number_of_coding_passes_until_10 += layer.number_of_coding_passes;
-                ++number_of_layers_for_first_10_passes;
-                if (total_number_of_coding_passes_until_10 >= 10)
-                    break;
-            }
-
-            size_t total_size = 0;
-            for (auto const& layer : layers)
-                for (auto const& segment : layer.segments)
-                    total_size += segment.size(); // XXX super overcount. (can't dynamically realloc since that invalidates old ReadonlyBytes we already added to all_segments)
-            maybe_storage = TRY(ByteBuffer::create_uninitialized(total_size));
-            int scratch_offset = 0;
-
-            if (total_number_of_coding_passes_until_10 < 10) {
-                // data ends before filling the first 10. That's fine.
-                // can also do this codepath if we have exactly 10...XXX or not? why does this assert then?
-                for (auto const& layer : layers) {
-                    if (!layer.segments.is_empty()) {
-                        VERIFY(layer.segments.size() == 1);
-                        memcpy(maybe_storage.offset_pointer(scratch_offset), layer.segments[0].data(), layer.segments[0].size());
-                        scratch_offset += layer.segments[0].size();
-                    }
-                }
-                TRY(all_segments.try_append(maybe_storage.bytes().slice(0, scratch_offset)));
-                return all_segments;
-            }
-
-            if (number_of_layers_for_first_10_passes == 1) {
-                TRY(all_segments.try_append(layers[0].segments[0]));
-            } else {
-                // copy
-                int sum = 0;
-                for (int i = 0; i < number_of_layers_for_first_10_passes - 1; ++i) {
-                    if (layers[i].segments.is_empty())
-                        continue;
-                    VERIFY(layers[i].segments.size() == 1);
-                    memcpy(maybe_storage.offset_pointer(scratch_offset), layers[i].segments[0].data(), layers[i].segments[0].size());
-                    scratch_offset += layers[i].segments[0].size();
-                    sum += layers[i].number_of_coding_passes;
-                }
-
-                VERIFY(layers[number_of_layers_for_first_10_passes - 1].segments.size() >= 1);
-                memcpy(maybe_storage.offset_pointer(scratch_offset), layers[number_of_layers_for_first_10_passes - 1].segments[0].data(), layers[number_of_layers_for_first_10_passes - 1].segments[0].size());
-                scratch_offset += layers[number_of_layers_for_first_10_passes - 1].segments[0].size();
-                VERIFY(sum < 10);
-                VERIFY(sum + layers[number_of_layers_for_first_10_passes - 1].number_of_coding_passes >= 10);
-                TRY(all_segments.try_append(maybe_storage.bytes().slice(0, scratch_offset)));
-            }
-
-            int passes_available = total_number_of_coding_passes_until_10;
-            int passes_used = 10;
-            int current_layer = number_of_layers_for_first_10_passes - 1;
-            // int current_layer_segment = 1;
-            int current_segment = 1, current_segment_in_layer = 1;
-            for (; current_layer < (int)layers.size(); ++current_layer) {
-                while (passes_used < passes_available) {
-                    int passes_needed = current_segment % 2 == 1 ? 2 : 1;
-                    if (passes_available - passes_used >= passes_needed) {
-                        TRY(all_segments.try_append(layers[current_layer].segments[current_segment_in_layer]));
-                        ++current_segment;
-                        ++current_segment_in_layer;
-                        passes_used += passes_needed;
-                    } else {
-                        // TODO(); // XXX copy; combine with first segment in next layer
-                        VERIFY(current_layer + 1 < (int)layers.size());
-                        VERIFY(layers[current_layer + 1].segments.size() > 0);
-
-                        int start = scratch_offset;
-                        memcpy(maybe_storage.offset_pointer(scratch_offset), layers[current_layer].segments[current_segment_in_layer].data(), layers[current_layer].segments[current_segment_in_layer].size());
-                        scratch_offset += layers[current_layer].segments[current_segment_in_layer].size();
-                        memcpy(maybe_storage.offset_pointer(scratch_offset), layers[current_layer + 1].segments[0].data(), layers[current_layer + 1].segments[0].size());
-                        scratch_offset += layers[current_layer + 1].segments[0].size();
-
-                        TRY(all_segments.try_append(maybe_storage.bytes().slice(start, scratch_offset - start)));
-
-                        ++current_segment;
-                        current_segment_in_layer = 1;
-                        passes_available += layers[current_layer + 1].number_of_coding_passes;
-                        passes_used += passes_needed; // always 2
-                        goto yurch;
-                    }
-                }
-
-                VERIFY(passes_used == passes_available);
-                if (current_layer + 1 < (int)layers.size()) {
-                    passes_available += layers[current_layer + 1].number_of_coding_passes;
-                    current_segment_in_layer = 0;
-                    continue;
-                }
-            yurch:
-            }
-            return all_segments;
-        }
-
-        size_t total_size = 0;
-        for (auto const& layer : layers)
-            total_size += layer.segments[0].size();
-
-        maybe_storage = TRY(ByteBuffer::create_uninitialized(total_size));
-        size_t offset = 0;
+        u32 highest_segment_id = 0;
         for (auto const& layer : layers) {
-            memcpy(maybe_storage.offset_pointer(offset), layer.segments[0].data(), layer.segments[0].size());
-            offset += layer.segments[0].size();
+            VERIFY(layer.segments.size() == layer.segment_ids.size());
+            for (auto segment_id : layer.segment_ids)
+                highest_segment_id = max(highest_segment_id, segment_id);
         }
-        return Vector<ReadonlyBytes, 1> { maybe_storage };
+
+        Vector<Vector<ReadonlyBytes, 1>, 1> all_segment_parts_for_segment;
+        all_segment_parts_for_segment.resize(highest_segment_id + 1);
+
+        for (auto const& layer : layers)
+            for (size_t i = 0; i < layer.segments.size(); ++i)
+                TRY(all_segment_parts_for_segment[layer.segment_ids[i]].try_append(layer.segments[i]));
+
+        // Copy segments with multiple parts into consecutive storage.
+        size_t total_scratch_size = 0;
+        for (auto const& segment_parts : all_segment_parts_for_segment) {
+            if (segment_parts.size() > 1) {
+                for (auto const& segment_part : segment_parts)
+                    total_scratch_size += segment_part.size();
+            }
+        }
+
+        if (total_scratch_size > 0)
+            maybe_storage = TRY(ByteBuffer::create_uninitialized(total_scratch_size));
+
+        Vector<ReadonlyBytes, 1> all_segments;
+        size_t scratch_offset = 0;
+        for (auto& segment_parts : all_segment_parts_for_segment) {
+            if (segment_parts.size() == 1) {
+                TRY(all_segments.try_append(segment_parts[0]));
+                continue;
+            }
+
+            auto start = scratch_offset;
+            for (auto const& segment_part : segment_parts) {
+                memcpy(maybe_storage.offset_pointer(scratch_offset), segment_part.data(), segment_part.size());
+                scratch_offset += segment_part.size();
+            }
+            TRY(all_segments.try_append(maybe_storage.bytes().slice(start, scratch_offset - start)));
+        }
+        return all_segments;
     }
 };
 
@@ -1653,6 +1576,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
     struct TemporaryCodeBlockData {
         u8 number_of_coding_passes { 0 };
         Vector<u32, 1> length_of_codeword_segments;
+        Vector<u32, 1> index_of_codeword_segments;
     };
     struct TemporarySubBandData {
         DecodedPrecinct* precinct { nullptr };
@@ -1750,10 +1674,10 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
 
             u32 passes_from_previous_layers = precinct.code_blocks[code_block_index].number_of_coding_passes();
 
+            JPEG2000::BitplaneDecodingOptions options;
+            options.uses_termination_on_each_coding_pass = coding_parameters.uses_termination_on_each_coding_pass();
+            options.uses_selective_arithmetic_coding_bypass = coding_parameters.uses_selective_arithmetic_coding_bypass();
             int number_of_segments = [&]() {
-                JPEG2000::BitplaneDecodingOptions options;
-                options.uses_termination_on_each_coding_pass = coding_parameters.uses_termination_on_each_coding_pass();
-                options.uses_selective_arithmetic_coding_bypass = coding_parameters.uses_selective_arithmetic_coding_bypass();
                 auto old_segment_index = passes_from_previous_layers == 0 ? 0 : JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers - 1);
                 auto new_segment_index = JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers + number_of_coding_passes - 1);
                 auto number_of_segments = new_segment_index - old_segment_index;
@@ -1792,11 +1716,13 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
             };
 
             VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.is_empty());
+            VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.is_empty());
             if (number_of_segments == 1) {
                 // Note: This can happen even for multiple segments if this codeblock happens to contain just a single segment (with bypass).
                 u32 length = TRY(read_one_codeword_segment_length(number_of_coding_passes));
                 dbgln_if(JPEG2000_DEBUG, "length {}", length);
                 temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
+                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.append(JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers));
             } else {
                 // B.10.7.2 Multiple codeword segments
                 // "Let T be the set of indices of terminated coding passes included for the code-block in the packet as indicated in Tables D.8
@@ -1808,22 +1734,26 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 int number_of_passes_used = 0;
                 for (int i = 0; i < number_of_segments; ++i) {
                     int number_of_passes_in_segment = 1;
+                    u32 segment_index = 0;
 
-                    if (coding_parameters.uses_selective_arithmetic_coding_bypass() && !coding_parameters.uses_termination_on_each_coding_pass()) {
-                        u32 segment_index = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
+                    if (coding_parameters.uses_termination_on_each_coding_pass()) {
+                        segment_index = passes_from_previous_layers + i;
+                    } else if (coding_parameters.uses_selective_arithmetic_coding_bypass()) {
+                        u32 index_of_first_segment_in_layer = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
+                        segment_index = index_of_first_segment_in_layer + i;
 
                         u32 pending_passes = 0; // how many passes from previous layer are part of an as-of-yet incomplete segment
-                        if (segment_index == 0 && i == 0)
+                        if (index_of_first_segment_in_layer == 0 && i == 0)
                             pending_passes = passes_from_previous_layers;
-                        else if (segment_index % 2 == 1 && i == 0)
+                        else if (index_of_first_segment_in_layer % 2 == 1 && i == 0)
                             pending_passes = (passes_from_previous_layers - 10) % 3;
 
                         // Table D.9 – Selective arithmetic coding bypass
                         // 10, 2, 1, 2, 1, 2, 1, ...
 
-                        if (segment_index + i == 0)
+                        if (segment_index == 0)
                             number_of_passes_in_segment = 10 - pending_passes;
-                        else if ((segment_index + i) % 2 == 1)
+                        else if (segment_index % 2 == 1)
                             number_of_passes_in_segment = 2 - pending_passes;
 
                         if (i == number_of_segments - 1)
@@ -1832,10 +1762,12 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                     u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
                     dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
                     temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
+                    temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.append(segment_index);
                     // XXX also store number_of_passes_in_segment in the layer?
                     number_of_passes_used += number_of_passes_in_segment;
                     VERIFY(number_of_passes_used <= number_of_coding_passes);
                 }
+                VERIFY(number_of_passes_used == number_of_coding_passes);
             }
         }
     }
@@ -1864,15 +1796,21 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
         for (auto const& [code_block_index, temporary_code_block] : enumerate(temporary_sub_band.temporary_code_block_data)) {
             DecodedCodeBlock::Layer layer;
             layer.number_of_coding_passes = temporary_code_block.number_of_coding_passes;
-            for (u32 length : temporary_code_block.length_of_codeword_segments) {
+            VERIFY(temporary_code_block.length_of_codeword_segments.size() == temporary_code_block.index_of_codeword_segments.size());
+            for (size_t i = 0; i < temporary_code_block.length_of_codeword_segments.size(); ++i) {
+                u32 length = temporary_code_block.length_of_codeword_segments[i];
                 auto segment_data = data.slice(offset, length);
                 offset += length;
                 TRY(layer.segments.try_append(segment_data));
+                layer.segment_ids.append(temporary_code_block.index_of_codeword_segments[i]);
             }
             if (!coding_parameters.uses_multiple_segments()) {
-                if (layer.segments.is_empty())
+                if (layer.segments.is_empty()) {
                     layer.segments.append(data.slice(offset, 0));
+                    layer.segment_ids.append(0);
+                }
                 VERIFY(layer.segments.size() == 1);
+                VERIFY(layer.segment_ids.size() == 1);
             }
             TRY(temporary_sub_band.precinct->code_blocks[code_block_index].layers.try_append(layer));
         }
@@ -2024,7 +1962,7 @@ static ErrorOr<void> decode_bitplanes_to_coefficients(JPEG2000LoadingContext& co
             for (auto& code_block : precinct.code_blocks) {
                 int total_number_of_coding_passes = code_block.number_of_coding_passes();
                 ByteBuffer storage;
-                Vector<ReadonlyBytes, 1> combined_segments = TRY(code_block.segments_for_all_layers(coding_style.uses_selective_arithmetic_coding_bypass(), coding_style.uses_termination_on_each_coding_pass(), storage));
+                Vector<ReadonlyBytes, 1> combined_segments = TRY(code_block.segments_for_all_layers(storage));
 
                 JPEG2000::Span2D<i16> output;
                 output.size = code_block.rect.size();
