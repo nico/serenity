@@ -531,6 +531,27 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
         };
         auto pass_type = [](int pass) { return static_cast<Pass>((pass + 2) % 3); };
 
+        if (options.uses_selective_arithmetic_coding_bypass)
+            use_bypass = pass >= 10 && pass_type(pass) != Pass::Cleanup;
+
+        if (options.uses_termination_on_each_coding_pass) {
+            if (options.uses_selective_arithmetic_coding_bypass && use_bypass) {
+                current_raw_segment = pass;
+                current_raw_byte_index = 0;
+                current_raw_bit_position = 0;
+            } else {
+                arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass]));
+            }
+        } else if (options.uses_selective_arithmetic_coding_bypass && pass >= 10) {
+            if (pass_type(pass) == Pass::SignificancePropagation) {
+                current_raw_segment = segment_index_from_pass_index_in_bypass_mode(pass);
+                current_raw_byte_index = 0;
+                current_raw_bit_position = 0;
+            } else if (pass_type(pass) == Pass::Cleanup) {
+                arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[segment_index_from_pass_index_in_bypass_mode(pass)]));
+            }
+        }
+
         // D0, Is this the first bit-plane for the code-block?
         switch (pass_type(pass)) {
         case Pass::SignificancePropagation:
@@ -554,30 +575,6 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
 
             ++current_bitplane;
             break;
-        }
-
-        if (options.uses_selective_arithmetic_coding_bypass)
-            use_bypass = pass + 1 >= 10 && pass_type(pass + 1) != Pass::Cleanup;
-
-        if (options.uses_termination_on_each_coding_pass && pass + 1 < number_of_coding_passes) {
-            if (options.uses_selective_arithmetic_coding_bypass && use_bypass) {
-                current_raw_segment = pass + 1;
-                current_raw_byte_index = 0;
-                current_raw_bit_position = 0;
-            } else {
-                arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass + 1]));
-            }
-        } else if (options.uses_selective_arithmetic_coding_bypass && pass + 1 >= 10 && pass_type(pass) == Pass::MagnitudeRefinement) {
-            size_t next_raw = segment_index_from_pass_index_in_bypass_mode(pass + 2);
-            if (next_raw < segments.size()) {
-                current_raw_segment = next_raw;
-                current_raw_byte_index = 0;
-                current_raw_bit_position = 0;
-            }
-
-            size_t next_arithmetic = next_raw - 1;
-            if (next_arithmetic < segments.size())
-                arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[next_arithmetic]));
         }
 
         if (options.reset_context_probabilities_each_pass)
