@@ -539,16 +539,12 @@ inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int
         if (options.uses_selective_arithmetic_coding_bypass)
             use_bypass = pass >= 10 && pass_type != Pass::Cleanup;
 
-        if (options.uses_termination_on_each_coding_pass) {
-            if (options.uses_selective_arithmetic_coding_bypass && use_bypass)
-                set_current_raw_segment(pass);
-            else
-                arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[pass]));
-        } else if (options.uses_selective_arithmetic_coding_bypass && pass >= 10) {
-            if (pass_type == Pass::SignificancePropagation)
-                set_current_raw_segment(segment_index_from_pass_index_in_bypass_mode(pass));
-            else if (pass_type == Pass::Cleanup)
-                arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[segment_index_from_pass_index_in_bypass_mode(pass)]));
+        if (options.uses_selective_arithmetic_coding_bypass && use_bypass
+            && (options.uses_termination_on_each_coding_pass || pass_type == Pass::SignificancePropagation)) {
+            set_current_raw_segment(segment_index_from_pass_index(options, pass));
+        } else if (options.uses_termination_on_each_coding_pass
+            || (options.uses_selective_arithmetic_coding_bypass && pass >= 10 && pass_type == Pass::Cleanup)) {
+            arithmetic_decoder = TRY(QMArithmeticDecoder::initialize(segments[segment_index_from_pass_index(options, pass)]));
         }
 
         // D0, Is this the first bit-plane for the code-block?
