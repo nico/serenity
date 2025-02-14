@@ -23,6 +23,8 @@ struct BitplaneDecodingOptions {
 
 inline auto segment_index_from_pass_index_in_bypass_mode(unsigned pass)
 {
+    // D.6 Selective arithmetic coding bypass
+    // Table D.9 – Selective arithmetic coding bypass
     if (pass < 10)
         return 0u;
     // After the first 10 passes, this mode alternates between 1 segment for 2 passes and 1 segment for 1 pass.
@@ -33,8 +35,13 @@ inline auto segment_index_from_pass_index(BitplaneDecodingOptions options, unsig
 {
     if (options.uses_termination_on_each_coding_pass)
         return pass;
+
+    // "If termination on each coding pass is selected (see A.6.1 and A.6.2), then every pass is
+    //  terminated (including both raw passes)."
+    // This is handled by putting this behind the uses_termination_on_each_coding_pass check.
     if (options.uses_selective_arithmetic_coding_bypass)
         return segment_index_from_pass_index_in_bypass_mode(pass);
+
     return 0u;
 }
 

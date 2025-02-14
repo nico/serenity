@@ -1750,36 +1750,17 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
 
             u32 passes_from_previous_layers = precinct.code_blocks[code_block_index].number_of_coding_passes();
 
-            int number_of_segments = 1;
-            if (coding_parameters.uses_termination_on_each_coding_pass()) {
-                // See Table D.8 – Arithmetic coder termination patterns, 2nd column.
-                number_of_segments = number_of_coding_passes;
-            } else if (coding_parameters.uses_selective_arithmetic_coding_bypass()) {
-                // D.6 Selective arithmetic coding bypass
-                // Table D.9 – Selective arithmetic coding bypass
-                // The first 4 bitplanes == 10 passes use arithmetic coding with a single termination, i.e. a single segment.
-                // After that, significance propagation and magnitude refinement share a segment, and cleanup has its own --
-                // that is, 2 segments for every 3 passes.
-                if (passes_from_previous_layers + number_of_coding_passes > 10) {
-                    number_of_segments = 0;
-                    u32 threeple_count = number_of_coding_passes;
+            JPEG2000::BitplaneDecodingOptions options;
+            options.uses_termination_on_each_coding_pass = coding_parameters.uses_termination_on_each_coding_pass();
+            options.uses_selective_arithmetic_coding_bypass = coding_parameters.uses_selective_arithmetic_coding_bypass();
+            auto old_segment_index = passes_from_previous_layers == 0 ? 0 : JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers - 1);
+            auto new_segment_index = JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers + number_of_coding_passes - 1);
+            int number_of_segments = new_segment_index - old_segment_index;
 
-                    // segment ends missing from previous layer
-                    if (passes_from_previous_layers < 10) {
-                        number_of_segments += 1;
-                        threeple_count -= min(10 - passes_from_previous_layers, threeple_count);
-                    } else if ((passes_from_previous_layers - 10) % 3 == 1) {
-                        number_of_segments += 1;
-                        threeple_count -= min(1, threeple_count);
-                    }
-
-                    // threeple_count is now how many passes are left after using the first few passes to fill up the missing passes in the last cb-segment in the previous layer.
-                    number_of_segments += 2 * (threeple_count / 3) + (threeple_count % 3 > 0);
-                }
-                // "If termination on each coding pass is selected (see A.6.1 and A.6.2), then every pass is
-                //  terminated (including both raw passes)."
-                // This is handled by putting this in the else.
-            }
+            // If the old layer does not end on a segment boundary, the new layer has to add one segment for continuing the previous segment
+            // in addition to counting the segments it contains and starts.
+            if (old_segment_index == JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers))
+                number_of_segments++;
 
             // B.10.7.1 Single codeword segment
             // "A codeword segment is the number of bytes contributed to a packet by a code-block.
