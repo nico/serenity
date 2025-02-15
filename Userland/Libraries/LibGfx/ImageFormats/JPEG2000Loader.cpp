@@ -1734,13 +1734,10 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 int number_of_passes_used = 0;
                 for (int i = 0; i < number_of_segments; ++i) {
                     int number_of_passes_in_segment = 1;
-                    u32 segment_index = 0;
+                    u32 segment_index = JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers) + i;
 
-                    if (coding_parameters.uses_termination_on_each_coding_pass()) {
-                        segment_index = passes_from_previous_layers + i;
-                    } else if (coding_parameters.uses_selective_arithmetic_coding_bypass()) {
+                    if (!coding_parameters.uses_termination_on_each_coding_pass() && coding_parameters.uses_selective_arithmetic_coding_bypass()) {
                         u32 index_of_first_segment_in_layer = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
-                        segment_index = index_of_first_segment_in_layer + i;
 
                         // Table D.9 – Selective arithmetic coding bypass
                         // 10, 2, 1, 2, 1, 2, 1, ...
