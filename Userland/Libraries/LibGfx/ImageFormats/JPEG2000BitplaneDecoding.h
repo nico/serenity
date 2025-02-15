@@ -45,6 +45,15 @@ inline auto segment_index_from_pass_index(BitplaneDecodingOptions options, unsig
     return 0u;
 }
 
+inline auto number_of_passes_from_segment_index_in_bypass_mode(unsigned segment_index)
+{
+    // Table D.9 – Selective arithmetic coding bypass
+    if (segment_index == 0)
+        return 10u;
+    // After the first 10 passes, this mode alternates between 1 segment for 2 passes and 1 segment for 1 pass.
+    return segment_index % 2 == 1 ? 2u : 1u;
+}
+
 inline ErrorOr<void> decode_code_block(Span2D<i16> result, SubBand sub_band, int number_of_coding_passes, Vector<ReadonlyBytes, 1> segments, int M_b, int p, BitplaneDecodingOptions options = {})
 {
     // This is an implementation of the bitplane decoding algorithm described in Annex D of the JPEG2000 spec.
