@@ -1581,8 +1581,11 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
     // " for each sub-band (LL or HL, LH and HH)"
     struct TemporaryCodeBlockData {
         u8 number_of_coding_passes { 0 };
-        Vector<u32, 1> length_of_codeword_segments;
-        Vector<u32, 1> index_of_codeword_segments;
+        struct Segment {
+            u32 length { 0 };
+            u32 index { 0 };
+        };
+        Vector<Segment, 1> codeword_segments;
     };
     struct TemporarySubBandData {
         DecodedPrecinct* precinct { nullptr };
@@ -1730,8 +1733,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 return length;
             };
 
-            VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.is_empty());
-            VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.is_empty());
+            VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].codeword_segments.is_empty());
 
             int number_of_passes_used = 0;
             for (int i = 0; i < number_of_segments; ++i) {
@@ -1757,8 +1759,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 }
                 u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
                 dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
-                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
-                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.append(segment_index);
+                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].codeword_segments.append({ length, segment_index });
                 // XXX also store number_of_passes_in_segment in the layer?
                 number_of_passes_used += number_of_passes_in_segment;
                 VERIFY(number_of_passes_used <= number_of_coding_passes);
@@ -1791,12 +1792,10 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
         for (auto const& [code_block_index, temporary_code_block] : enumerate(temporary_sub_band.temporary_code_block_data)) {
             DecodedCodeBlock::Layer layer;
             layer.number_of_coding_passes = temporary_code_block.number_of_coding_passes;
-            VERIFY(temporary_code_block.length_of_codeword_segments.size() == temporary_code_block.index_of_codeword_segments.size());
-            for (size_t i = 0; i < temporary_code_block.length_of_codeword_segments.size(); ++i) {
-                u32 length = temporary_code_block.length_of_codeword_segments[i];
+            for (auto [ length, index ] : temporary_code_block.codeword_segments) {
                 auto segment_data = data.slice(offset, length);
                 offset += length;
-                layer.segments.append({ segment_data, temporary_code_block.index_of_codeword_segments[i] });
+                layer.segments.append({ segment_data, index });
             }
             if (!coding_parameters.uses_multiple_segments()) {
                 if (layer.segments.is_empty())
