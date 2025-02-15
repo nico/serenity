@@ -688,8 +688,11 @@ struct DecodedCodeBlock {
     u32 p { 0 };
 
     struct Layer {
-        Vector<ReadonlyBytes, 1> segments;
-        Vector<u32, 1> segment_ids;
+        struct Segment {
+            ReadonlyBytes data;
+            u32 index { 0 };
+        };
+        Vector<Segment, 1> segments;
         u8 number_of_coding_passes { 0 };
     };
     Vector<Layer, 1> layers;
@@ -704,19 +707,18 @@ struct DecodedCodeBlock {
 
     ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(ByteBuffer& maybe_storage) const
     {
-        u32 highest_segment_id = 0;
+        u32 highest_segment_index = 0;
         for (auto const& layer : layers) {
-            VERIFY(layer.segments.size() == layer.segment_ids.size());
-            for (auto segment_id : layer.segment_ids)
-                highest_segment_id = max(highest_segment_id, segment_id);
+            for (auto const& segment : layer.segments)
+                highest_segment_index = max(highest_segment_index, segment.index);
         }
 
         Vector<Vector<ReadonlyBytes, 1>, 1> all_segment_parts_for_segment;
-        all_segment_parts_for_segment.resize(highest_segment_id + 1);
+        all_segment_parts_for_segment.resize(highest_segment_index + 1);
 
         for (auto const& layer : layers)
-            for (size_t i = 0; i < layer.segments.size(); ++i)
-                TRY(all_segment_parts_for_segment[layer.segment_ids[i]].try_append(layer.segments[i]));
+            for (auto const& segment : layer.segments)
+                TRY(all_segment_parts_for_segment[segment.index].try_append(segment.data));
 
         // Copy segments with multiple parts into consecutive storage.
         size_t total_scratch_size = 0;
@@ -1787,16 +1789,12 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 u32 length = temporary_code_block.length_of_codeword_segments[i];
                 auto segment_data = data.slice(offset, length);
                 offset += length;
-                TRY(layer.segments.try_append(segment_data));
-                layer.segment_ids.append(temporary_code_block.index_of_codeword_segments[i]);
+                layer.segments.append({ segment_data, temporary_code_block.index_of_codeword_segments[i] });
             }
             if (!coding_parameters.uses_multiple_segments()) {
-                if (layer.segments.is_empty()) {
-                    layer.segments.append(data.slice(offset, 0));
-                    layer.segment_ids.append(0);
-                }
+                if (layer.segments.is_empty())
+                    layer.segments.append({ data.slice(offset, 0), 0 });
                 VERIFY(layer.segments.size() == 1);
-                VERIFY(layer.segment_ids.size() == 1);
             }
             TRY(temporary_sub_band.precinct->code_blocks[code_block_index].layers.try_append(layer));
         }
