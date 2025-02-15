@@ -1742,19 +1742,18 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                         u32 index_of_first_segment_in_layer = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
                         segment_index = index_of_first_segment_in_layer + i;
 
-                        u32 pending_passes = 0; // how many passes from previous layer are part of an as-of-yet incomplete segment
-                        if (index_of_first_segment_in_layer == 0 && i == 0)
-                            pending_passes = passes_from_previous_layers;
-                        else if (index_of_first_segment_in_layer % 2 == 1 && i == 0)
-                            pending_passes = (passes_from_previous_layers - 10) % 3;
-
                         // Table D.9 – Selective arithmetic coding bypass
                         // 10, 2, 1, 2, 1, 2, 1, ...
-
                         if (segment_index == 0)
-                            number_of_passes_in_segment = 10 - pending_passes;
+                            number_of_passes_in_segment = 10;
                         else if (segment_index % 2 == 1)
-                            number_of_passes_in_segment = 2 - pending_passes;
+                            number_of_passes_in_segment = 2;
+
+                        // how many passes from previous layer are part of an as-of-yet incomplete segment
+                        if (index_of_first_segment_in_layer == 0 && i == 0)
+                            number_of_passes_in_segment -= passes_from_previous_layers;
+                        else if (index_of_first_segment_in_layer % 2 == 1 && i == 0)
+                            number_of_passes_in_segment -= (passes_from_previous_layers - 10) % 3;
 
                         if (i == number_of_segments - 1)
                             number_of_passes_in_segment = min(number_of_coding_passes - number_of_passes_used, number_of_passes_in_segment);
