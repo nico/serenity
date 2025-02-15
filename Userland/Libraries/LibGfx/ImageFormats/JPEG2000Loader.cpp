@@ -705,16 +705,20 @@ struct DecodedCodeBlock {
         return total;
     }
 
-    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(ByteBuffer& maybe_storage) const
+    Optional<u32> highest_segment_index() const
     {
-        u32 highest_segment_index = 0;
+        Optional<u32> highest_index;
         for (auto const& layer : layers) {
             for (auto const& segment : layer.segments)
-                highest_segment_index = max(highest_segment_index, segment.index);
+                highest_index = max(highest_index.value_or(segment.index), segment.index);
         }
+        return highest_index;
+    }
 
+    ErrorOr<Vector<ReadonlyBytes, 1>> segments_for_all_layers(ByteBuffer& maybe_storage) const
+    {
         Vector<Vector<ReadonlyBytes, 1>, 1> all_segment_parts_for_segment;
-        all_segment_parts_for_segment.resize(highest_segment_index + 1);
+        all_segment_parts_for_segment.resize(highest_segment_index().value_or(0) + 1);
 
         for (auto const& layer : layers)
             for (auto const& segment : layer.segments)
