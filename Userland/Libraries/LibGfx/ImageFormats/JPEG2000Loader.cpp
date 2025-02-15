@@ -1697,6 +1697,15 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
             //  The value of Lblock is initially set to three. The number of bytes contributed by each code-block is preceded by signalling
             //  bits that increase the value of Lblock, as needed. A signalling bit of zero indicates the current value of Lblock is sufficient.
             //  If there are k ones followed by a zero, the value of Lblock is incremented by k."
+            // B.10.7.2 Multiple codeword segments
+            // "Let T be the set of indices of terminated coding passes included for the code-block in the packet as indicated in Tables D.8
+            //  and D.9. If the index final coding pass included in the packet is not a member of T, then it is added to T. Let n_1 < ... < n_K
+            //  be the indices in T. K lengths are signalled consecutively with each length using the mechanism described in B.10.7.1."
+            // "using the mechanism" means adjusting Lblock just once, and then reading one code word segment length with the
+            // number of passes per segment, apparently.
+            // We combine both cases: the single segment case is a special case of the multiple segment case.
+            // For the B.10.7.1 case, we'll have number_of_segments = 1 and number_of_passes_in_segment = number_of_coding_passes.
+
             u32 k = 0;
             while (TRY(read_bit()))
                 k++;
@@ -1717,54 +1726,42 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
 
             VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.is_empty());
             VERIFY(temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.is_empty());
-            if (number_of_segments == 1) {
-                // Note: This can happen even for multiple segments if this codeblock happens to contain just a single segment (with bypass).
-                u32 length = TRY(read_one_codeword_segment_length(number_of_coding_passes));
-                dbgln_if(JPEG2000_DEBUG, "length {}", length);
-                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
-                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.append(JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers));
-            } else {
-                // B.10.7.2 Multiple codeword segments
-                // "Let T be the set of indices of terminated coding passes included for the code-block in the packet as indicated in Tables D.8
-                //  and D.9. If the index final coding pass included in the packet is not a member of T, then it is added to T. Let n_1 < ... < n_K
-                //  be the indices in T. K lengths are signalled consecutively with each length using the mechanism described in B.10.7.1."
-                // "using the mechanism" means adjusting Lblock just once, and then reading one code word segment length with the
-                // number of passes per segment, apparently.
-                // XXX maybe update comment
-                int number_of_passes_used = 0;
-                for (int i = 0; i < number_of_segments; ++i) {
-                    int number_of_passes_in_segment = 1;
-                    u32 segment_index = JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers) + i;
 
-                    if (!coding_parameters.uses_termination_on_each_coding_pass() && coding_parameters.uses_selective_arithmetic_coding_bypass()) {
-                        u32 index_of_first_segment_in_layer = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
+            int number_of_passes_used = 0;
+            for (int i = 0; i < number_of_segments; ++i) {
+                int number_of_passes_in_segment = number_of_coding_passes;
+                u32 segment_index = JPEG2000::segment_index_from_pass_index(options, passes_from_previous_layers) + i;
 
-                        // Table D.9 – Selective arithmetic coding bypass
-                        // 10, 2, 1, 2, 1, 2, 1, ...
-                        if (segment_index == 0)
-                            number_of_passes_in_segment = 10;
-                        else if (segment_index % 2 == 1)
-                            number_of_passes_in_segment = 2;
+                if (coding_parameters.uses_termination_on_each_coding_pass()) {
+                    number_of_passes_in_segment = 1;
+                } else if (coding_parameters.uses_selective_arithmetic_coding_bypass()) {
+                    u32 index_of_first_segment_in_layer = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
 
-                        // how many passes from previous layer are part of an as-of-yet incomplete segment
-                        if (index_of_first_segment_in_layer == 0 && i == 0)
-                            number_of_passes_in_segment -= passes_from_previous_layers;
-                        else if (index_of_first_segment_in_layer % 2 == 1 && i == 0)
-                            number_of_passes_in_segment -= (passes_from_previous_layers - 10) % 3;
+                    // Table D.9 – Selective arithmetic coding bypass
+                    // 10, 2, 1, 2, 1, 2, 1, ...
+                    if (segment_index == 0)
+                        number_of_passes_in_segment = 10;
+                    else
+                        number_of_passes_in_segment = segment_index % 2 == 1 ? 2 : 1;
 
-                        if (i == number_of_segments - 1)
-                            number_of_passes_in_segment = min(number_of_coding_passes - number_of_passes_used, number_of_passes_in_segment);
-                    }
-                    u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
-                    dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
-                    temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
-                    temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.append(segment_index);
-                    // XXX also store number_of_passes_in_segment in the layer?
-                    number_of_passes_used += number_of_passes_in_segment;
-                    VERIFY(number_of_passes_used <= number_of_coding_passes);
+                    // how many passes from previous layer are part of an as-of-yet incomplete segment
+                    if (index_of_first_segment_in_layer == 0 && i == 0)
+                        number_of_passes_in_segment -= passes_from_previous_layers;
+                    else if (index_of_first_segment_in_layer % 2 == 1 && i == 0)
+                        number_of_passes_in_segment -= (passes_from_previous_layers - 10) % 3;
+
+                    if (i == number_of_segments - 1)
+                        number_of_passes_in_segment = min(number_of_coding_passes - number_of_passes_used, number_of_passes_in_segment);
                 }
-                VERIFY(number_of_passes_used == number_of_coding_passes);
+                u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
+                dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
+                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].length_of_codeword_segments.append(length);
+                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].index_of_codeword_segments.append(segment_index);
+                // XXX also store number_of_passes_in_segment in the layer?
+                number_of_passes_used += number_of_passes_in_segment;
+                VERIFY(number_of_passes_used <= number_of_coding_passes);
             }
+            VERIFY(number_of_passes_used == number_of_coding_passes);
         }
     }
 
