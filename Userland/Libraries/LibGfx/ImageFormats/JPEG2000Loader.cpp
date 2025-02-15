@@ -1742,15 +1742,17 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                     number_of_passes_in_segment = 1;
                 } else if (coding_parameters.uses_selective_arithmetic_coding_bypass()) {
                     number_of_passes_in_segment = JPEG2000::number_of_passes_from_segment_index_in_bypass_mode(segment_index);
-
-                    // how many passes from previous layer are part of an as-of-yet incomplete segment
-                    if (segment_index == 0 && i == 0)
-                        number_of_passes_in_segment -= passes_from_previous_layers;
-                    else if (segment_index % 2 == 1 && i == 0)
-                        number_of_passes_in_segment -= (passes_from_previous_layers - 10) % 3;
-
-                    if (i == number_of_segments - 1)
+                    if (i == 0) {
+                        // Correction at start: Did the previous layer end in an incomplete segment that's continued in this layer?
+                        if (segment_index == 0)
+                            number_of_passes_in_segment -= passes_from_previous_layers;
+                        else if (segment_index % 2 == 1)
+                            number_of_passes_in_segment -= (passes_from_previous_layers - 10) % 3;
+                    }
+                    if (i == number_of_segments - 1) {
+                        // Correction at end: Does this layer end in an incomplete segment that's continued in the next layer?
                         number_of_passes_in_segment = min(number_of_coding_passes - number_of_passes_used, number_of_passes_in_segment);
+                    }
                 }
                 u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
                 dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
