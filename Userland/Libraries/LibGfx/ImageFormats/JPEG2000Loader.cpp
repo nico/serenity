@@ -1738,10 +1738,9 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                     number_of_passes_in_segment = JPEG2000::number_of_passes_from_segment_index_in_bypass_mode(segment_index);
 
                     // how many passes from previous layer are part of an as-of-yet incomplete segment
-                    u32 index_of_first_segment_in_layer = JPEG2000::segment_index_from_pass_index_in_bypass_mode(passes_from_previous_layers);
-                    if (index_of_first_segment_in_layer == 0 && i == 0)
+                    if (segment_index == 0 && i == 0)
                         number_of_passes_in_segment -= passes_from_previous_layers;
-                    else if (index_of_first_segment_in_layer % 2 == 1 && i == 0)
+                    else if (segment_index % 2 == 1 && i == 0)
                         number_of_passes_in_segment -= (passes_from_previous_layers - 10) % 3;
 
                     if (i == number_of_segments - 1)
