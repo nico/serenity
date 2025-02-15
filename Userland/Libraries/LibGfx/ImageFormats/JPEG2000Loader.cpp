@@ -691,9 +691,9 @@ struct DecodedCodeBlock {
         struct Segment {
             ReadonlyBytes data;
             u32 index { 0 };
+            int number_of_passes { 0 };
         };
         Vector<Segment, 1> segments;
-        u8 number_of_coding_passes { 0 };
     };
     Vector<Layer, 1> layers;
 
@@ -701,7 +701,8 @@ struct DecodedCodeBlock {
     {
         u32 total = 0;
         for (auto const& layer : layers)
-            total += layer.number_of_coding_passes;
+            for (auto const& segment : layer.segments)
+                total += segment.number_of_passes;
         return total;
     }
 
@@ -1580,10 +1581,10 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
 
     // " for each sub-band (LL or HL, LH and HH)"
     struct TemporaryCodeBlockData {
-        u8 number_of_coding_passes { 0 };
         struct Segment {
             u32 length { 0 };
             u32 index { 0 };
+            int number_of_passes { 0 };
         };
         Vector<Segment, 1> codeword_segments;
     };
@@ -1676,7 +1677,6 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 return 37 + bits;
             }());
             dbgln_if(JPEG2000_DEBUG, "number of coding passes: {}", number_of_coding_passes);
-            temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].number_of_coding_passes = number_of_coding_passes;
 
             // B.10.7 Length of the compressed image data from a given code-block
             // "Multiple codeword segments arise when a termination occurs between coding passes which are included in the packet"
@@ -1759,8 +1759,7 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
                 }
                 u32 length = TRY(read_one_codeword_segment_length(number_of_passes_in_segment));
                 dbgln_if(JPEG2000_DEBUG, "length({}) {}", i, length);
-                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].codeword_segments.append({ length, segment_index });
-                // XXX also store number_of_passes_in_segment in the layer?
+                temporary_sub_band_data[sub_band_index].temporary_code_block_data[code_block_index].codeword_segments.append({ length, segment_index, number_of_passes_in_segment });
                 number_of_passes_used += number_of_passes_in_segment;
                 VERIFY(number_of_passes_used <= number_of_coding_passes);
             }
@@ -1791,15 +1790,14 @@ static ErrorOr<u32> read_one_packet_header(JPEG2000LoadingContext& context, Tile
     for (auto const& temporary_sub_band : temporary_sub_band_data) {
         for (auto const& [code_block_index, temporary_code_block] : enumerate(temporary_sub_band.temporary_code_block_data)) {
             DecodedCodeBlock::Layer layer;
-            layer.number_of_coding_passes = temporary_code_block.number_of_coding_passes;
-            for (auto [ length, index ] : temporary_code_block.codeword_segments) {
+            for (auto [ length, index, number_of_passes ] : temporary_code_block.codeword_segments) {
                 auto segment_data = data.slice(offset, length);
                 offset += length;
-                layer.segments.append({ segment_data, index });
+                layer.segments.append({ segment_data, index, number_of_passes });
             }
             if (!coding_parameters.uses_multiple_segments()) {
                 if (layer.segments.is_empty())
-                    layer.segments.append({ data.slice(offset, 0), 0 });
+                    layer.segments.append({ data.slice(offset, 0), 0, 0 });
                 VERIFY(layer.segments.size() == 1);
             }
             TRY(temporary_sub_band.precinct->code_blocks[code_block_index].layers.try_append(layer));
