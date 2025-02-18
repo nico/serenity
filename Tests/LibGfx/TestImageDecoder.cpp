@@ -1551,6 +1551,12 @@ TEST_CASE(test_tiff_cmyk)
     EXPECT(Gfx::TIFFImageDecoderPlugin::sniff(file->bytes()));
     auto plugin_decoder = TRY_OR_FAIL(Gfx::TIFFImageDecoderPlugin::create(file->bytes()));
 
+    EXPECT_EQ(plugin_decoder->natural_frame_format(), Gfx::NaturalFrameFormat::CMYK);
+    auto cmyk_frame = TRY_OR_FAIL(plugin_decoder->cmyk_frame());
+    EXPECT_EQ(cmyk_frame->size(), Gfx::IntSize(400, 300));
+    EXPECT_EQ(cmyk_frame->scanline(0)[0], (Gfx::CMYK { 0, 0, 0, 0 })); // White
+    EXPECT_EQ(cmyk_frame->scanline(75)[60], (Gfx::CMYK { 0, 0xeb, 0xf8, 1 })); // Reddish
+
     auto frame = TRY_OR_FAIL(expect_single_frame_of_size(*plugin_decoder, { 400, 300 }));
 
     EXPECT_EQ(frame.image->get_pixel(0, 0), Gfx::Color::NamedColor::White);
