@@ -347,11 +347,61 @@ PDFErrorOr<NonnullRefPtr<RadialShading>> RadialShading::create(Document* documen
     return adopt_ref(*new RadialShading(move(common_entries), start, start_radius, end, end_radius, t0, t1, move(functions), extend_start, extend_end));
 }
 
-PDFErrorOr<void> RadialShading::draw(Gfx::Painter&, Gfx::AffineTransform const&)
+PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& inverse_ctm)
 {
-    return Error::rendering_unsupported_error("Cannot draw radial shading yet");
-}
+    auto& bitmap = painter.target();
 
+    auto scale = painter.scale();
+    auto clip_rect = painter.clip_rect() * scale;
+
+    Vector<float, 4> color_components;
+    color_components.resize(m_common_entries.color_space->number_of_components());
+
+    // FIXME: Do something with m_common_entries.b_box if it's set.
+
+    for (int y = clip_rect.top(); y < clip_rect.bottom(); ++y) {
+        for (int x = clip_rect.left(); x < clip_rect.right(); ++x) {
+            Gfx::FloatPoint pdf = inverse_ctm.map(Gfx::FloatPoint { x, y } / scale);
+
+            // FIXME: Normalize m_end to have unit length from m_start.
+            float distance = min(m_start.distance_from(pdf) - m_start_radius, m_end.distance_from(pdf) - m_end_radius); 
+
+            Gfx::FloatVector2 to_end { m_end.x() - m_start.x(), m_end.y() - m_start.y() };
+            float x_prime = to_point.dot(to_end) / to_end.dot(to_end);
+
+            float t;
+            if (0 <= x_prime && x_prime <= 1)
+                t = m_t0 + (m_t1 - m_t0) * x_prime;
+            else if (x_prime < 0) {
+                if (!m_extend_start)
+                    continue;
+                t = m_t0;
+            } else {
+                if (!m_extend_end)
+                    continue;
+                t = m_t1;
+            }
+
+            TRY(m_functions.visit(
+                [&](Function const& function) -> PDFErrorOr<void> {
+                    auto result = TRY(function.evaluate(to_array({ t })));
+                    result.copy_to(color_components);
+                    return {};
+                },
+                [&](Vector<NonnullRefPtr<Function>> const& functions) -> PDFErrorOr<void> {
+                    for (size_t i = 0; i < functions.size(); ++i) {
+                        auto result = TRY(functions[i]->evaluate(to_array({ t })));
+                        color_components[i] = result[0];
+                    }
+                    return {};
+                }));
+
+            auto color = TRY(m_common_entries.color_space->style(color_components));
+            bitmap.scanline(y)[x] = color.get<Gfx::Color>().value();
+        }
+    }
+
+    return {};
 }
 
 PDFErrorOr<NonnullRefPtr<Shading>> Shading::create(Document* document, NonnullRefPtr<Object> shading_dict_or_stream, Renderer& renderer)
