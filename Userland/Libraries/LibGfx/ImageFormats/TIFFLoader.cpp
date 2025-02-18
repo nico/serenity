@@ -789,6 +789,9 @@ ErrorOr<ImageFrameDescriptor> TIFFImageDecoderPlugin::frame(size_t index, Option
     if (m_context->state() < TIFF::TIFFLoadingContext::State::FrameDecoded)
         TRY(m_context->decode_frame());
 
+    if (m_context->state() == TIFF::TIFFLoadingContext::State::Error)
+        return Error::from_string_literal("TIFFImageDecoderPlugin: Decoding failed");
+
     if (m_context->cmyk_bitmap())
         return ImageFrameDescriptor { TRY(m_context->cmyk_bitmap()->to_low_quality_rgb()), 0 };
 
