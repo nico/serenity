@@ -375,6 +375,9 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             //     p = ((c1 - c0) * (c0 - p) - (r1 - r0)) / ((c1 - c0)^2 - (r1 - r0)^2)
             //     s = -p/2 ± sqrt(p^2/4 - ((c1 - c0)^2 - (r1 - r0)^2) * ((c0 - p)^2 - r0^2) / ((c1 - c0)^2 - (r1 - r0)^2)
 
+            // XXX more detailed start and end, less detailed middle
+            // XXX simplify term in sqrt (?)
+
             // FIXME: Normalize m_end to have unit length from m_start.
             Gfx::FloatVector2 to_point { pdf.x() - m_start.x(), pdf.y() - m_start.y() };
             Gfx::FloatVector2 to_end { m_end.x() - m_start.x(), m_end.y() - m_start.y() };
@@ -393,8 +396,26 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
 
             float s = s_0 >= 0 && s_0 <= 1 ? s_0 : s_1;
 
-            if (s < 0 || s > 1) continue; // XXX extend
+            // Interesting extension cases:
+            // * normal case: two circles outside each other, different radii, one with left smaller, one with right smaller.
+            // * both circles have same radius, different origins
+            // * one circle inside the other one, both combinations, extend outwards (need s_1 here)
+            if (s < 0) {
+                if (!m_extend_start)
+                    continue;
+                if (m_start_radius < m_end_radius && s < -m_start_radius / dr)
+                    continue;
+                s = 0;
+            }
+            if (s > 1) {
+                if (!m_extend_end)
+                    continue;
+                if (m_start_radius > m_end_radius && s > -m_start_radius / dr)
+                    continue;
+                s = 1;
+            }
 
+            // if (s < 0 || s > 1) continue; // XXX extend
             // s = clamp(s, 0.0f, 1.0f); // XXX extend
 
             float t = m_t0 + s * (m_t1 - m_t0);
