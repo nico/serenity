@@ -363,24 +363,41 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
         for (int x = clip_rect.left(); x < clip_rect.right(); ++x) {
             Gfx::FloatPoint pdf = inverse_ctm.map(Gfx::FloatPoint { x, y } / scale);
 
+            // The spec explains how to get a point given s. We want to solve the inverse problem:
+            // The current pixel is at p. We want to find the s where (c(s) - p)^2 = r(s)^2.
+            // Per spec, the circle depending on s is c(s) = c0 + s * (c1 - c0), r(s) = r0 + s * (r1 - r0).
+            // Putting in the values:
+            //
+            //     (c0 + s * (c1 - c0) - p)^2 = (r0 + s * (r1 - r0))^2
+            //     s^2 * (c1 - c0)^2 + 2 * s * (c1 - c0) * (c0 - p) + (c0 - p)^2 = s^2 * (r1 - r0)^2 + 2 * s * (r1 - r0) * r0 + r0^2
+            //     s^2 * ((c1 - c0)^2 - (r1 - r0)^2) + 2 * s * ((c1 - c0) * (c0 - p) - (r1 - r0) * r0) + (c0 - p)^2 - r0^2 = 0
+            //
+            //     p = ((c1 - c0) * (c0 - p) - (r1 - r0)) / ((c1 - c0)^2 - (r1 - r0)^2)
+            //     s = -p/2 ± sqrt(p^2/4 - ((c1 - c0)^2 - (r1 - r0)^2) * ((c0 - p)^2 - r0^2) / ((c1 - c0)^2 - (r1 - r0)^2)
+
             // FIXME: Normalize m_end to have unit length from m_start.
-            float distance = min(m_start.distance_from(pdf) - m_start_radius, m_end.distance_from(pdf) - m_end_radius); 
-
+            Gfx::FloatVector2 to_point { pdf.x() - m_start.x(), pdf.y() - m_start.y() };
             Gfx::FloatVector2 to_end { m_end.x() - m_start.x(), m_end.y() - m_start.y() };
-            float x_prime = to_point.dot(to_end) / to_end.dot(to_end);
+            float dr = m_end_radius - m_start_radius;
 
-            float t;
-            if (0 <= x_prime && x_prime <= 1)
-                t = m_t0 + (m_t1 - m_t0) * x_prime;
-            else if (x_prime < 0) {
-                if (!m_extend_start)
-                    continue;
-                t = m_t0;
-            } else {
-                if (!m_extend_end)
-                    continue;
-                t = m_t1;
-            }
+            float p = -2 * (to_end.dot(to_point) + dr * m_start_radius) / (to_end.dot(to_end) - dr*dr);
+            float q = (to_point.dot(to_point) - m_start_radius * m_start_radius)  / (to_end.dot(to_end) - dr*dr);
+
+            float discriminant = p * p / 4.0f - q;
+
+            if (discriminant < 0)
+                continue;
+
+            float s_0 = -p / 2.0f + sqrt(discriminant);
+            float s_1 = -p / 2.0f - sqrt(discriminant);
+
+            float s = s_0 >= 0 && s_0 <= 1 ? s_0 : s_1;
+
+            if (s < 0 || s > 1) continue; // XXX extend
+
+            // s = clamp(s, 0.0f, 1.0f); // XXX extend
+
+            float t = m_t0 + s * (m_t1 - m_t0);
 
             TRY(m_functions.visit(
                 [&](Function const& function) -> PDFErrorOr<void> {
@@ -402,6 +419,8 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
     }
 
     return {};
+}
+
 }
 
 PDFErrorOr<NonnullRefPtr<Shading>> Shading::create(Document* document, NonnullRefPtr<Object> shading_dict_or_stream, Renderer& renderer)
