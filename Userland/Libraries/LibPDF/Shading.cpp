@@ -406,36 +406,71 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             // {left_larger, right_larger} x { apart, overlapping, nested } x { no_extend, left_extend, right_extend, both_extend } +
             // equal_radius x { apart, overlapping } x { no_extend, left_extend, right_extend, both_extend } +
 
-            if (m_extend_start) {
-                if (m_start_radius <= m_end_radius) {
-                    if (s_0 < -m_start_radius / dr)
-                        continue;
-                    if (s_0 < 0)
-                        s = 0;
-                } else {
-                    if (s_0 < 0)
-                        s = 0;
-                }
-            } else {
-                if (s < 0 && !(m_extend_end && s_0 > 0))
-                    continue;
-            }
-
-            if (m_extend_end) {
-                if (m_start_radius <= m_end_radius) {
-                    if (s_0 > 1)
-                        s = 1;
-                } else {
-                    if (s > -m_start_radius / dr)
-                        continue;
-                    if ((m_end_radius < m_start_radius && to_end.length() < m_start_radius ? s_1 : s_0) > 1)
-                        s = 1;
-                }
-            } else {
-                if (s_1 > 1)
-                    continue;
-                if (s_0 > 1 && s_1 > 0)
+            if (to_end.length() <= max(m_start_radius, m_end_radius)) {
+                // One circle is inside the other one.
+                // One of s_0 will be 0..1 in the main gradient part, and the other one will be negative in the whole circle.
+                if (m_start_radius < m_end_radius)
+                    s = s_0;
+                else
                     s = s_1;
+
+                if (m_extend_start) {
+                    if (m_start_radius <= m_end_radius) {
+                        if (s < 0)
+                            s = 0;
+                    } else {
+                        if (s > 1)
+                            s = 1;
+                    }
+                } else {
+                    if (s < 0 && !(m_extend_end && s > 0))
+                        continue;
+                }
+
+                if (m_extend_end) {
+                    if (m_start_radius <= m_end_radius) {
+                        if (s > 1)
+                            s = 1;
+                    } else {
+                        if (s < 0)
+                            s = 0;
+                    }
+                } else {
+                    if (s > 1)
+                        continue;
+                }
+            } else {
+                if (m_extend_start) {
+                    if (m_start_radius <= m_end_radius) {
+                        if (s < -m_start_radius / dr)
+                            continue;
+                        if (s_0 < 0)
+                            s = 0;
+                    } else {
+                        if (s_0 < 0)
+                            s = 0;
+                    }
+                } else {
+                    if (s < 0 && !(m_extend_end && s_0 > 0))
+                        continue;
+                }
+
+                if (m_extend_end) {
+                    if (m_start_radius <= m_end_radius) {
+                        if (s_0 > 1)
+                            s = 1;
+                    } else {
+                        if (s > -m_start_radius / dr)
+                            continue;
+                        if ((m_end_radius < m_start_radius && to_end.length() < m_start_radius ? s_1 : s_0) > 1)
+                            s = 1;
+                    }
+                } else {
+                    if (s_0 > 1 && s_1 > 0)
+                        s = s_1;
+                    if (s > 1)
+                        continue;
+                }
             }
 
             float t = m_t0 + s * (m_t1 - m_t0);
