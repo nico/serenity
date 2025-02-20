@@ -403,6 +403,8 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             // * normal case: two circles outside each other, different radii, one with left smaller, one with right smaller.
             // * both circles have same radius, different origins
             // * one circle inside the other one, both combinations, extend outwards (need s_1 here)
+            // {left_larger, right_larger} x { apart, overlapping, nested } x { no_extend, left_extend, right_extend, both_extend } +
+            // equal_radius x { apart, overlapping } x { no_extend, left_extend, right_extend, both_extend } +
 
             if (m_extend_start) {
                 if (m_start_radius <= m_end_radius) {
