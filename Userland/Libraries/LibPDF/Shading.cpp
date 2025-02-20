@@ -387,18 +387,6 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             float q = (to_point.dot(to_point) - m_start_radius * m_start_radius)  / (to_end.dot(to_end) - dr*dr);
 
             float discriminant = p * p / 4.0f - q;
-
-            // These here all do the same as the above. None is any better; I thought maybe it'd simplify at the end. But it doesn't.
-            // discriminant = (powf(to_end.dot(to_point), 2.0f) + 2 * to_point.dot(to_end) * m_start_radius * dr + m_start_radius * m_start_radius * dr * dr) / powf(to_end.dot(to_end) - dr*dr, 2.0f) - q;
-            // discriminant = (powf(to_end.dot(to_point), 2.0f) + 2 * to_point.dot(to_end) * m_start_radius * dr + m_start_radius * m_start_radius * dr * dr -
-                // (to_point.dot(to_point) * to_end.dot(to_end) - m_start_radius * m_start_radius * to_end.dot(to_end) - to_point.dot(to_point) * dr * dr + m_start_radius * m_start_radius * dr * dr)) / powf(to_end.dot(to_end) - dr*dr, 2.0f);
-            // discriminant = (powf(to_end.dot(to_point), 2.0f) + 2 * to_point.dot(to_end) * m_start_radius * dr + m_start_radius * m_start_radius * dr * dr 
-                // - to_point.dot(to_point) * to_end.dot(to_end) + m_start_radius * m_start_radius * to_end.dot(to_end) + to_point.dot(to_point) * dr * dr - m_start_radius * m_start_radius * dr * dr) / powf(to_end.dot(to_end) - dr*dr, 2.0f);
-            // discriminant = (powf(to_end.dot(to_point), 2.0f) + 2 * to_point.dot(to_end) * m_start_radius * dr
-                // - to_point.dot(to_point) * to_end.dot(to_end) + m_start_radius * m_start_radius * to_end.dot(to_end) + to_point.dot(to_point) * dr * dr) / powf(to_end.dot(to_end) - dr*dr, 2.0f);
-            // discriminant = (powf(to_end.dot(to_point), 2.0f) - to_point.dot(to_point) * to_end.dot(to_end)
-                // + m_start_radius * m_start_radius * to_end.dot(to_end) + 2 * to_point.dot(to_end) * m_start_radius * dr + to_point.dot(to_point) * dr * dr) / powf(to_end.dot(to_end) - dr*dr, 2.0f);
-
             if (discriminant < 0)
                 continue;
 
