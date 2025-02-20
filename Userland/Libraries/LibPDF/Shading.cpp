@@ -415,7 +415,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
                         s = 0;
                 }
             } else {
-                if (s < 0)
+                if (s_0 < 0 && !(m_extend_end && s_1 > 0))
                     continue;
             }
 
@@ -426,7 +426,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
                 } else {
                     if (s > -m_start_radius / dr)
                         continue;
-                    if (s_1 > 1)
+                    if (s_0 > 1)
                         s = 1;
                 }
             } else {
