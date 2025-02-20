@@ -384,7 +384,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             float dr = m_end_radius - m_start_radius;
 
             float p = -2 * (to_end.dot(to_point) + dr * m_start_radius) / (to_end.dot(to_end) - dr*dr);
-            float q = (to_point.dot(to_point) - m_start_radius * m_start_radius)  / (to_end.dot(to_end) - dr*dr);
+            float q = (to_point.dot(to_point) - m_start_radius * m_start_radius) / (to_end.dot(to_end) - dr*dr);
 
             float discriminant = p * p / 4.0f - q;
             if (discriminant < 0)
@@ -393,29 +393,48 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             float s_0 = -p / 2.0f + sqrt(discriminant);
             float s_1 = -p / 2.0f - sqrt(discriminant);
 
+            // XXX maybe the bounds here are wrong?
+            // go left to 0 if not extended, down to -r0 / dr else (assuming r1 < r2)
+            // go right to 1 if not extended, infinity else (assuming r1 < r2)
+
             float s = s_0 >= 0 && s_0 <= 1 ? s_0 : s_1;
 
             // Interesting extension cases:
             // * normal case: two circles outside each other, different radii, one with left smaller, one with right smaller.
             // * both circles have same radius, different origins
             // * one circle inside the other one, both combinations, extend outwards (need s_1 here)
-            if (s < 0) {
-                if (!m_extend_start)
+
+            if (m_extend_start) {
+                if (m_start_radius <= m_end_radius) {
+                    if (s_0 < -m_start_radius / dr)
+                        continue;
+                    if (s_0 < 0)
+                        s = 0;
+                } else {
+                    if (s_0 < 0)
+                        s = 0;
+                }
+            } else {
+                if (s < 0)
                     continue;
-                if (m_start_radius < m_end_radius && s < -m_start_radius / dr)
-                    continue;
-                s = 0;
-            }
-            if (s > 1) {
-                if (!m_extend_end)
-                    continue;
-                if (m_start_radius > m_end_radius && s > -m_start_radius / dr)
-                    continue;
-                s = 1;
             }
 
-            // if (s < 0 || s > 1) continue; // XXX extend
-            // s = clamp(s, 0.0f, 1.0f); // XXX extend
+            if (m_extend_end) {
+                if (m_start_radius <= m_end_radius) {
+                    if (s_0 > 1)
+                        s = 1;
+                } else {
+                    if (s > -m_start_radius / dr)
+                        continue;
+                    if (s_1 > 1)
+                        s = 1;
+                }
+            } else {
+                if (s_1 > 1)
+                    continue;
+                if (s_0 > 1 && s_1 > 0)
+                    s = s_1;
+            }
 
             float t = m_t0 + s * (m_t1 - m_t0);
 
