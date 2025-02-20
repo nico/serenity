@@ -415,7 +415,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
                         s = 0;
                 }
             } else {
-                if (s_0 < 0 && !(m_extend_end && s_1 > 0))
+                if (s < 0 && !(m_extend_end && s_0 > 0))
                     continue;
             }
 
