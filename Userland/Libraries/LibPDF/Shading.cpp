@@ -412,11 +412,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             if (to_end.length() <= max(m_start_radius, m_end_radius)) {
                 // One circle is inside the other one.
                 // One of s_0 will be 0..1 in the main gradient part, and the other one will be negative in the whole circle.
-                if (m_start_radius < m_end_radius)
-                    s = s_0;
-                else
-                    s = s_1;
-
+                s = m_start_radius < m_end_radius ? s_0 : s_1;
                 if (s < 0) {
                     if (!m_extend_start)
                         continue;
@@ -427,7 +423,6 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
                     s = 1;
                 }
             } else {
-
                 if (m_extend_start) {
                     if (m_start_radius <= m_end_radius) {
                         if (s < -m_start_radius / dr)
