@@ -424,15 +424,10 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
                 }
             } else {
                 if (m_extend_start) {
-                    if (m_start_radius <= m_end_radius) {
-                        if (s < -m_start_radius / dr)
-                            continue;
-                        if (s_0 < 0)
-                            s = 0;
-                    } else {
-                        if (s_0 < 0)
-                            s = 0;
-                    }
+                    if (m_start_radius <= m_end_radius && s < -m_start_radius / dr)
+                        continue;
+                    if (s < 0)
+                        s = 0;
                 } else {
                     if (s < 0 && !(m_extend_end && s_0 > 0))
                         continue;
