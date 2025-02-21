@@ -359,6 +359,8 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
 
     // FIXME: Do something with m_common_entries.b_box if it's set.
 
+    // FIXME: Use smaller box if the circles are nested and the outer circle is
+
     for (int y = clip_rect.top(); y < clip_rect.bottom(); ++y) {
         for (int x = clip_rect.left(); x < clip_rect.right(); ++x) {
             Gfx::FloatPoint pdf = inverse_ctm.map(Gfx::FloatPoint { x, y } / scale);
@@ -404,7 +406,8 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             // * both circles have same radius, different origins
             // * one circle inside the other one, both combinations, extend outwards (need s_1 here)
             // {left_larger, right_larger} x { apart, overlapping, nested } x { no_extend, left_extend, right_extend, both_extend } +
-            // equal_radius x { apart, overlapping } x { no_extend, left_extend, right_extend, both_extend } +
+            // equal_radius x { apart, overlapping } x { no_extend, left_extend, right_extend, both_extend }
+            // XXX also test center of one circle on circumference of the other one
 
             if (to_end.length() <= max(m_start_radius, m_end_radius)) {
                 // One circle is inside the other one.
@@ -414,32 +417,17 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
                 else
                     s = s_1;
 
-                if (m_extend_start) {
-                    if (m_start_radius <= m_end_radius) {
-                        if (s < 0)
-                            s = 0;
-                    } else {
-                        if (s > 1)
-                            s = 1;
-                    }
-                } else {
-                    if (s < 0 && !(m_extend_end && s > 0))
+                if (s < 0) {
+                    if (!m_extend_start)
                         continue;
-                }
-
-                if (m_extend_end) {
-                    if (m_start_radius <= m_end_radius) {
-                        if (s > 1)
-                            s = 1;
-                    } else {
-                        if (s < 0)
-                            s = 0;
-                    }
-                } else {
-                    if (s > 1)
+                    s = 0;
+                } else if (s > 1) {
+                    if (!m_extend_end)
                         continue;
+                    s = 1;
                 }
             } else {
+
                 if (m_extend_start) {
                     if (m_start_radius <= m_end_radius) {
                         if (s < -m_start_radius / dr)
