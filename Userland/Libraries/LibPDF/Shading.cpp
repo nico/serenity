@@ -371,26 +371,33 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             // Putting in the values:
             //
             //     (c0 + s * (c1 - c0) - p)^2 = (r0 + s * (r1 - r0))^2
-            //     s^2 * (c1 - c0)^2 + 2 * s * (c1 - c0) * (c0 - p) + (c0 - p)^2 = s^2 * (r1 - r0)^2 + 2 * s * (r1 - r0) * r0 + r0^2
-            //     s^2 * ((c1 - c0)^2 - (r1 - r0)^2) + 2 * s * ((c1 - c0) * (c0 - p) - (r1 - r0) * r0) + (c0 - p)^2 - r0^2 = 0
             //
-            //     p = 2 * ((c1 - c0) * (c0 - p) - (r1 - r0)) / ((c1 - c0)^2 - (r1 - r0)^2)
-            //     s = -p/2 ± sqrt(p^2/4 - ((c1 - c0)^2 - (r1 - r0)^2) * ((c0 - p)^2 - r0^2) / ((c1 - c0)^2 - (r1 - r0)^2)
-
-            // XXX more detailed start and end, less detailed middle
-            // XXX simplify term in sqrt (?)
+            // Rearranging terms, we get a quadratic equation in s:
+            //
+            //     A * s^2 + B * s + C = 0
+            //
+            // with:
+            //
+            //     A = (c1 - c0)^2 - (r1 - r0)^2
+            //     B = -2 * ((c1 - c0) * (p - c0) + (r1 - r0) * r0)
+            //     C = (c0 - p)^2 - r0^2
+            //
+            // When both circles touch in one point, A = 0 and we get a linear equation instead.
 
             // FIXME: Normalize m_end to have unit length from m_start.
             Gfx::FloatVector2 to_point { point.x() - m_start.x(), point.y() - m_start.y() };
             Gfx::FloatVector2 to_end { m_end.x() - m_start.x(), m_end.y() - m_start.y() };
             float dr = m_end_radius - m_start_radius;
 
-            float s_0, s_1;
+            float s_0;
+            float s_1;
 
-            if (to_end.dot(to_end) != dr*dr) {
-                float p = -2 * (to_end.dot(to_point) + dr * m_start_radius) / (to_end.dot(to_end) - dr*dr);
-                float q = (to_point.dot(to_point) - m_start_radius * m_start_radius) / (to_end.dot(to_end) - dr*dr);
-
+            float A = to_end.dot(to_end) - dr * dr;
+            float B = -2 * (to_end.dot(to_point) + dr * m_start_radius);
+            float C = to_point.dot(to_point) - m_start_radius * m_start_radius;
+            if (A != 0) {
+                float p = B / A;
+                float q = C / A;
                 float discriminant = p * p / 4.0f - q;
                 if (discriminant < 0)
                     continue;
@@ -398,10 +405,8 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
                 s_0 = -p / 2.0f + sqrt(discriminant);
                 s_1 = -p / 2.0f - sqrt(discriminant);
             } else {
-                // Linear case: the circles are the same size.
-                // 2 * s * ((c1 - c0) * (c0 - p) - (r1 - r0) * r0) + (c0 - p)^2 - r0^2 = 0
-                // s = (r0^2 - (c0 - p)^2) / ((c1 - c0) * (c0 - p) - (r1 - r0) * r0) / 2
-                s_0 = (m_start_radius * m_start_radius - to_point.dot(to_point)) / (2 * (-to_end.dot(to_point) - dr * m_start_radius));
+                // Linear case: B * s + C = 0
+                s_0 = -C / B;
                 s_1 = s_0;
             }
 
