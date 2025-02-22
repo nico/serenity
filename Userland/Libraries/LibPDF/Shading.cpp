@@ -419,7 +419,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             // equal_radius x { apart, overlapping } x { no_extend, left_extend, right_extend, both_extend }
             // XXX also test center of one circle on circumference of the other one
 
-            if (to_end.length() <= max(m_start_radius, m_end_radius) - min(m_start_radius, m_end_radius)) {
+            if (to_end.length() < max(m_start_radius, m_end_radius) - min(m_start_radius, m_end_radius)) {
                 // One circle is inside the other one.
                 // One of s_0 will be 0..1 in the main gradient part, and the other one will be negative in the whole circle.
                 s = m_start_radius < m_end_radius ? s_0 : s_1;
