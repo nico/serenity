@@ -363,7 +363,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
 
     for (int y = clip_rect.top(); y < clip_rect.bottom(); ++y) {
         for (int x = clip_rect.left(); x < clip_rect.right(); ++x) {
-            Gfx::FloatPoint pdf = inverse_ctm.map(Gfx::FloatPoint { x, y } / scale);
+            Gfx::FloatPoint point = inverse_ctm.map(Gfx::FloatPoint { x, y } / scale);
 
             // The spec explains how to get a point given s. We want to solve the inverse problem:
             // The current pixel is at p. We want to find the s where (c(s) - p)^2 = r(s)^2.
@@ -381,7 +381,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             // XXX simplify term in sqrt (?)
 
             // FIXME: Normalize m_end to have unit length from m_start.
-            Gfx::FloatVector2 to_point { pdf.x() - m_start.x(), pdf.y() - m_start.y() };
+            Gfx::FloatVector2 to_point { point.x() - m_start.x(), point.y() - m_start.y() };
             Gfx::FloatVector2 to_end { m_end.x() - m_start.x(), m_end.y() - m_start.y() };
             float dr = m_end_radius - m_start_radius;
 
