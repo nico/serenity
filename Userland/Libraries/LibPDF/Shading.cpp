@@ -396,14 +396,14 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             float B = -2 * (to_end.dot(to_point) + dr * m_start_radius);
             float C = to_point.dot(to_point) - m_start_radius * m_start_radius;
             if (A != 0) {
-                float p = B / A;
-                float q = C / A;
-                float discriminant = p * p / 4.0f - q;
+                float discriminant = B * B - 4 * A * C;
                 if (discriminant < 0)
                     continue;
 
-                s_0 = -p / 2.0f + sqrt(discriminant);
-                s_1 = -p / 2.0f - sqrt(discriminant);
+                s_0 = (-B + sqrt(discriminant)) / (2 * A);
+                s_1 = (-B - sqrt(discriminant)) / (2 * A);
+                if (A < 0)
+                    swap(s_0, s_1);
             } else {
                 // Linear case: B * s + C = 0
                 s_0 = -C / B;
