@@ -374,7 +374,7 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             //     s^2 * (c1 - c0)^2 + 2 * s * (c1 - c0) * (c0 - p) + (c0 - p)^2 = s^2 * (r1 - r0)^2 + 2 * s * (r1 - r0) * r0 + r0^2
             //     s^2 * ((c1 - c0)^2 - (r1 - r0)^2) + 2 * s * ((c1 - c0) * (c0 - p) - (r1 - r0) * r0) + (c0 - p)^2 - r0^2 = 0
             //
-            //     p = ((c1 - c0) * (c0 - p) - (r1 - r0)) / ((c1 - c0)^2 - (r1 - r0)^2)
+            //     p = 2 * ((c1 - c0) * (c0 - p) - (r1 - r0)) / ((c1 - c0)^2 - (r1 - r0)^2)
             //     s = -p/2 ± sqrt(p^2/4 - ((c1 - c0)^2 - (r1 - r0)^2) * ((c0 - p)^2 - r0^2) / ((c1 - c0)^2 - (r1 - r0)^2)
 
             // XXX more detailed start and end, less detailed middle
@@ -385,15 +385,25 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
             Gfx::FloatVector2 to_end { m_end.x() - m_start.x(), m_end.y() - m_start.y() };
             float dr = m_end_radius - m_start_radius;
 
-            float p = -2 * (to_end.dot(to_point) + dr * m_start_radius) / (to_end.dot(to_end) - dr*dr);
-            float q = (to_point.dot(to_point) - m_start_radius * m_start_radius) / (to_end.dot(to_end) - dr*dr);
+            float s_0, s_1;
 
-            float discriminant = p * p / 4.0f - q;
-            if (discriminant < 0)
-                continue;
+            if (to_end.dot(to_end) != dr*dr) {
+                float p = -2 * (to_end.dot(to_point) + dr * m_start_radius) / (to_end.dot(to_end) - dr*dr);
+                float q = (to_point.dot(to_point) - m_start_radius * m_start_radius) / (to_end.dot(to_end) - dr*dr);
 
-            float s_0 = -p / 2.0f + sqrt(discriminant);
-            float s_1 = -p / 2.0f - sqrt(discriminant);
+                float discriminant = p * p / 4.0f - q;
+                if (discriminant < 0)
+                    continue;
+
+                s_0 = -p / 2.0f + sqrt(discriminant);
+                s_1 = -p / 2.0f - sqrt(discriminant);
+            } else {
+                // Linear case: the circles are the same size.
+                // 2 * s * ((c1 - c0) * (c0 - p) - (r1 - r0) * r0) + (c0 - p)^2 - r0^2 = 0
+                // s = (r0^2 - (c0 - p)^2) / ((c1 - c0) * (c0 - p) - (r1 - r0) * r0) / 2
+                s_0 = (m_start_radius * m_start_radius - to_point.dot(to_point)) / (2 * (-to_end.dot(to_point) - dr * m_start_radius));
+                s_1 = s_0;
+            }
 
             // XXX maybe the bounds here are wrong?
             // go left to 0 if not extended, down to -r0 / dr else (assuming r1 < r2)
