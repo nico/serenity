@@ -104,6 +104,7 @@ set(CMD_SOURCES_CPP
     matroska.cpp
     md.cpp
     memstat.cpp
+    mkcmyk.cpp
     mkdir.cpp
     mkfifo.cpp
     mkfs.fat.cpp

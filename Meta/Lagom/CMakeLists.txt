@@ -602,6 +602,7 @@ if (BUILD_LAGOM)
             add_serenity_subdirectory(Meta/Lagom/Contrib/VideoPlayerSDL)
         endif()
 
+        lagom_utility(mkcmyk SOURCES ../../Userland/Utilities/mkcmyk.cpp LIBS LibGfx LibMain)
         lagom_utility(icc SOURCES ../../Userland/Utilities/icc.cpp LIBS LibGfx LibMain LibURL)
         lagom_utility(iconv SOURCES ../../Userland/Utilities/iconv.cpp LIBS LibTextCodec LibMain)
         lagom_utility(image SOURCES ../../Userland/Utilities/image.cpp LIBS LibGfx LibMain)
