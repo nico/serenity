@@ -19,7 +19,7 @@ keep_environment_variables=(
 )
 
 for environment_variable_name in "${keep_environment_variables[@]}"; do
-    if [ -v "${environment_variable_name}" ]; then
+    if [ -n "${environment_variable_name+x}" ]; then
         environment_variables+=("${environment_variable_name}=${!environment_variable_name}")
     fi
 done

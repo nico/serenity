@@ -8,7 +8,16 @@ if [ -z "${SERENITY_STRIPPED_ENV:-}" ]; then
 fi
 unset SERENITY_STRIPPED_ENV
 
-export MAKEJOBS="${MAKEJOBS:-$(nproc)}"
+case "$(uname -s)" in
+  Darwin*)
+    num_cores=$(sysctl -n hw.ncpu)
+    ;;
+  *)
+    num_cores=$(nproc)
+    ;;
+esac
+
+export MAKEJOBS="${MAKEJOBS:-${num_cores}}"
 export CMAKE_BUILD_PARALLEL_LEVEL="$MAKEJOBS"
 
 buildstep() {
