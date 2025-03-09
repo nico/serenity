@@ -7,6 +7,7 @@
 #pragma once
 
 #include <AK/Function.h>
+#include <AK/GeneratorIterator.h>
 
 namespace Gfx::JPEG2000 {
 
@@ -37,9 +38,13 @@ public:
     virtual ProgressionData next() override;
 
 private:
+    Generator<ProgressionData, Empty> generator();
+
+    int m_layer_count { 0 };
+    int m_max_number_of_decomposition_levels { 0 };
+    int m_component_count { 0 };
     Function<int(int resolution_level, int component)> m_precinct_count;
-    ProgressionData m_next {};
-    ProgressionData m_end {};
+    GeneratorIterator<ProgressionData> m_generator;
 };
 
 // B.12.1.2 Resolution level-layer-component-position progression
