@@ -340,6 +340,7 @@ This list is also available at [ports.serenityos.net](https://ports.serenityos.n
 | [`vlang`](vlang/)                             | V programming language                                        | weekly.2021.31           | https://github.com/vlang/v                                           |
 | [`vttest`](vttest/)                           | vttest                                                        | 20240708                 | https://invisible-island.net/vttest/                                 |
 | [`VVVVVV`](VVVVVV/)                           | Terry Cavanagh's VVVVVV                                       | 2.3.6                    | https://github.com/TerryCavanagh/VVVVVV/                             |
+| [`vv`](vv/)                                   | Terminal image viewer                                         | 3.2                      | https://github.com/wolfpld/vv                                        |
 | [`wayland`](wayland/)                         | Wayland client libraries                                      | 1.21.0                   | https://wayland.freedesktop.org/                                     |
 | [`wget`](wget/)                               | GNU Wget                                                      | 1.25.0                   | https://www.gnu.org/software/wget/                                   |
 | [`which`](which/)                             | GNU which                                                     | 2.21                     | https://www.gnu.org/software/which/                                  |
