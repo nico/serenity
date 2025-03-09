@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <AK/Format.h>
 #include <AK/Function.h>
 #include <AK/GeneratorIterator.h>
 
@@ -63,6 +64,18 @@ private:
     int m_component_count { 0 };
     Function<int(int resolution_level, int component)> m_precinct_count;
     GeneratorIterator<ProgressionData> m_generator;
+};
+
+}
+
+namespace AK {
+
+template<>
+struct Formatter<Gfx::JPEG2000::ProgressionData> : Formatter<FormatString> {
+    ErrorOr<void> format(FormatBuilder& builder, Gfx::JPEG2000::ProgressionData const& value)
+    {
+        return Formatter<FormatString>::format(builder, "layer={}, resolution_level={}, component={}, precinct={}"sv, value.layer, value.resolution_level, value.component, value.precinct);
+    }
 };
 
 }
