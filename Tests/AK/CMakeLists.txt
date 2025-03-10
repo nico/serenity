@@ -38,6 +38,7 @@ set(AK_TEST_SOURCES
     TestFunction.cpp
     TestFuzzyMatch.cpp
     TestGeneratorAK.cpp
+    TestGeneratorIterator.cpp
     TestGenericLexer.cpp
     TestHashFunctions.cpp
     TestHashMap.cpp
