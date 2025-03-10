@@ -16,33 +16,16 @@ LayerResolutionLevelComponentPositionProgressionIterator::LayerResolutionLevelCo
     , m_generator(generator())
 
 {
-    generate_next();
 }
 
 bool LayerResolutionLevelComponentPositionProgressionIterator::has_next() const
 {
-    return m_has_next;
+    return m_generator.has_next();
 }
 
 ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
 {
-    auto result = m_next;
-    generate_next();
-    return result;
-}
-
-void LayerResolutionLevelComponentPositionProgressionIterator::generate_next()
-{
-    auto coroutine = m_generator.next();
-    VERIFY(coroutine.await_ready());
-    coroutine.await_resume().visit(
-        [&](ProgressionData const& data) {
-            m_next = data;
-            m_has_next = true;
-        },
-        [&](Empty) {
-            m_has_next = false;
-        });
+    return m_generator.next();
 }
 
 Generator<ProgressionData, Empty> LayerResolutionLevelComponentPositionProgressionIterator::generator()
