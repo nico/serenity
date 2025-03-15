@@ -27,7 +27,7 @@ ProgressionData LayerResolutionLevelComponentPositionProgressionIterator::next()
     return m_generator.next();
 }
 
-Generator<ProgressionData, Empty> LayerResolutionLevelComponentPositionProgressionIterator::generator()
+Generator<ProgressionData> LayerResolutionLevelComponentPositionProgressionIterator::generator()
 {
     // B.12.1.1 Layer-resolution level-component-position progression
     // "for each l = 0,..., L – 1
@@ -44,7 +44,7 @@ Generator<ProgressionData, Empty> LayerResolutionLevelComponentPositionProgressi
             for (int i = 0; i < m_component_count; ++i)
                 for (int k = 0; k < m_precinct_count(r, i); ++k)
                     co_yield ProgressionData { l, r, i, k };
-    co_return {};
+    co_return;
 }
 
 ResolutionLevelLayerComponentPositionProgressionIterator::ResolutionLevelLayerComponentPositionProgressionIterator(int layer_count, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> precinct_count)
@@ -66,7 +66,7 @@ ProgressionData ResolutionLevelLayerComponentPositionProgressionIterator::next()
     return m_generator.next();
 }
 
-Generator<ProgressionData, Empty> ResolutionLevelLayerComponentPositionProgressionIterator::generator()
+Generator<ProgressionData> ResolutionLevelLayerComponentPositionProgressionIterator::generator()
 {
     // B.12.1.2 Resolution level-layer-component-position progression
     // "for each r = 0,..., Nmax
@@ -82,7 +82,7 @@ Generator<ProgressionData, Empty> ResolutionLevelLayerComponentPositionProgressi
             for (int i = 0; i < m_component_count; ++i)
                 for (int k = 0; k < m_precinct_count(r, i); ++k)
                     co_yield ProgressionData { l, r, i, k };
-    co_return {};
+    co_return;
 }
 
 ResolutionLevelPositionComponentLayerProgressionIterator::ResolutionLevelPositionComponentLayerProgressionIterator(
@@ -119,7 +119,7 @@ ProgressionData ResolutionLevelPositionComponentLayerProgressionIterator::next()
     return m_generator.next();
 }
 
-Generator<ProgressionData, Empty> ResolutionLevelPositionComponentLayerProgressionIterator::generator()
+Generator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionIterator::generator()
 {
     auto compute_precinct = [&](int x, int y, int r, int i) {
         // (B-20)
@@ -166,7 +166,7 @@ Generator<ProgressionData, Empty> ResolutionLevelPositionComponentLayerProgressi
             }
         }
     }
-    co_return {};
+    co_return;
 }
 
 PositionComponentResolutionLevelLayerProgressionIterator::PositionComponentResolutionLevelLayerProgressionIterator(
@@ -202,7 +202,7 @@ ProgressionData PositionComponentResolutionLevelLayerProgressionIterator::next()
     return m_generator.next();
 }
 
-Generator<ProgressionData, Empty> PositionComponentResolutionLevelLayerProgressionIterator::generator()
+Generator<ProgressionData> PositionComponentResolutionLevelLayerProgressionIterator::generator()
 {
     auto compute_precinct = [&](int x, int y, int r, int i) {
         // (B-20)
@@ -249,7 +249,7 @@ Generator<ProgressionData, Empty> PositionComponentResolutionLevelLayerProgressi
             }
         }
     }
-    co_return {};
+    co_return;
 }
 
 ComponentPositionResolutionLevelLayerProgressionIterator::ComponentPositionResolutionLevelLayerProgressionIterator(
@@ -285,7 +285,7 @@ ProgressionData ComponentPositionResolutionLevelLayerProgressionIterator::next()
     return m_generator.next();
 }
 
-Generator<ProgressionData, Empty> ComponentPositionResolutionLevelLayerProgressionIterator::generator()
+Generator<ProgressionData> ComponentPositionResolutionLevelLayerProgressionIterator::generator()
 {
     auto compute_precinct = [&](int x, int y, int r, int i) {
         // (B-20)
@@ -332,7 +332,7 @@ Generator<ProgressionData, Empty> ComponentPositionResolutionLevelLayerProgressi
             }
         }
     }
-    co_return {};
+    co_return;
 }
 
 }
