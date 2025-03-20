@@ -767,6 +767,124 @@ SyncGenerator<ProgressionData> ResolutionLevelLayerComponentPositionProgressionI
                     co_yield ProgressionData { l, r, i, k };
 }
 
+// B.12.1.3 Resolution level-position-component-layer progression
+class ResolutionLevelPositionComponentLayerProgressionIterator : public ProgressionIterator {
+public:
+    // FIXME: Supporting POC packets will probably require changes to this.
+    ResolutionLevelPositionComponentLayerProgressionIterator(int layer_count, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> precinct_count,
+        Function<int(int component)> XRsiz, Function<int(int component)> YRsiz,
+        Function<int(int resolution_level, int component)> PPx, Function<int(int resolution_level, int component)> PPy,
+        Function<int(int component)> N_L,
+        Function<int(int resolution_level, int component)> num_precincts_wide,
+        Gfx::IntRect tile_rect,
+        Function<IntRect(int resolution_level, int component)> ll_rect);
+    virtual bool has_next() const override;
+    virtual ProgressionData next() override;
+
+private:
+    SyncGenerator<ProgressionData> generator();
+
+    Optional<ProgressionData> m_next;
+    int m_layer_count { 0 };
+    int m_max_number_of_decomposition_levels { 0 };
+    int m_component_count { 0 };
+    Function<int(int resolution_level, int component)> m_precinct_count;
+    Function<int(int component)> m_XRsiz;
+    Function<int(int component)> m_YRsiz;
+    Function<int(int resolution_level, int component)> m_PPx;
+    Function<int(int resolution_level, int component)> m_PPy;
+    Function<int(int component)> m_N_L;
+    Function<int(int resolution_level, int component)> m_num_precincts_wide;
+    Gfx::IntRect m_tile_rect;
+    Function<IntRect(int resolution_level, int component)> m_ll_rect;
+    SyncGenerator<ProgressionData> m_generator;
+};
+
+ResolutionLevelPositionComponentLayerProgressionIterator::ResolutionLevelPositionComponentLayerProgressionIterator(
+    int layer_count, int max_number_of_decomposition_levels, int component_count, Function<int(int resolution_level, int component)> precinct_count,
+    Function<int(int component)> XRsiz, Function<int(int component)> YRsiz,
+    Function<int(int resolution_level, int component)> PPx, Function<int(int resolution_level, int component)> PPy,
+    Function<int(int component)> N_L,
+    Function<int(int resolution_level, int component)> num_precincts_wide,
+    Gfx::IntRect tile_rect,
+    Function<IntRect(int resolution_level, int component)> ll_rect)
+    : m_layer_count(layer_count)
+    , m_max_number_of_decomposition_levels(max_number_of_decomposition_levels)
+    , m_component_count(component_count)
+    , m_precinct_count(move(precinct_count))
+    , m_XRsiz(move(XRsiz))
+    , m_YRsiz(move(YRsiz))
+    , m_PPx(move(PPx))
+    , m_PPy(move(PPy))
+    , m_N_L(move(N_L))
+    , m_num_precincts_wide(move(num_precincts_wide))
+    , m_tile_rect(tile_rect)
+    , m_ll_rect(move(ll_rect))
+    , m_generator(generator())
+{
+    m_next = m_generator.next();
+}
+
+bool ResolutionLevelPositionComponentLayerProgressionIterator::has_next() const
+{
+    return m_next.has_value();
+}
+
+ProgressionData ResolutionLevelPositionComponentLayerProgressionIterator::next()
+{
+    auto result = m_next;
+    m_next = m_generator.next();
+    return result.value();
+}
+
+SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionIterator::generator()
+{
+    auto compute_precinct = [&](int x, int y, int r, int i) {
+        // (B-20)
+        auto const trx0 = m_ll_rect(r, i).left();
+        auto const try0 = m_ll_rect(r, i).top();
+        auto const x_offset = floor_div(ceil_div(x, m_XRsiz(i) * (1 << (m_N_L(i) - r))), 1 << m_PPx(r, i)) - floor_div(trx0, 1 << m_PPx(r, i));
+        auto const y_offset = floor_div(ceil_div(y, m_YRsiz(i) * (1 << (m_N_L(i) - r))), 1 << m_PPy(r, i)) - floor_div(try0, 1 << m_PPy(r, i));
+        return x_offset + m_num_precincts_wide(r, i) * y_offset;
+    };
+    // B.12.1.3 Resolution level-position-component-layer progression
+    // "for each r = 0,..., Nmax
+    //      for each y = ty0,..., ty1 – 1,
+    //          for each x = tx0,..., tx1 – 1,
+    //              for each i = 0,..., Csiz – 1
+    //                  if ((y divisible by YRsiz(i) * 2 ** (PPy(r, i) + N_L(i) - r) OR
+    //                      ((y == ty0) AND (try0 * 2 ** (N_L(i) - r) NOT divisible by 2 ** (PPy(r, i) + N_L(i) - r))))
+    //                  if ((x divisible by XRsiz(i) * 2 ** (PPx(r, i) + N_L(i) - r) OR
+    //                      ((x == tx0) AND (trx0 * 2 ** (N_L(i) - r) NOT divisible by 2 ** (PPx(r, i) + N_L(i) - r))))
+    //          for the next precinct, k, if one exists,
+    //              for each l = 0,..., L – 1
+    //                  packet for component i, resolution level r, layer l, and precinct k."
+    // The motivation for this loop is to walk corresponding precincts in different components at the same time,
+    // even if the components have different precinct counts.
+    for (int r = 0; r <= m_max_number_of_decomposition_levels; ++r) {
+        auto const tx0 = m_tile_rect.left();
+        auto const ty0 = m_tile_rect.top();
+        for (int y = ty0; y < m_tile_rect.bottom(); ++y) {
+            for (int x = tx0; x < m_tile_rect.right(); ++x) {
+                for (int i = 0; i < m_component_count; ++i) {
+                    auto const trx0 = m_ll_rect(r, i).left();
+                    auto const try0 = m_ll_rect(r, i).top();
+                    if ((y % (m_YRsiz(i) * (1 << (m_PPy(r, i) + m_N_L(i) - r))) == 0)
+                        || ((y == ty0) && (try0 * (1 << (m_N_L(i) - r)) % (1 << (m_PPy(r, i) + m_N_L(i) - r)) != 0))) {
+                        if ((x % (m_XRsiz(i) * (1 << (m_PPx(r, i) + m_N_L(i) - r))) == 0)
+                            || ((x == tx0) && (trx0 * (1 << (m_N_L(i) - r)) % (1 << (m_PPx(r, i) + m_N_L(i) - r)) != 0))) {
+                            if (int k = compute_precinct(x, y, r, i); k < m_precinct_count(r, i)) {
+                                for (int l = 0; l < m_layer_count; ++l) {
+                                    co_yield ProgressionData { l, r, i, k };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
 
 struct TilePartData {
     StartOfTilePart sot;
@@ -993,13 +1111,68 @@ static ErrorOr<OwnPtr<ProgressionIterator>> make_progression_iterator(JPEG2000Lo
         return num_precincts_wide * num_precincts_high;
     };
 
+    auto number_of_precincts_wide = [&](int r, int component_index) {
+        auto ll_rect = context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component_index, r, number_of_decomposition_levels_for_component(context, tile, component_index));
+
+// dbgln("ll_rect: {} for tile rect {} component index {} r {}", ll_rect, tile.rect, component_index, r);
+
+        // B.6
+        // (B-16)
+        int num_precincts_wide = 0;
+        // int num_precincts_high = 0;
+        int PPx = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPx;
+        // int PPy = coding_style_parameters_for_component(context, tile, component_index).precinct_sizes[r].PPy;
+
+        // XXX this needs this too :/
+        // XXX or maybe it doesn't, because it's for the LL band and below is for subbands? aaarrrhhhhh
+        // => probably don't need this
+        // if (r > 0) {
+            // PPx--;
+            // PPy--;
+        // }
+
+        if (ll_rect.width() > 0)
+            num_precincts_wide = ceil_div(ll_rect.right(), 1 << PPx) - (ll_rect.x() / (1 << PPx));
+        // if (ll_rect.height() > 0)
+            // num_precincts_high = ceil_div(ll_rect.bottom(), 1 << PPy) - (ll_rect.y() / (1 << PPy));
+        // dbgln("num_precincts_wide: {}, num_precincts_high: {}", num_precincts_wide, num_precincts_high);
+        return num_precincts_wide;
+    };
+
     switch (tile.cod.value_or(context.cod).progression_order) {
     case CodingStyleDefault::ProgressionOrder::LayerResolutionComponentPosition:
         return make<LayerResolutionLevelComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
     case CodingStyleDefault::ResolutionLayerComponentPosition:
         return make<ResolutionLevelLayerComponentPositionProgressionIterator>(number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component));
-    case CodingStyleDefault::ResolutionPositionComponentLayer:
-        return Error::from_string_literal("JPEG200Loader: ResolutionPositionComponentLayer progression order not yet supported");
+    case CodingStyleDefault::ResolutionPositionComponentLayer: {
+        auto XRsiz = [&](size_t i) { return context.siz.components[i].horizontal_separation; };
+        auto YRsiz = [&](size_t i) { return context.siz.components[i].vertical_separation; };
+
+        // "To use this progression, XRsiz and YRsiz values must be powers of two for each component."
+        for (size_t component_index = 0; component_index < context.siz.components.size(); ++component_index) {
+            if (!is_power_of_two(XRsiz(component_index)) || !is_power_of_two(YRsiz(component_index)))
+                return Error::from_string_literal("JPEG2000Loader: ResolutionPositionComponentLayer progression order requires XRsiz and YRsiz to be powers of two");
+        }
+
+        auto PPx = [&](int resolution_level, int component) {
+            return coding_style_parameters_for_component(context, tile, component).precinct_sizes[resolution_level].PPx;
+        };
+        auto PPy = [&](int resolution_level, int component) {
+            return coding_style_parameters_for_component(context, tile, component).precinct_sizes[resolution_level].PPy;
+        };
+        auto N_L = [&](int component) {
+            return coding_style_parameters_for_component(context, tile, component).number_of_decomposition_levels;
+        };
+        auto ll_rect = [&](int resolution_level, int component) {
+            // The outer N_L lambda has been move()d away by the time this runs and can't be called here.
+            auto N_L = coding_style_parameters_for_component(context, tile, component).number_of_decomposition_levels;
+            return context.siz.reference_grid_coordinates_for_ll_band(tile.rect, component, resolution_level, N_L);
+        };
+
+        return make<ResolutionLevelPositionComponentLayerProgressionIterator>(
+            number_of_layers, compute_max_number_of_decomposition_levels(context, tile), context.siz.components.size(), move(number_of_precincts_from_resolution_level_and_component),
+            move(XRsiz), move(YRsiz), move(PPx), move(PPy), move(N_L), move(number_of_precincts_wide), tile.rect, move(ll_rect));
+    }
     case CodingStyleDefault::PositionComponentResolutionLayer:
         return Error::from_string_literal("JPEG200Loader: PositionComponentResolutionLayer progression order not yet supported");
     case CodingStyleDefault::ComponentPositionResolutionLayer:
