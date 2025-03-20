@@ -1275,6 +1275,8 @@ static ErrorOr<void> parse_codestream_main_header(JPEG2000LoadingContext& contex
                 saw_QCD_marker = true;
             } else if (marker.marker == J2K_QCC) {
                 context.qccs.append(TRY(read_quantization_component(marker.data.value(), context.siz.components.size())));
+            } else if (marker.marker == J2K_TLM) {
+                // ignore
             } else if (marker.marker == J2K_COM) {
                 context.coms.append(TRY(read_comment(marker.data.value())));
             } else {
