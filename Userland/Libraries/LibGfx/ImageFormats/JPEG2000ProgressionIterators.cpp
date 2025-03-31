@@ -129,14 +129,6 @@ ProgressionData ResolutionLevelPositionComponentLayerProgressionIterator::next()
 
 SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionIterator::generator()
 {
-    auto compute_precinct = [&](int x, int y, int r, int i) {
-        // (B-20)
-        auto const trx0 = m_ll_rect(r, i).left();
-        auto const try0 = m_ll_rect(r, i).top();
-        auto const x_offset = floor_div(ceil_div(x, m_XRsiz(i) * (1 << (m_N_L(i) - r))), 1 << m_PPx(r, i)) - floor_div(trx0, 1 << m_PPx(r, i));
-        auto const y_offset = floor_div(ceil_div(y, m_YRsiz(i) * (1 << (m_N_L(i) - r))), 1 << m_PPy(r, i)) - floor_div(try0, 1 << m_PPy(r, i));
-        return x_offset + m_num_precincts_wide(r, i) * y_offset;
-    };
     // B.12.1.3 Resolution level-position-component-layer progression
     // "for each r = 0,..., Nmax
     //      for each y = ty0,..., ty1 – 1,
@@ -155,21 +147,25 @@ SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionI
     Vector<Vector<int>> PPxs;
     Vector<Vector<int>> PPys;
     Vector<Vector<int>> precinct_counts;
+    Vector<Vector<int>> num_precincts_wide;
     ll_rects.resize(m_max_number_of_decomposition_levels + 1);
     PPxs.resize(m_max_number_of_decomposition_levels + 1);
     PPxs.resize(m_max_number_of_decomposition_levels + 1);
     PPys.resize(m_max_number_of_decomposition_levels + 1);
     precinct_counts.resize(m_max_number_of_decomposition_levels + 1);
+    num_precincts_wide.resize(m_max_number_of_decomposition_levels + 1);
     for (int r = 0; r <= m_max_number_of_decomposition_levels; ++r) {
         ll_rects[r].resize(m_component_count);
         PPxs[r].resize(m_component_count);
         PPys[r].resize(m_component_count);
         precinct_counts[r].resize(m_component_count);
+        num_precincts_wide[r].resize(m_component_count);
         for (int i = 0; i < m_component_count; ++i) {
             ll_rects[r][i] = m_ll_rect(r, i);
             PPxs[r][i] = m_PPx(r, i);
             PPys[r][i] = m_PPy(r, i);
             precinct_counts[r][i] = m_precinct_count(r, i);
+            num_precincts_wide[r][i] = m_num_precincts_wide(r, i);
         }
     }
 
@@ -184,6 +180,15 @@ SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionI
         XRsizs[i] = m_XRsiz(i);
         YRsizs[i] = m_YRsiz(i);
     }
+
+    auto compute_precinct = [&](int x, int y, int r, int i) {
+        // (B-20)
+        auto const trx0 = m_ll_rect(r, i).left();
+        auto const try0 = m_ll_rect(r, i).top();
+        auto const x_offset = floor_div(ceil_div(x, XRsizs[i] * (1 << (N_Ls[i] - r))), 1 << PPxs[r][i]) - floor_div(trx0, 1 << PPxs[r][i]);
+        auto const y_offset = floor_div(ceil_div(y, YRsizs[i] * (1 << (N_Ls[i] - r))), 1 << PPys[r][i]) - floor_div(try0, 1 << PPys[r][i]);
+        return x_offset + num_precincts_wide[r][i] * y_offset;
+    };
 
     for (int r = 0; r <= m_max_number_of_decomposition_levels; ++r) {
         auto const tx0 = m_tile_rect.left();
