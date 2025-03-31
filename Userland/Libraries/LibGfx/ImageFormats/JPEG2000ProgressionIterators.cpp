@@ -151,19 +151,53 @@ SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionI
     //                  packet for component i, resolution level r, layer l, and precinct k."
     // The motivation for this loop is to walk corresponding precincts in different components at the same time,
     // even if the components have different precinct counts.
+    Vector<Vector<IntRect>> ll_rects;
+    Vector<Vector<int>> PPxs;
+    Vector<Vector<int>> PPys;
+    Vector<Vector<int>> precinct_counts;
+    ll_rects.resize(m_max_number_of_decomposition_levels + 1);
+    PPxs.resize(m_max_number_of_decomposition_levels + 1);
+    PPxs.resize(m_max_number_of_decomposition_levels + 1);
+    PPys.resize(m_max_number_of_decomposition_levels + 1);
+    precinct_counts.resize(m_max_number_of_decomposition_levels + 1);
+    for (int r = 0; r <= m_max_number_of_decomposition_levels; ++r) {
+        ll_rects[r].resize(m_component_count);
+        PPxs[r].resize(m_component_count);
+        PPys[r].resize(m_component_count);
+        precinct_counts[r].resize(m_component_count);
+        for (int i = 0; i < m_component_count; ++i) {
+            ll_rects[r][i] = m_ll_rect(r, i);
+            PPxs[r][i] = m_PPx(r, i);
+            PPys[r][i] = m_PPy(r, i);
+            precinct_counts[r][i] = m_precinct_count(r, i);
+        }
+    }
+
+    Vector<int> N_Ls;
+    Vector<int> XRsizs;
+    Vector<int> YRsizs;
+    N_Ls.resize(m_component_count);
+    XRsizs.resize(m_component_count);
+    YRsizs.resize(m_component_count);
+    for (int i = 0; i < m_component_count; ++i) {
+        N_Ls[i] = m_N_L(i);
+        XRsizs[i] = m_XRsiz(i);
+        YRsizs[i] = m_YRsiz(i);
+    }
+
     for (int r = 0; r <= m_max_number_of_decomposition_levels; ++r) {
         auto const tx0 = m_tile_rect.left();
         auto const ty0 = m_tile_rect.top();
         for (int y = ty0; y < m_tile_rect.bottom(); ++y) {
             for (int x = tx0; x < m_tile_rect.right(); ++x) {
                 for (int i = 0; i < m_component_count; ++i) {
-                    auto const trx0 = m_ll_rect(r, i).left();
-                    auto const try0 = m_ll_rect(r, i).top();
-                    if ((y % (m_YRsiz(i) * (1 << (m_PPy(r, i) + m_N_L(i) - r))) == 0)
-                        || ((y == ty0) && (try0 * (1 << (m_N_L(i) - r)) % (1 << (m_PPy(r, i) + m_N_L(i) - r)) != 0))) {
-                        if ((x % (m_XRsiz(i) * (1 << (m_PPx(r, i) + m_N_L(i) - r))) == 0)
-                            || ((x == tx0) && (trx0 * (1 << (m_N_L(i) - r)) % (1 << (m_PPx(r, i) + m_N_L(i) - r)) != 0))) {
-                            if (int k = compute_precinct(x, y, r, i); k < m_precinct_count(r, i)) {
+                    auto const trx0 = ll_rects[r][i].left();
+                    auto const try0 = ll_rects[r][i].top();
+                    if ((y % (YRsizs[i] * (1 << (PPys[r][i] + N_Ls[i] - r))) == 0)
+                        || ((y == ty0) && (try0 * (1 << (N_Ls[i] - r)) % (1 << (PPys[r][i] + N_Ls[i] - r)) != 0))) {
+                        if ((x % (XRsizs[i] * (1 << (PPxs[r][i] + N_Ls[i] - r))) == 0)
+                            || ((x == tx0) && (trx0 * (1 << (N_Ls[i] - r)) % (1 << (PPxs[r][i] + N_Ls[i] - r)) != 0))) {
+                            if (int k = compute_precinct(x, y, r, i); k < precinct_counts[r][i]) {
                                 for (int l = 0; l < m_layer_count; ++l) {
                                     co_yield ProgressionData { l, r, i, k };
                                 }
