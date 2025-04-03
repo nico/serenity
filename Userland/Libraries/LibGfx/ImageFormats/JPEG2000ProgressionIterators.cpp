@@ -189,8 +189,8 @@ SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionI
 
     auto compute_precinct = [&](int x, int y, int r, int i) {
         // (B-20)
-        auto const trx0 = m_ll_rect(r, i).left();
-        auto const try0 = m_ll_rect(r, i).top();
+        auto const trx0 = ll_rects[r * C + i].left();
+        auto const try0 = ll_rects[r * C + i].top();
         auto const x_offset = floor_div(ceil_div(x, XRsizs[i] * (1 << (N_Ls[i] - r))), 1 << PPxs[r * C + i]) - floor_div(trx0, 1 << PPxs[r * C + i]);
         auto const y_offset = floor_div(ceil_div(y, YRsizs[i] * (1 << (N_Ls[i] - r))), 1 << PPys[r * C + i]) - floor_div(try0, 1 << PPys[r * C + i]);
         return x_offset + num_precincts_wide[r * C + i] * y_offset;
