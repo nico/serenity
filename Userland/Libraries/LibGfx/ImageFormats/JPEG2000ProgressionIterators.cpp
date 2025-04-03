@@ -145,38 +145,47 @@ SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionI
     // even if the components have different precinct counts.
     int const N = m_max_number_of_decomposition_levels + 1;
     int const C = m_component_count;
-    Vector<IntRect> ll_rects;
-    Vector<int> PPxs;
-    Vector<int> PPys;
-    Vector<int> precinct_counts;
-    Vector<int> num_precincts_wide;
-    ll_rects.resize(N * m_component_count);
-    PPxs.resize(N * m_component_count);
-    PPxs.resize(N * m_component_count);
-    PPys.resize(N * m_component_count);
-    precinct_counts.resize(N * m_component_count);
-    num_precincts_wide.resize(N * m_component_count);
+    Vector<IntRect> ll_rects_vec;
+    Vector<int> PPxs_vec;
+    Vector<int> PPys_vec;
+    Vector<int> precinct_counts_vec;
+    Vector<int> num_precincts_wide_vec;
+    ll_rects_vec.resize(N * m_component_count);
+    PPxs_vec.resize(N * m_component_count);
+    PPxs_vec.resize(N * m_component_count);
+    PPys_vec.resize(N * m_component_count);
+    precinct_counts_vec.resize(N * m_component_count);
+    num_precincts_wide_vec.resize(N * m_component_count);
     for (int r = 0; r <= m_max_number_of_decomposition_levels; ++r) {
         for (int i = 0; i < m_component_count; ++i) {
-            ll_rects[r * C + i] = m_ll_rect(r, i);
-            PPxs[r * C + i] = m_PPx(r, i);
-            PPys[r * C + i] = m_PPy(r, i);
-            precinct_counts[r * C + i] = m_precinct_count(r, i);
-            num_precincts_wide[r * C + i] = m_num_precincts_wide(r, i);
+            ll_rects_vec[r * C + i] = m_ll_rect(r, i);
+            PPxs_vec[r * C + i] = m_PPx(r, i);
+            PPys_vec[r * C + i] = m_PPy(r, i);
+            precinct_counts_vec[r * C + i] = m_precinct_count(r, i);
+            num_precincts_wide_vec[r * C + i] = m_num_precincts_wide(r, i);
         }
     }
 
-    Vector<int> N_Ls;
-    Vector<int> XRsizs;
-    Vector<int> YRsizs;
-    N_Ls.resize(m_component_count);
-    XRsizs.resize(m_component_count);
-    YRsizs.resize(m_component_count);
+    Vector<int> N_Ls_vec;
+    Vector<int> XRsizs_vec;
+    Vector<int> YRsizs_vec;
+    N_Ls_vec.resize(m_component_count);
+    XRsizs_vec.resize(m_component_count);
+    YRsizs_vec.resize(m_component_count);
     for (int i = 0; i < m_component_count; ++i) {
-        N_Ls[i] = m_N_L(i);
-        XRsizs[i] = m_XRsiz(i);
-        YRsizs[i] = m_YRsiz(i);
+        N_Ls_vec[i] = m_N_L(i);
+        XRsizs_vec[i] = m_XRsiz(i);
+        YRsizs_vec[i] = m_YRsiz(i);
     }
+
+    auto* ll_rects = ll_rects_vec.data();
+    auto* PPxs = PPxs_vec.data();
+    auto* PPys = PPys_vec.data();
+    auto* precinct_counts = precinct_counts_vec.data();
+    auto* num_precincts_wide = num_precincts_wide_vec.data();
+    auto* N_Ls = N_Ls_vec.data();
+    auto* XRsizs = XRsizs_vec.data();
+    auto* YRsizs = YRsizs_vec.data();
 
     auto compute_precinct = [&](int x, int y, int r, int i) {
         // (B-20)
