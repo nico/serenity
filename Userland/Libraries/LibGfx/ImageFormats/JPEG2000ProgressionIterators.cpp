@@ -187,12 +187,14 @@ SyncGenerator<ProgressionData> ResolutionLevelPositionComponentLayerProgressionI
         return x_offset + num_precincts_wide[r * C + i] * y_offset;
     };
 
-    for (int r = 0; r <= m_max_number_of_decomposition_levels; ++r) {
+    for (int r = 0; r < N; ++r) {
         auto const tx0 = m_tile_rect.left();
         auto const ty0 = m_tile_rect.top();
-        for (int y = ty0; y < m_tile_rect.bottom(); ++y) {
-            for (int x = tx0; x < m_tile_rect.right(); ++x) {
-                for (int i = 0; i < m_component_count; ++i) {
+        auto const tx1 = m_tile_rect.right();
+        auto const ty1 = m_tile_rect.bottom();
+        for (int y = ty0; y < ty1; ++y) {
+            for (int x = tx0; x < tx1; ++x) {
+                for (int i = 0; i < C; ++i) {
                     auto const trx0 = ll_rects[r * C + i].left();
                     auto const try0 = ll_rects[r * C + i].top();
                     if ((y % (YRsizs[i] * (1 << (PPys[r * C + i] + N_Ls[i] - r))) == 0)
