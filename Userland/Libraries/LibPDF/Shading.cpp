@@ -790,6 +790,16 @@ PDFErrorOr<void> draw_gouraud_triangles(Gfx::Painter& painter, Gfx::AffineTransf
     return {};
 }
 
+void draw_gouraud_quad(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudPaintStyle::FunctionsType functions, Vector<Gfx::FloatPoint, 4> points, Vector<GouraudPaintStyle::Color, 4> colors)
+{
+    VERIFY(points.size() == 4);
+    VERIFY(colors.size() == 4);
+
+    // FIXME: https://gpuopen.com/learn/bilinear-interpolation-quadrilateral-barycentric-coordinates/ / https://jcgt.org/published/0011/03/04/paper.pdf instead.
+    draw_gouraud_triangle(painter, color_space, functions, { points[0], points[1], points[2] }, { colors[0], colors[1], colors[2] });
+    draw_gouraud_triangle(painter, color_space, functions, { points[0], points[2], points[3] }, { colors[0], colors[2], colors[3] });
+}
+
 class FreeFormGouraudShading final : public Shading {
 public:
     static PDFErrorOr<NonnullRefPtr<FreeFormGouraudShading>> create(Document*, NonnullRefPtr<StreamObject>, CommonEntries);
@@ -1375,9 +1385,10 @@ private:
         u32 colors[4];
     };
 
-    TensorProductPatchShading(CommonEntries common_entries, Vector<float> patch_data, Vector<TensorProductPatch> patches, FunctionsType functions)
+    TensorProductPatchShading(CommonEntries common_entries, Vector<float> patch_data, size_t number_of_components, Vector<TensorProductPatch> patches, FunctionsType functions)
         : m_common_entries(move(common_entries))
         , m_patch_data(move(patch_data))
+        , m_number_of_components(number_of_components)
         , m_patches(move(patches))
         , m_functions(move(functions))
     {
@@ -1388,6 +1399,7 @@ private:
     // Interleaved x0, y0, x1, y1, ..., x15, y15, c0, c1, c2, c3, ...
     // (For flags 1-3, only 12 coordinates and 2 colors.)
     Vector<float> m_patch_data;
+    size_t m_number_of_components { 0 };
     Vector<TensorProductPatch> m_patches;
     FunctionsType m_functions;
 };
@@ -1653,12 +1665,36 @@ PDFErrorOr<NonnullRefPtr<TensorProductPatchShading>> TensorProductPatchShading::
         bitstream.align_to_byte_boundary();
     }
 
-    return adopt_ref(*new TensorProductPatchShading(move(common_entries), move(patch_data), move(patches), move(functions)));
+    return adopt_ref(*new TensorProductPatchShading(move(common_entries), move(patch_data), number_of_components, move(patches), move(functions)));
 }
 
-PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter&, Gfx::AffineTransform const&)
+PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& inverse_ctm)
 {
-    return Error::rendering_unsupported_error("Cannot draw tensor-product path mesh shadings yet");
+    // XXX pass in forward ctm
+    auto maybe_ctm = inverse_ctm.inverse();
+    if (!maybe_ctm.has_value())
+        return Error::malformed_error("Invalid CTM");
+    auto ctm = maybe_ctm.value();
+
+    for (auto& patch : m_patches) {
+        Gfx::FloatPoint control_points[16];
+        for (size_t i = 0; i < 16; ++i)
+            control_points[i] = ctm.map(Gfx::FloatPoint { m_patch_data[patch.control_points[i]], m_patch_data[patch.control_points[i] + 1] });
+
+        Vector<GouraudPaintStyle::Color, 4> colors;
+        for (size_t i = 0; i < 4; ++i) {
+            GouraudPaintStyle::Color color;
+            color.resize(m_number_of_components);
+            for (size_t j = 0; j < m_number_of_components; ++j) {
+                color[j] = m_patch_data[patch.colors[i] + j];
+            }
+            colors.append(color);
+        }
+        swap(colors[2], colors[3]);
+
+        draw_gouraud_quad(painter, m_common_entries.color_space, m_functions, { control_points[0], control_points[3], control_points[15], control_points[12] }, colors);
+    }
+    return {};
 }
 
 }
