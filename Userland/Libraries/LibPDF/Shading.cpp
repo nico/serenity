@@ -1117,9 +1117,10 @@ private:
         u32 colors[4];
     };
 
-    CoonsPatchShading(CommonEntries common_entries, Vector<float> patch_data, Vector<CoonsPatch> patches, FunctionsType functions)
+    CoonsPatchShading(CommonEntries common_entries, Vector<float> patch_data, size_t number_of_components, Vector<CoonsPatch> patches, FunctionsType functions)
         : m_common_entries(move(common_entries))
         , m_patch_data(move(patch_data))
+        , m_number_of_components(number_of_components)
         , m_patches(move(patches))
         , m_functions(move(functions))
     {
@@ -1130,6 +1131,7 @@ private:
     // Interleaved x0, y0, x1, y1, ..., x11, y11, c0, c1, c2, c3, ...
     // (For flags 1-3, only 8 coordinates and 2 colors.)
     Vector<float> m_patch_data;
+    size_t m_number_of_components { 0 };
     Vector<CoonsPatch> m_patches;
     FunctionsType m_functions;
 };
@@ -1353,12 +1355,81 @@ PDFErrorOr<NonnullRefPtr<CoonsPatchShading>> CoonsPatchShading::create(Document*
         bitstream.align_to_byte_boundary();
     }
 
-    return adopt_ref(*new CoonsPatchShading(move(common_entries), move(patch_data), move(patches), move(functions)));
+    return adopt_ref(*new CoonsPatchShading(move(common_entries), move(patch_data), number_of_components, move(patches), move(functions)));
 }
 
-PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter&, Gfx::AffineTransform const&)
+void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudPaintStyle::FunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudPaintStyle::Color, 4> colors, int depth = 0);
+
+PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& inverse_ctm)
 {
-    return Error::rendering_unsupported_error("Cannot draw coons path mesh shadings yet");
+    // XXX pass in forward ctm
+    auto maybe_ctm = inverse_ctm.inverse();
+    if (!maybe_ctm.has_value())
+        return Error::malformed_error("Invalid CTM");
+    auto ctm = maybe_ctm.value();
+
+    for (auto& patch : m_patches) {
+        // XXX spec ref
+        Gfx::FloatPoint control_points[16];
+
+        for (size_t i = 0; i < 4; ++i)
+            control_points[i] = ctm.map(Gfx::FloatPoint { m_patch_data[patch.control_points[i]], m_patch_data[patch.control_points[i] + 1] });
+
+        for (size_t i = 0; i < 3; ++i)
+            control_points[7 + i * 4] = ctm.map(Gfx::FloatPoint { m_patch_data[patch.control_points[4 + i]], m_patch_data[patch.control_points[4 + i] + 1] });
+        for (size_t i = 0; i < 3; ++i)
+            control_points[14 - i] = ctm.map(Gfx::FloatPoint { m_patch_data[patch.control_points[7 + i]], m_patch_data[patch.control_points[7 + i] + 1] });
+
+        control_points[8] = ctm.map(Gfx::FloatPoint { m_patch_data[patch.control_points[10]], m_patch_data[patch.control_points[10] + 1] });
+        control_points[4] = ctm.map(Gfx::FloatPoint { m_patch_data[patch.control_points[11]], m_patch_data[patch.control_points[11] + 1] });
+
+        // "The Coons patch (type 6) is actually a special case of the tensor-product patch
+        //  (type 7) in which the four internal control points (p11 , p12 , p21 , p22 ) are implicitly
+        //  defined by the boundary curves. The values of the internal control points are giv-
+        //  en by these equations:"
+
+        control_points[5] = (-control_points[0] * 4
+                                + (control_points[1] + control_points[4]) * 6
+                                - (control_points[3] + control_points[12]) * 2
+                                + (control_points[13] + control_points[7]) * 3
+                                - control_points[15])
+            * 1.0f / 9.0f;
+
+        control_points[6] = (-control_points[3] * 4
+                                + (control_points[2] + control_points[7]) * 6
+                                - (control_points[0] + control_points[15]) * 2
+                                + (control_points[14] + control_points[4]) * 3
+                                - control_points[12])
+            * 1.0f / 9.0f;
+
+        control_points[9] = (-control_points[12] * 4
+                                + (control_points[13] + control_points[8]) * 6
+                                - (control_points[15] + control_points[0]) * 2
+                                + (control_points[1] + control_points[11]) * 3
+                                - control_points[3])
+            * 1.0f / 9.0f;
+
+        control_points[10] = (-control_points[15] * 4
+                                 + (control_points[14] + control_points[11]) * 6
+                                 - (control_points[12] + control_points[3]) * 2
+                                 + (control_points[2] + control_points[8]) * 3
+                                 - control_points[0])
+            * 1.0f / 9.0f;
+
+        Vector<GouraudPaintStyle::Color, 4> colors;
+        for (size_t i = 0; i < 4; ++i) {
+            GouraudPaintStyle::Color color;
+            color.resize(m_number_of_components);
+            for (size_t j = 0; j < m_number_of_components; ++j) {
+                color[j] = m_patch_data[patch.colors[i] + j];
+            }
+            colors.append(color);
+        }
+
+        swap(colors[2], colors[3]); // coons order goes in circle, tensor in scanline
+        draw_gouraud_bezier_patch(painter, m_common_entries.color_space, m_functions, control_points, colors);
+    }
+    return {};
 }
 
 class TensorProductPatchShading final : public Shading {
@@ -1668,7 +1739,7 @@ PDFErrorOr<NonnullRefPtr<TensorProductPatchShading>> TensorProductPatchShading::
     return adopt_ref(*new TensorProductPatchShading(move(common_entries), move(patch_data), number_of_components, move(patches), move(functions)));
 }
 
-void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudPaintStyle::FunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudPaintStyle::Color, 4> colors, int depth = 0)
+void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudPaintStyle::FunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudPaintStyle::Color, 4> colors, int depth)
 {
     // const float tolerance = 2000.0f;
 
