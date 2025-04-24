@@ -1773,31 +1773,6 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
         return;
     }
 
-    #if 0
-    // Subdivide the patch into 4 smaller patches using De Casteljau's algorithm.
-    Array level_1_midpoints {
-        (points[0] + points[1] + points[4] + points[5]) / 4,
-        (points[1] + points[2] + points[5] + points[6]) / 4,
-        (points[2] + points[3] + points[6] + points[7]) / 4,
-
-        (points[4] + points[5] + points[8] + points[9]) / 4,
-        (points[5] + points[6] + points[9] + points[10]) / 4,
-        (points[6] + points[7] + points[10] + points[11]) / 4,
-
-        (points[8] + points[9] + points[12] + points[13]) / 4,
-        (points[9] + points[10] + points[13] + points[14]) / 4,
-        (points[10] + points[11] + points[14] + points[15]) / 4,
-    };
-    Array level_2_midpoints {
-        (level_1_midpoints[0] + level_1_midpoints[1] + level_1_midpoints[3] + level_1_midpoints[4]) / 4,
-        (level_1_midpoints[1] + level_1_midpoints[2] + level_1_midpoints[4] + level_1_midpoints[5]) / 4,
-
-        (level_1_midpoints[3] + level_1_midpoints[4] + level_1_midpoints[6] + level_1_midpoints[7]) / 4,
-        (level_1_midpoints[4] + level_1_midpoints[5] + level_1_midpoints[7] + level_1_midpoints[8]) / 4,
-    };
-    auto level_3_midpoint = (level_2_midpoints[0] + level_2_midpoints[1] + level_2_midpoints[2] + level_2_midpoints[3]) / 4;
-    #endif
-
     Vector<Gfx::FloatPoint, 16> new_points;
     new_points.resize(16);
     Vector<GouraudPaintStyle::Color, 4> new_colors;
