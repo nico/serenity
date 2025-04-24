@@ -1697,6 +1697,7 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     // XXX copy colors less
     if (depth == 5 /*|| error < tolerance*/) {
     // if (error < tolerance) {
+        swap(colors[2], colors[3]); // XXX maybe make draw_gouraud_quad the unmodified order
         draw_gouraud_quad(painter, color_space, functions, { points[0], points[3], points[15], points[12] }, colors);
         return;
     }
@@ -1730,7 +1731,15 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points.resize(16);
     Vector<GouraudPaintStyle::Color, 4> new_colors;
     new_colors.resize(4);
-   
+
+    auto lerp = [](GouraudPaintStyle::Color a, GouraudPaintStyle::Color b, float t) {
+        GouraudPaintStyle::Color c;
+        c.resize(a.size());
+        for (size_t i = 0; i < a.size(); ++i)
+            c[i] = a[i] * (1.0f - t) + b[i] * t;
+        return c;
+    };
+
     // XXX fewer mults and adds with separable de casteljau
     // lower left
     new_points[0]  = points[0];
@@ -1753,10 +1762,10 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points[14] = (points[0] + points[4] * 3 + points[8] * 3 + points[12] + (points[1] + points[5] * 3 + points[9] * 3 + points[13]) * 2 +  points[2] + points[6] * 3 + points[10] * 3 + points[14]) / 32.0f;
     new_points[15] = (points[0] + points[4] * 3 + points[8] * 3 + points[12] + (points[1] + points[5] * 3 + points[9] * 3 + points[13]) * 3 + (points[2] + points[6] * 3 + points[10] * 3 + points[14]) * 3 + points[3] + points[7] * 3 + points[11] * 3 + points[15]) / 64.0f;
 
-    new_colors[0] = colors[0];// * 1.0f / 3.0f + colors[3] * 2.0f / 3.0f;
-    new_colors[1] = colors[1];// * 1.0f / 3.0f + colors[2] * 2.0f / 3.0f;
-    new_colors[2] = colors[2];// * 1.0f / 3.0f + colors[0] * 2.0f / 3.0f;
-    new_colors[3] = colors[3];// * 2.0f / 3.0f + colors[3] * 1.0f / 3.0f;
+    new_colors[0] = colors[0];
+    new_colors[1] = lerp(colors[0], colors[1], 0.5f);
+    new_colors[2] = lerp(colors[0], colors[2], 0.5f);
+    new_colors[3] = lerp(lerp(colors[0], colors[1], 0.5f), lerp(colors[2], colors[3], 0.5f), 0.5f);
 
     draw_gouraud_bezier_patch(painter, color_space, functions, new_points, new_colors, depth + 1);
 
@@ -1781,6 +1790,11 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points[14] = (points[2] + points[6] * 3 + points[10] * 3 + points[14] + points[3] + points[7] * 3 + points[11] * 3 + points[15]) / 16.0f;
     new_points[15] = (points[3] + points[7] * 3 + points[11] * 3 + points[15]) / 8.0f;
 
+    new_colors[0] = lerp(colors[0], colors[1], 0.5f);
+    new_colors[1] = colors[1];
+    new_colors[2] = lerp(lerp(colors[0], colors[1], 0.5f), lerp(colors[2], colors[3], 0.5f), 0.5f);
+    new_colors[3] = lerp(colors[1], colors[3], 0.5f);
+
     draw_gouraud_bezier_patch(painter, color_space, functions, new_points, new_colors, depth + 1);
 
     // upper left
@@ -1804,6 +1818,11 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points[2]  = (points[12] + points[8] * 3 + points[4] * 3 + points[0] + (points[13] + points[9] * 3 + points[5] * 3 + points[1]) * 2 +  points[14] + points[10] * 3 + points[6] * 3 + points[2]) / 32.0f;
     new_points[3]  = (points[12] + points[8] * 3 + points[4] * 3 + points[0] + (points[13] + points[9] * 3 + points[5] * 3 + points[1]) * 3 + (points[14] + points[10] * 3 + points[6] * 3 + points[2]) * 3 + points[15] + points[11] * 3 + points[7] * 3 + points[3]) / 64.0f;
 
+    new_colors[0] = lerp(colors[0], colors[2], 0.5f);
+    new_colors[1] = lerp(lerp(colors[0], colors[1], 0.5f), lerp(colors[2], colors[3], 0.5f), 0.5f);
+    new_colors[2] = colors[2];
+    new_colors[3] = lerp(colors[2], colors[3], 0.5f);
+
     draw_gouraud_bezier_patch(painter, color_space, functions, new_points, new_colors, depth + 1);
 
     // upper right
@@ -1826,6 +1845,11 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points[1]  = (points[13] + points[ 9] * 3 + points[5] * 3 + points[1] + (points[14] + points[10] * 3 + points[6] * 3 + points[2]) * 2 +  points[15] + points[11] * 3 + points[7] * 3 + points[3]) / 32.0f;
     new_points[2]  = (points[14] + points[10] * 3 + points[6] * 3 + points[2] +  points[15] + points[11] * 3 + points[7] * 3 + points[3]) / 16.0f;
     new_points[3]  = (points[15] + points[11] * 3 + points[7] * 3 + points[3]) / 8.0f;
+
+    new_colors[0] = lerp(lerp(colors[0], colors[1], 0.5f), lerp(colors[2], colors[3], 0.5f), 0.5f);
+    new_colors[1] = lerp(colors[1], colors[3], 0.5f);
+    new_colors[2] = lerp(colors[2], colors[3], 0.5f);
+    new_colors[3] = colors[3];
 
     draw_gouraud_bezier_patch(painter, color_space, functions, new_points, new_colors, depth + 1);
 
@@ -1853,7 +1877,6 @@ PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter& painter, Gfx::Aff
             }
             colors.append(color);
         }
-        swap(colors[2], colors[3]); // XXX maybe make draw_gouraud_quad the unmodified order
 
         draw_gouraud_bezier_patch(painter, m_common_entries.color_space, m_functions, control_points, colors);
     }
