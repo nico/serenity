@@ -1742,7 +1742,7 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
 
     // XXX fewer mults and adds with separable de casteljau
     // lower left
-    new_points[0]  = points[0];
+    new_points[0]  =  points[0];
     new_points[1]  = (points[0] + points[1]) / 2.0f;
     new_points[2]  = (points[0] + points[1] * 2 + points[2]) / 4.0f;
     new_points[3]  = (points[0] + points[1] * 3 + points[2] * 3 + points[3]) / 8.0f;
@@ -1750,7 +1750,7 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points[4]  = (points[0] + points[4]) / 2.0f;
     new_points[5]  = (points[0] + points[4] +  points[1] + points[5]) / 4.0f;
     new_points[6]  = (points[0] + points[4] + (points[1] + points[5]) * 2 +  points[2] + points[6]) / 8.0f;
-    new_points[7]  = (points[0] + points[4] + (points[1] + points[5]) * 3 + (points[2] + points[4]) * 3 + points[3] + points[7]) / 16.0f;
+    new_points[7]  = (points[0] + points[4] + (points[1] + points[5]) * 3 + (points[2] + points[6]) * 3 + points[3] + points[7]) / 16.0f;
 
     new_points[8]  = (points[0] + points[4] * 2 + points[8]) / 4.0f;
     new_points[9]  = (points[0] + points[4] * 2 + points[8] +  points[1] + points[5] * 2 + points[9]) / 8.0f;
@@ -1773,16 +1773,16 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points[0]  = (points[0] + points[1] * 3 + points[2] * 3 + points[3]) / 8.0f;
     new_points[1]  = (points[1] + points[2] * 2 + points[3]) / 4.0f;
     new_points[2]  = (points[2] + points[3]) / 2.0f;
-    new_points[3]  = points[3];
+    new_points[3]  =  points[3];
 
-    new_points[4]  = (points[0] + points[4] + (points[1] + points[5]) * 3 + (points[2] + points[4]) * 3 + points[3] + points[7]) / 16.0f;
+    new_points[4]  = (points[0] + points[4] + (points[1] + points[5]) * 3 + (points[2] + points[6]) * 3 + points[3] + points[7]) / 16.0f;
     new_points[5]  = (points[1] + points[5] + (points[2] + points[6]) * 2 +  points[3] + points[7]) / 8.0f;
     new_points[6]  = (points[2] + points[6] + points[3] + points[7]) / 4.0f;
     new_points[7]  = (points[3] + points[7]) / 2.0f;
 
-    new_points[8]  = (points[0] + points[4] * 2 + points[8] + (points[1] + points[5] * 2 + points[9]) * 3 + (points[2] + points[6] * 2 + points[10]) * 3 + points[3] + points[7] * 2 + points[11]) / 32.0f;
-    new_points[9]  = (points[1] + points[5] * 2 + points[9] + (points[2] + points[6] * 2 + points[10]) * 2 + points[3] + points[7] * 2 + points[11]) / 16.0f;
-    new_points[10] = (points[2] + points[6] * 2 + points[10] + points[2] + points[7] * 2 + points[11]) / 8.0f;
+    new_points[8]  = (points[0] + points[4] * 2 + points[ 8] + (points[1] + points[5] * 2 + points[ 9]) * 3 + (points[2] + points[6] * 2 + points[10]) * 3 + points[3] + points[7] * 2 + points[11]) / 32.0f;
+    new_points[9]  = (points[1] + points[5] * 2 + points[ 9] + (points[2] + points[6] * 2 + points[10]) * 2 +  points[3] + points[7] * 2 + points[11]) / 16.0f;
+    new_points[10] = (points[2] + points[6] * 2 + points[10] +  points[3] + points[7] * 2 + points[11]) / 8.0f;
     new_points[11] = (points[3] + points[7] * 2 + points[11]) / 4.0f;
 
     new_points[12] = (points[0] + points[4] * 3 + points[ 8] * 3 + points[12] + (points[1] + points[5] * 3 + points[9] * 3 + points[13]) * 3 + (points[2] + points[6] * 3 + points[10] * 3 + points[14]) * 3 + points[3] + points[7] * 3 + points[11] * 3 + points[15]) / 64.0f;
@@ -1798,7 +1798,7 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     draw_gouraud_bezier_patch(painter, color_space, functions, new_points, new_colors, depth + 1);
 
     // upper left
-    new_points[12] = points[12];
+    new_points[12] =  points[12];
     new_points[13] = (points[12] + points[13]) / 2.0f;
     new_points[14] = (points[12] + points[13] * 2 + points[14]) / 4.0f;
     new_points[15] = (points[12] + points[13] * 3 + points[14] * 3 + points[15]) / 8.0f;
@@ -1829,11 +1829,11 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
     new_points[12] = (points[12] + points[13] * 3 + points[14] * 3 + points[15]) / 8.0f;
     new_points[13] = (points[13] + points[14] * 2 + points[15]) / 4.0f;
     new_points[14] = (points[14] + points[15]) / 2.0f;
-    new_points[15] = points[15];
+    new_points[15] =  points[15];
 
-    new_points[8]  = (points[12] + points[8] + (points[13] + points[9]) * 3 + (points[14] + points[10]) * 3 + points[15] + points[11]) / 16.0f;
-    new_points[9]  = (points[13] + points[9] + (points[14] + points[10]) * 2 + points[15] + points[11]) / 8.0f;
-    new_points[10] = (points[14] + points[7] +  points[15] + points[11]) / 4.0f;
+    new_points[8]  = (points[12] + points[ 8] + (points[13] + points[ 9]) * 3 + (points[14] + points[10]) * 3 + points[15] + points[11]) / 16.0f;
+    new_points[9]  = (points[13] + points[ 9] + (points[14] + points[10]) * 2 +  points[15] + points[11]) / 8.0f;
+    new_points[10] = (points[14] + points[10] +  points[15] + points[11]) / 4.0f;
     new_points[11] = (points[15] + points[11]) / 2.0f;
 
     new_points[4]  = (points[12] + points[ 8] * 2 + points[4] + (points[13] + points[ 9] * 2 + points[5]) * 3 + (points[14] + points[10] * 2 + points[6]) * 3 + points[15] + points[11] * 2 + points[7]) / 32.0f;
