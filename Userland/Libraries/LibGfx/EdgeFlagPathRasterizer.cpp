@@ -365,7 +365,14 @@ void EdgeFlagPathRasterizer<SamplesPerPixel>::write_pixel(BitmapFormat format, A
     auto dest_x = offset + m_blit_origin.x();
     auto coverage = SubpixelSample::compute_coverage(sample);
     auto paint_color = scanline_color(scanline, offset, coverage_to_alpha(coverage), color_or_function);
-    scanline_ptr[dest_x] = color_for_format(format, scanline_ptr[dest_x]).blend(paint_color).value();
+#if 0
+    auto dst = color_for_format(format, scanline_ptr[dest_x]);
+    scanline_ptr[dest_x] = dst.blend(paint_color).value();
+#else
+    // aliased
+    (void)format;
+    scanline_ptr[dest_x] = paint_color.with_alpha(255).value();
+#endif
 }
 
 template<unsigned SamplesPerPixel>

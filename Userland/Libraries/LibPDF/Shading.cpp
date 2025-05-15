@@ -644,9 +644,119 @@ PDFErrorOr<void> RadialShading::draw(Gfx::Painter& painter, Gfx::AffineTransform
 using GouraudFunctionsType = Variant<Empty, NonnullRefPtr<Function>, Vector<NonnullRefPtr<Function>>>;
 using GouraudColor = Vector<float, 4>;
 
-PDFErrorOr<void> draw_gouraud_triangle(Gfx::Painter&, NonnullRefPtr<ColorSpace>, GouraudFunctionsType, Array<Gfx::FloatPoint, 3>, Array<GouraudColor, 3>)
+class GouraudPaintStyle final : public Gfx::GradientPaintStyle {
+public:
+    static NonnullRefPtr<GouraudPaintStyle> create(NonnullRefPtr<ColorSpace> color_space, GouraudFunctionsType functions, Array<Gfx::FloatPoint, 3> points, Array<GouraudColor, 3> colors)
+    {
+        return adopt_ref(*new GouraudPaintStyle(move(color_space), move(functions), move(points), move(colors)));
+    }
+
+    Gfx::Color sample_color_2(Gfx::IntPoint origin, Gfx::IntPoint point) const;
+
+    virtual void paint(Gfx::IntRect physical_bounding_box, PaintFunction paint) const override
+    {
+        paint([this, physical_bounding_box](Gfx::IntPoint point) { return sample_color_2(physical_bounding_box.location(), point); });
+    }
+
+private:
+    GouraudPaintStyle(NonnullRefPtr<ColorSpace> color_space, GouraudFunctionsType functions, Array<Gfx::FloatPoint, 3> points, Array<GouraudColor, 3> colors)
+        : m_functions(move(functions))
+        , m_color_space(move(color_space))
+        , m_points(move(points))
+        , m_colors(move(colors))
+    {
+        VERIFY(m_points.size() == 3);
+        // XXX verify
+
+        VERIFY(m_colors.size() == m_points.size());
+        if (m_functions.has<Empty>()) {
+            for (size_t i = 0; i < m_colors.size(); ++i)
+                VERIFY(m_colors[i].size() == static_cast<size_t>(m_color_space->number_of_components()));
+        } else {
+            for (size_t i = 0; i < m_colors.size(); ++i)
+                VERIFY(m_colors[i].size() == 1);
+
+            // XXX comment enough; already ensured by parsing
+            // if (m_functions.has<NonnullRefPtr<Function>>())
+            //     VERIFY(m_functions.get<NonnullRefPtr<Function>>()->number_of_outputs() == static_cast<size_t>(m_color_space->number_of_components()));
+            // else {
+            //     VERIFY(m_functions.get<Vector<NonnullRefPtr<Function>>>().size() == static_cast<size_t>(m_color_space->number_of_components()));
+            //     // XXX and each function has size 1
+            // }
+        }
+    }
+
+    GouraudFunctionsType m_functions;
+    NonnullRefPtr<ColorSpace> m_color_space;
+    Array<Gfx::FloatPoint, 3> m_points;
+    Array<GouraudColor, 3> m_colors;
+};
+
+Gfx::Color GouraudPaintStyle::sample_color_2(Gfx::IntPoint origin, Gfx::IntPoint relative_point) const
 {
-    return Error::rendering_unsupported_error("Cannot draw Gouraud triangles yet");
+    auto signed_area = [](Gfx::FloatPoint a, Gfx::FloatPoint b, Gfx::FloatPoint c) {
+        return (a.x() - c.x()) * (b.y() - c.y()) - (b.x() - c.x()) * (a.y() - c.y());
+    };
+
+    auto point = Gfx::FloatPoint { origin } + Gfx::FloatPoint { relative_point };
+
+    float area = signed_area(m_points[0], m_points[1], m_points[2]);
+    VERIFY(area != 0);
+    float alpha = signed_area(point, m_points[1], m_points[2]) / area;
+    float beta = signed_area(m_points[0], point, m_points[2]) / area;
+    float gamma = signed_area(m_points[0], m_points[1], point) / area;
+
+    GouraudColor color;
+    color.resize(m_color_space->number_of_components());
+
+    MUST(m_functions.visit(
+        [&](Empty) -> PDFErrorOr<void> {
+            // No function, just use the colors.
+            // XXX clamp to range of color space instead, for lab :/
+            for (int i = 0; i < m_color_space->number_of_components(); ++i) {
+                // color[i] = clamp(alpha * m_colors[0][i] + beta * m_colors[1][i] + gamma * m_colors[2][i], 0.0f, 1.0f);
+                color[i] = alpha * m_colors[0][i] + beta * m_colors[1][i] + gamma * m_colors[2][i];
+            }
+            return {};
+        },
+        [&](Function const& function) -> PDFErrorOr<void> {
+            float input = clamp(alpha * m_colors[0][0] + beta * m_colors[1][0] + gamma * m_colors[2][0], 0.0f, 1.0f);
+            // XXX verify size stuff somewhere
+
+            auto result = TRY(function.evaluate(to_array({ input })));
+            result.copy_to(color);
+            return {};
+        },
+        [&](Vector<NonnullRefPtr<Function>> const& functions) -> PDFErrorOr<void> {
+            float input = clamp(alpha * m_colors[0][0] + beta * m_colors[1][0] + gamma * m_colors[2][0], 0.0f, 1.0f);
+            // XXX verify size stuff somewhere
+
+            for (size_t i = 0; i < functions.size(); ++i) {
+                auto result = TRY(functions[i]->evaluate(to_array({ input })));
+                // XXX verify size stuff more
+                color[i] = result[0];
+            }
+            return {};
+        }));
+
+    // XXX assumptions...
+    // XXX can m_color_space be a pattern color space here?
+    return MUST(m_color_space->style(color)).get<Gfx::Color>();
+}
+
+void draw_gouraud_triangle(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudFunctionsType functions, Array<Gfx::FloatPoint, 3> points, Array<GouraudColor, 3> colors)
+{
+    static_assert(points.size() == 3);
+    static_assert(colors.size() == 3);
+
+    Gfx::Path triangle_path;
+    triangle_path.move_to(points[0]);
+    triangle_path.line_to(points[1]);
+    triangle_path.line_to(points[2]);
+    triangle_path.close();
+
+    auto paint_style = GouraudPaintStyle::create(move(color_space), move(functions), move(points), move(colors));
+    painter.fill_path(triangle_path, paint_style);
 }
 
 struct Triangle {
@@ -691,7 +801,7 @@ PDFErrorOr<void> draw_gouraud_triangles(Gfx::Painter& painter, Gfx::AffineTransf
             }
             colors[i] = color;
         }
-        TRY(draw_gouraud_triangle(painter, color_space, functions, { a, b, c }, move(colors)));
+        draw_gouraud_triangle(painter, color_space, functions, { a, b, c }, move(colors));
     }
 
     return {};
