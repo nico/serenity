@@ -141,7 +141,7 @@ public:
     void stroke_path(Path const&, Color, int thickness);
 
     void fill_path(Path const&, Color, WindingRule rule = WindingRule::Nonzero);
-    void fill_path(Path const&, PaintStyle const& paint_style, float opacity = 1.0f, WindingRule rule = WindingRule::Nonzero);
+    void fill_path(Path const&, PaintStyle const& paint_style, float opacity = 1.0f, WindingRule rule = WindingRule::Nonzero, bool anti_alias = true);
 
     Font const& font() const
     {

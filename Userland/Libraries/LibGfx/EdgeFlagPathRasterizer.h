@@ -146,7 +146,7 @@ public:
     EdgeFlagPathRasterizer(IntSize);
 
     void fill(Painter&, Path const&, Color, WindingRule, FloatPoint offset = {});
-    void fill(Painter&, Path const&, PaintStyle const&, float opacity, WindingRule, FloatPoint offset = {});
+    void fill(Painter&, Path const&, PaintStyle const&, float opacity, WindingRule, bool anti_alias, FloatPoint offset = {});
 
 private:
     using SubpixelSample = Detail::Sample<SamplesPerPixel>;
@@ -172,12 +172,13 @@ private:
         }
     };
 
-    void fill_internal(Painter&, Path const&, auto color_or_function, WindingRule, FloatPoint offset);
+    void fill_internal(Painter&, Path const&, auto color_or_function, WindingRule, bool anti_alias, FloatPoint offset);
     Detail::Edge* plot_edges_for_scanline(int scanline, auto plot_edge, EdgeExtent&, Detail::Edge* active_edges = nullptr);
 
-    template<WindingRule>
+    template<WindingRule, bool anti_alias>
     FLATTEN void write_scanline(Painter&, int scanline, EdgeExtent, auto& color_or_function);
     Color scanline_color(int scanline, int offset, u8 alpha, auto& color_or_function);
+    template<bool anti_alias>
     void write_pixel(BitmapFormat format, ARGB32* scanline_ptr, int scanline, int offset, SampleType sample, auto& color_or_function);
     void fast_fill_solid_color_span(ARGB32* scanline_ptr, int start, int end, Color color);
 

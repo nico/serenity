@@ -101,11 +101,12 @@ EdgeFlagPathRasterizer<SamplesPerPixel>::EdgeFlagPathRasterizer(IntSize size)
 template<unsigned SamplesPerPixel>
 void EdgeFlagPathRasterizer<SamplesPerPixel>::fill(Painter& painter, Path const& path, Color color, WindingRule winding_rule, FloatPoint offset)
 {
-    fill_internal(painter, path, color, winding_rule, offset);
+    bool const anti_alias = true;
+    fill_internal(painter, path, color, winding_rule, anti_alias, offset);
 }
 
 template<unsigned SamplesPerPixel>
-void EdgeFlagPathRasterizer<SamplesPerPixel>::fill(Painter& painter, Path const& path, PaintStyle const& style, float opacity, WindingRule winding_rule, FloatPoint offset)
+void EdgeFlagPathRasterizer<SamplesPerPixel>::fill(Painter& painter, Path const& path, PaintStyle const& style, float opacity, WindingRule winding_rule, bool anti_alias, FloatPoint offset)
 {
     style.paint(enclosing_int_rect(path.bounding_box()), [&](PaintStyle::SamplerFunction sampler) {
         if (opacity == 0.0f)
@@ -115,14 +116,14 @@ void EdgeFlagPathRasterizer<SamplesPerPixel>::fill(Painter& painter, Path const&
                 painter, path, [=, sampler = move(sampler)](IntPoint point) {
                     return sampler(point).with_opacity(opacity);
                 },
-                winding_rule, offset);
+                winding_rule, anti_alias, offset);
         }
-        return fill_internal(painter, path, move(sampler), winding_rule, offset);
+        return fill_internal(painter, path, move(sampler), winding_rule, anti_alias, offset);
     });
 }
 
 template<unsigned SamplesPerPixel>
-void EdgeFlagPathRasterizer<SamplesPerPixel>::fill_internal(Painter& painter, Path const& path, auto color_or_function, WindingRule winding_rule, FloatPoint offset)
+void EdgeFlagPathRasterizer<SamplesPerPixel>::fill_internal(Painter& painter, Path const& path, auto color_or_function, WindingRule winding_rule, bool anti_alias, FloatPoint offset)
 {
     // FIXME: Figure out how painter scaling works here...
     VERIFY(painter.scale() == 1);
@@ -199,7 +200,10 @@ void EdgeFlagPathRasterizer<SamplesPerPixel>::fill_internal(Painter& painter, Pa
         for (int scanline = min_scanline; scanline <= max_scanline; scanline++) {
             auto edge_extent = empty_edge_extent();
             active_edges = plot_edges_for_scanline(scanline, plot_edge, edge_extent, active_edges);
-            write_scanline<WindingRule::EvenOdd>(painter, scanline, edge_extent, color_or_function);
+            if (anti_alias)
+                write_scanline<WindingRule::EvenOdd, true>(painter, scanline, edge_extent, color_or_function);
+            else
+                write_scanline<WindingRule::EvenOdd, false>(painter, scanline, edge_extent, color_or_function);
         }
     } else {
         VERIFY(winding_rule == WindingRule::Nonzero);
@@ -217,7 +221,10 @@ void EdgeFlagPathRasterizer<SamplesPerPixel>::fill_internal(Painter& painter, Pa
         for (int scanline = min_scanline; scanline <= max_scanline; scanline++) {
             auto edge_extent = empty_edge_extent();
             active_edges = plot_edges_for_scanline(scanline, plot_edge, edge_extent, active_edges);
-            write_scanline<WindingRule::Nonzero>(painter, scanline, edge_extent, color_or_function);
+            if (anti_alias)
+                write_scanline<WindingRule::Nonzero, true>(painter, scanline, edge_extent, color_or_function);
+            else
+                write_scanline<WindingRule::Nonzero, false>(painter, scanline, edge_extent, color_or_function);
         }
     }
 }
@@ -358,14 +365,21 @@ auto EdgeFlagPathRasterizer<SamplesPerPixel>::accumulate_scanline(EdgeExtent edg
 }
 
 template<unsigned SamplesPerPixel>
+template<bool anti_alias>
 void EdgeFlagPathRasterizer<SamplesPerPixel>::write_pixel(BitmapFormat format, ARGB32* scanline_ptr, int scanline, int offset, SampleType sample, auto& color_or_function)
 {
     if (!sample)
         return;
     auto dest_x = offset + m_blit_origin.x();
-    auto coverage = SubpixelSample::compute_coverage(sample);
-    auto paint_color = scanline_color(scanline, offset, coverage_to_alpha(coverage), color_or_function);
-    scanline_ptr[dest_x] = color_for_format(format, scanline_ptr[dest_x]).blend(paint_color).value();
+    if constexpr (anti_alias) {
+        auto coverage = SubpixelSample::compute_coverage(sample);
+        auto paint_color = scanline_color(scanline, offset, coverage_to_alpha(coverage), color_or_function);
+        auto dst = color_for_format(format, scanline_ptr[dest_x]);
+        scanline_ptr[dest_x] = dst.blend(paint_color).value();
+    } else {
+        auto paint_color = scanline_color(scanline, offset, 255, color_or_function);
+        scanline_ptr[dest_x] = paint_color.value();
+    }
 }
 
 template<unsigned SamplesPerPixel>
@@ -377,7 +391,7 @@ void EdgeFlagPathRasterizer<SamplesPerPixel>::fast_fill_solid_color_span(ARGB32*
 }
 
 template<unsigned SamplesPerPixel>
-template<WindingRule WindingRule>
+template<WindingRule WindingRule, bool anti_alias>
 FLATTEN __attribute__((hot)) void EdgeFlagPathRasterizer<SamplesPerPixel>::write_scanline(Painter& painter, int scanline, EdgeExtent edge_extent, auto& color_or_function)
 {
     // Handle scanline clipping.
@@ -404,7 +418,7 @@ FLATTEN __attribute__((hot)) void EdgeFlagPathRasterizer<SamplesPerPixel>::write
     // Used for PaintStyle fills and semi-transparent colors.
     auto write_scanline_pixelwise = [&](auto& color_or_function) {
         accumulate_scanline<WindingRule>(clipped_extent, acc, [&](int x, SampleType sample) {
-            write_pixel(dest_format, dest_ptr, scanline, x, sample, color_or_function);
+            write_pixel<anti_alias>(dest_format, dest_ptr, scanline, x, sample, color_or_function);
         });
     };
     // Fast fill case: Track spans of solid color and set the entire span via a fast_u32_fill().
@@ -419,7 +433,7 @@ FLATTEN __attribute__((hot)) void EdgeFlagPathRasterizer<SamplesPerPixel>::write
                 full_coverage_count++;
                 return;
             } else {
-                write_pixel(dest_format, dest_ptr, scanline, x, sample, color);
+                write_pixel<anti_alias>(dest_format, dest_ptr, scanline, x, sample, color);
             }
             if (full_coverage_count > 0) {
                 fast_fill_solid_color_span(dest_ptr, x - full_coverage_count, x - 1, color);
@@ -448,10 +462,10 @@ void Painter::fill_path(Path const& path, Color color, WindingRule winding_rule)
     rasterizer.fill(*this, path, color, winding_rule);
 }
 
-void Painter::fill_path(Path const& path, PaintStyle const& paint_style, float opacity, WindingRule winding_rule)
+void Painter::fill_path(Path const& path, PaintStyle const& paint_style, float opacity, WindingRule winding_rule, bool anti_alias)
 {
     EdgeFlagPathRasterizer<8> rasterizer(path_bounds(path));
-    rasterizer.fill(*this, path, paint_style, opacity, winding_rule);
+    rasterizer.fill(*this, path, paint_style, opacity, winding_rule, anti_alias);
 }
 
 void AntiAliasingPainter::fill_path(Path const& path, Color color, WindingRule winding_rule)
@@ -463,7 +477,8 @@ void AntiAliasingPainter::fill_path(Path const& path, Color color, WindingRule w
 void AntiAliasingPainter::fill_path(Path const& path, PaintStyle const& paint_style, float opacity, WindingRule winding_rule)
 {
     EdgeFlagPathRasterizer<32> rasterizer(path_bounds(path));
-    rasterizer.fill(m_underlying_painter, path, paint_style, opacity, winding_rule, m_transform.translation());
+    bool const anti_alias = true;
+    rasterizer.fill(m_underlying_painter, path, paint_style, opacity, winding_rule, anti_alias, m_transform.translation());
 }
 
 template class EdgeFlagPathRasterizer<8>;
