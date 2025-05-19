@@ -1362,6 +1362,14 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
 
 PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& ctm)
 {
+    NonnullRefPtr<ColorSpace> color_space = m_common_entries.color_space;
+    bool is_indexed = color_space->family() == ColorSpaceFamily::Indexed;
+    RefPtr<IndexedColorSpace> indexed_color_space;
+    if (is_indexed) {
+        indexed_color_space = static_ptr_cast<IndexedColorSpace>(color_space);
+        color_space = indexed_color_space->base_color_space();
+    }
+
     for (auto& patch : m_patches) {
         // XXX spec ref
         Gfx::FloatPoint control_points[16];
@@ -1413,15 +1421,25 @@ PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTrans
         Vector<GouraudColor, 4> colors;
         for (size_t i = 0; i < 4; ++i) {
             GouraudColor color;
-            color.resize(m_number_of_components);
-            for (size_t j = 0; j < m_number_of_components; ++j) {
-                color[j] = m_patch_data[patch.colors[i] + j];
+
+            if (is_indexed) {
+                // "If ColorSpace is an Indexed color space, all color values specified in the shading
+                //  are immediately converted to the base color space. [...] Interpolation never occurs
+                //  in an Indexed color space, which is quantized and therefore inappropriate for calculations
+                //  that assume a continuous range of colors."
+                color.extend(TRY(indexed_color_space->base_components(m_patch_data[patch.colors[i]])));
+            } else {
+                color.resize(m_number_of_components);
+                for (size_t j = 0; j < m_number_of_components; ++j) {
+                    color[j] = m_patch_data[patch.colors[i] + j];
+                }
             }
+
             colors.append(color);
         }
 
         swap(colors[2], colors[3]); // coons order goes in circle, tensor in scanline
-        draw_gouraud_bezier_patch(painter, m_common_entries.color_space, m_functions, control_points, colors);
+        draw_gouraud_bezier_patch(painter, color_space, m_functions, control_points, colors);
     }
     return {};
 }
@@ -1897,6 +1915,14 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
 
 PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& ctm)
 {
+    NonnullRefPtr<ColorSpace> color_space = m_common_entries.color_space;
+    bool is_indexed = color_space->family() == ColorSpaceFamily::Indexed;
+    RefPtr<IndexedColorSpace> indexed_color_space;
+    if (is_indexed) {
+        indexed_color_space = static_ptr_cast<IndexedColorSpace>(color_space);
+        color_space = indexed_color_space->base_color_space();
+    }
+
     for (auto& patch : m_patches) {
         Gfx::FloatPoint control_points[16];
         for (size_t i = 0; i < 16; ++i)
@@ -1905,14 +1931,24 @@ PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter& painter, Gfx::Aff
         Vector<GouraudColor, 4> colors;
         for (size_t i = 0; i < 4; ++i) {
             GouraudColor color;
-            color.resize(m_number_of_components);
-            for (size_t j = 0; j < m_number_of_components; ++j) {
-                color[j] = m_patch_data[patch.colors[i] + j];
+
+            if (is_indexed) {
+                // "If ColorSpace is an Indexed color space, all color values specified in the shading
+                //  are immediately converted to the base color space. [...] Interpolation never occurs
+                //  in an Indexed color space, which is quantized and therefore inappropriate for calculations
+                //  that assume a continuous range of colors."
+                color.extend(TRY(indexed_color_space->base_components(m_patch_data[patch.colors[i]])));
+            } else {
+                color.resize(m_number_of_components);
+                for (size_t j = 0; j < m_number_of_components; ++j) {
+                    color[j] = m_patch_data[patch.colors[i] + j];
+                }
             }
+
             colors.append(color);
         }
 
-        draw_gouraud_bezier_patch(painter, m_common_entries.color_space, m_functions, control_points, colors);
+        draw_gouraud_bezier_patch(painter, color_space, m_functions, control_points, colors);
     }
     return {};
 }
