@@ -790,7 +790,7 @@ PDFErrorOr<void> draw_gouraud_triangles(Gfx::Painter& painter, Gfx::AffineTransf
     return {};
 }
 
-void draw_gouraud_quad(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudPaintStyle::FunctionsType functions, Vector<Gfx::FloatPoint, 4> points, Vector<GouraudPaintStyle::Color, 4> colors)
+void draw_gouraud_quad(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudFunctionsType functions, Vector<Gfx::FloatPoint, 4> points, Vector<GouraudColor, 4> colors)
 {
     VERIFY(points.size() == 4);
     VERIFY(colors.size() == 4);
@@ -1358,7 +1358,7 @@ PDFErrorOr<NonnullRefPtr<CoonsPatchShading>> CoonsPatchShading::create(Document*
     return adopt_ref(*new CoonsPatchShading(move(common_entries), move(patch_data), number_of_components, move(patches), move(functions)));
 }
 
-void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudPaintStyle::FunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudPaintStyle::Color, 4> colors, int depth = 0);
+void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudFunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudColor, 4> colors, int depth = 0);
 
 PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& inverse_ctm)
 {
@@ -1416,9 +1416,9 @@ PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTrans
                                  - control_points[0])
             * 1.0f / 9.0f;
 
-        Vector<GouraudPaintStyle::Color, 4> colors;
+        Vector<GouraudColor, 4> colors;
         for (size_t i = 0; i < 4; ++i) {
-            GouraudPaintStyle::Color color;
+            GouraudColor color;
             color.resize(m_number_of_components);
             for (size_t j = 0; j < m_number_of_components; ++j) {
                 color[j] = m_patch_data[patch.colors[i] + j];
@@ -1739,7 +1739,7 @@ PDFErrorOr<NonnullRefPtr<TensorProductPatchShading>> TensorProductPatchShading::
     return adopt_ref(*new TensorProductPatchShading(move(common_entries), move(patch_data), number_of_components, move(patches), move(functions)));
 }
 
-void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudPaintStyle::FunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudPaintStyle::Color, 4> colors, int depth)
+void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudFunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudColor, 4> colors, int depth)
 {
     // const float tolerance = 2000.0f;
 
@@ -1775,11 +1775,11 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
 
     Vector<Gfx::FloatPoint, 16> new_points;
     new_points.resize(16);
-    Vector<GouraudPaintStyle::Color, 4> new_colors;
+    Vector<GouraudColor, 4> new_colors;
     new_colors.resize(4);
 
-    auto lerp = [](GouraudPaintStyle::Color a, GouraudPaintStyle::Color b, float t) {
-        GouraudPaintStyle::Color c;
+    auto lerp = [](GouraudColor a, GouraudColor b, float t) {
+        GouraudColor c;
         c.resize(a.size());
         for (size_t i = 0; i < a.size(); ++i)
             c[i] = a[i] * (1.0f - t) + b[i] * t;
@@ -1914,9 +1914,9 @@ PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter& painter, Gfx::Aff
         for (size_t i = 0; i < 16; ++i)
             control_points[i] = ctm.map(Gfx::FloatPoint { m_patch_data[patch.control_points[i]], m_patch_data[patch.control_points[i] + 1] });
 
-        Vector<GouraudPaintStyle::Color, 4> colors;
+        Vector<GouraudColor, 4> colors;
         for (size_t i = 0; i < 4; ++i) {
-            GouraudPaintStyle::Color color;
+            GouraudColor color;
             color.resize(m_number_of_components);
             for (size_t j = 0; j < m_number_of_components; ++j) {
                 color[j] = m_patch_data[patch.colors[i] + j];
