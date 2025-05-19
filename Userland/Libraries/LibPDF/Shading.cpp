@@ -1360,14 +1360,8 @@ PDFErrorOr<NonnullRefPtr<CoonsPatchShading>> CoonsPatchShading::create(Document*
 
 void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> color_space, GouraudFunctionsType functions, ReadonlySpan<Gfx::FloatPoint> points, Vector<GouraudColor, 4> colors, int depth = 0);
 
-PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& inverse_ctm)
+PDFErrorOr<void> CoonsPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& ctm)
 {
-    // XXX pass in forward ctm
-    auto maybe_ctm = inverse_ctm.inverse();
-    if (!maybe_ctm.has_value())
-        return Error::malformed_error("Invalid CTM");
-    auto ctm = maybe_ctm.value();
-
     for (auto& patch : m_patches) {
         // XXX spec ref
         Gfx::FloatPoint control_points[16];
@@ -1901,14 +1895,8 @@ void draw_gouraud_bezier_patch(Gfx::Painter& painter, NonnullRefPtr<ColorSpace> 
 
 }
 
-PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& inverse_ctm)
+PDFErrorOr<void> TensorProductPatchShading::draw(Gfx::Painter& painter, Gfx::AffineTransform const& ctm)
 {
-    // XXX pass in forward ctm
-    auto maybe_ctm = inverse_ctm.inverse();
-    if (!maybe_ctm.has_value())
-        return Error::malformed_error("Invalid CTM");
-    auto ctm = maybe_ctm.value();
-
     for (auto& patch : m_patches) {
         Gfx::FloatPoint control_points[16];
         for (size_t i = 0; i < 16; ++i)
