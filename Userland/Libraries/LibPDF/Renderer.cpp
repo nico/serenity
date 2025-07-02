@@ -324,26 +324,36 @@ void Renderer::end_path_paint()
         deactivate_clip();
 }
 
-void Renderer::stroke_current_path()
+PDFErrorOr<void> Renderer::stroke_current_path()
 {
+    if (state().stroke_alpha_constant < 1.0f)
+        return Error::rendering_unsupported_error("Renderer::stroke_current_path: stroke alpha constant is less than 1.0");
+
     if (state().stroke_style.has<NonnullRefPtr<Gfx::PaintStyle>>()) {
         m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_style.get<NonnullRefPtr<Gfx::PaintStyle>>(), stroke_style(), state().stroke_alpha_constant);
     } else {
         m_anti_aliasing_painter.stroke_path(m_current_path, state().stroke_style.get<Color>(), stroke_style());
     }
+    return {};
 }
 
-void Renderer::fill_current_path(Gfx::WindingRule winding_rule)
+PDFErrorOr<void> Renderer::fill_current_path(Gfx::WindingRule winding_rule)
 {
+    if (state().paint_alpha_constant < 1.0f)
+        return Error::rendering_unsupported_error("Renderer::fill_current_path: fill alpha constant is less than 1.0");
+
     if (state().paint_style.has<NonnullRefPtr<Gfx::PaintStyle>>()) {
         m_anti_aliasing_painter.fill_path(m_current_path, state().paint_style.get<NonnullRefPtr<Gfx::PaintStyle>>(), state().paint_alpha_constant, winding_rule);
     } else {
         m_anti_aliasing_painter.fill_path(m_current_path, state().paint_style.get<Color>(), winding_rule);
     }
+    return {};
 }
 
-void Renderer::fill_and_stroke_current_path(Gfx::WindingRule winding_rule)
+PDFErrorOr<void> Renderer::fill_and_stroke_current_path(Gfx::WindingRule winding_rule)
 {
+    if (state().paint_alpha_constant < 1.0f || state().stroke_alpha_constant < 1.0f)
+        return Error::rendering_unsupported_error("Renderer::fill_and_stroke_current_path: fill or stroke alpha constant is less than 1.0");
     // Note: Just drawing the stroke on top of the fill is incorrect if the stroke is not opaque.
     // See "Special Path-Painting Considerations" on page 569 of the PDF 1.7 spec:
     // We're supposed to draw the stroke first, and then the fill only on pixels that weren't already stroked.
@@ -352,16 +362,17 @@ void Renderer::fill_and_stroke_current_path(Gfx::WindingRule winding_rule)
     // FIXME: Once we have support for transparency groups, do this per spec.
     auto path_end = m_current_path.end();
     m_current_path.close_all_subpaths();
-    fill_current_path(winding_rule);
+    TRY(fill_current_path(winding_rule));
     // .close_all_subpaths() only adds to the end of the path, so we can .trim() the path to remove any changes.
     m_current_path.trim(path_end);
-    stroke_current_path();
+    TRY(stroke_current_path());
+    return {};
 }
 
 RENDERER_HANDLER(path_stroke)
 {
     begin_path_paint();
-    stroke_current_path();
+    TRY(stroke_current_path());
     end_path_paint();
     return {};
 }
@@ -377,7 +388,7 @@ RENDERER_HANDLER(path_fill_nonzero)
 {
     begin_path_paint();
     m_current_path.close_all_subpaths();
-    fill_current_path(Gfx::WindingRule::Nonzero);
+    TRY(fill_current_path(Gfx::WindingRule::Nonzero));
     end_path_paint();
     return {};
 }
@@ -391,7 +402,7 @@ RENDERER_HANDLER(path_fill_evenodd)
 {
     begin_path_paint();
     m_current_path.close_all_subpaths();
-    fill_current_path(Gfx::WindingRule::EvenOdd);
+    TRY(fill_current_path(Gfx::WindingRule::EvenOdd));
     end_path_paint();
     return {};
 }
@@ -399,7 +410,7 @@ RENDERER_HANDLER(path_fill_evenodd)
 RENDERER_HANDLER(path_fill_stroke_nonzero)
 {
     begin_path_paint();
-    fill_and_stroke_current_path(Gfx::WindingRule::Nonzero);
+    TRY(fill_and_stroke_current_path(Gfx::WindingRule::Nonzero));
     end_path_paint();
     return {};
 }
@@ -407,7 +418,7 @@ RENDERER_HANDLER(path_fill_stroke_nonzero)
 RENDERER_HANDLER(path_fill_stroke_evenodd)
 {
     begin_path_paint();
-    fill_and_stroke_current_path(Gfx::WindingRule::EvenOdd);
+    TRY(fill_and_stroke_current_path(Gfx::WindingRule::EvenOdd));
     end_path_paint();
     return {};
 }
@@ -1282,6 +1293,9 @@ PDFErrorOr<void> Renderer::show_text(ByteString const& string)
 {
     if (!text_state().font)
         return Error::rendering_unsupported_error("Can't draw text because an invalid font was in use");
+
+    if (state().paint_alpha_constant < 1.0f)
+        return Error::rendering_unsupported_error("Renderer::show_text: paint alpha constant is less than 1.0");
 
     OwnPtr<ClipRAII> clip_raii;
     if (m_rendering_preferences.clip_text)
