@@ -2262,11 +2262,6 @@ static ErrorOr<Vector<u64>> grayscale_image_decoding_procedure(GrayscaleInputPar
 {
     VERIFY(inputs.bpp < 64);
 
-    // FIXME: Support this. generic_region_decoding_procedure() currently doesn't tell us how much data it
-    //        reads for MMR bitmaps, so we can't currently read more than one MMR bitplane here.
-    if (inputs.uses_mmr)
-        return Error::from_string_literal("JBIG2ImageDecoderPlugin: Cannot decode MMR grayscale images yet");
-
     // Table C.4 – Parameters used to decode a bitplane of the gray-scale image
     GenericRegionDecodingInputParameters generic_inputs;
     generic_inputs.is_modified_modified_read = inputs.uses_mmr;
@@ -2293,9 +2288,16 @@ static ErrorOr<Vector<u64>> grayscale_image_decoding_procedure(GrayscaleInputPar
     Vector<OwnPtr<BitBuffer>> bitplanes;
     bitplanes.resize(inputs.bpp);
 
+    Optional<CCITT::SplitResult> mmr_split;
+    if (inputs.uses_mmr) {
+        mmr_split = CCITT::split_at_ccitt_group4_eofb(data);
+        if (!mmr_split.has_value())
+            return Error::from_string_literal("JBIG2ImageDecoderPlugin: Failed to split data at CCITT Group 4 EOFB");
+    }
+
     // "1) Decode GSPLANES[GSBPP – 1] using the generic region decoding procedure. The parameters to the
     //     generic region decoding procedure are as shown in Table C.4."
-    bitplanes[inputs.bpp - 1] = TRY(generic_region_decoding_procedure(generic_inputs, data, contexts));
+    bitplanes[inputs.bpp - 1] = TRY(generic_region_decoding_procedure(generic_inputs, mmr_split.value_or({}).first, contexts));
 
     // "2) Set J = GSBPP – 2."
     int j = inputs.bpp - 2;
@@ -2304,7 +2306,12 @@ static ErrorOr<Vector<u64>> grayscale_image_decoding_procedure(GrayscaleInputPar
     while (j >= 0) {
         // "a) Decode GSPLANES[J] using the generic region decoding procedure. The parameters to the generic
         //     region decoding procedure are as shown in Table C.4."
-        bitplanes[j] = TRY(generic_region_decoding_procedure(generic_inputs, data, contexts));
+        if (inputs.uses_mmr) {
+            mmr_split = CCITT::split_at_ccitt_group4_eofb(mmr_split->rest);
+            if (!mmr_split.has_value())
+                return Error::from_string_literal("JBIG2ImageDecoderPlugin: Failed to split data at CCITT Group 4 EOFB");
+        }
+        bitplanes[j] = TRY(generic_region_decoding_procedure(generic_inputs, mmr_split.value_or({}).first, contexts));
 
         // "b) For each pixel (x, y) in GSPLANES[J], set:
         //     GSPLANES[J][x, y] = GSPLANES[J + 1][x, y] XOR GSPLANES[J][x, y]"
@@ -2313,6 +2320,9 @@ static ErrorOr<Vector<u64>> grayscale_image_decoding_procedure(GrayscaleInputPar
         // "c) Set J = J – 1."
         j = j - 1;
     }
+
+    if (mmr_split.has_value() && !mmr_split->rest.is_empty())
+        return Error::from_string_literal("JBIG2ImageDecoderPlugin: Trailing data after grayscale planes");
 
     // "4) For each (x, y), set:
     //     GSVALS [x, y] = sum_{J = 0}^{GSBPP - 1} GSPLANES[J][x,y] × 2**J)"

@@ -685,4 +685,58 @@ ErrorOr<ByteBuffer> decode_ccitt_group4(ReadonlyBytes bytes, u32 image_width, u3
     return output_stream->read_until_eof();
 }
 
+Optional<SplitResult> split_at_ccitt_group4_eofb(ReadonlyBytes bytes)
+{
+    StringView bytes_view { bytes };
+
+    // EOFB is 0x001001, but it can appear at any bit offset.
+    // Data after it is padded with trailing zeros until the next byte boundary.
+    // That means we're looking for one of:
+    //     0x00'10'01 0x00'20'02 0x00'40'04 0x00'80'08
+    //     0x01'00'10 0x02'00'20 0x04'00'40 0x08'00'80
+    // In all except the first case, some of the leading zeroes of EOFB are in the byte preceding these three bytes.
+    // Start by finding a 0x00 byte, then look around.
+    size_t position = 0;
+    while (true) {
+        auto index = bytes_view.find(0, position);
+        if (!index.has_value())
+            return OptionalNone {};
+
+        int bit_offset = -1;
+
+        // Check for second four cases:
+        if (index.value() > 0 && index.value() + 1 < bytes.size()) {
+            for (u32 i = 0; i < 4; ++i) {
+                if (bytes[index.value() - 1] == (1 << i) && bytes[index.value() + 1] == (1 << (i + 4))) {
+                    bit_offset = i + 4;
+                    break;
+                }
+            }
+        }
+
+        if (bit_offset == -1 && index.value() + 2 < bytes.size()) {
+            // Check for first four cases:
+            for (u32 i = 0; i < 4; ++i) {
+                if (bytes[index.value() + 1] == (1 << (i + 4)) && bytes[index.value() + 2] == (1 << i)) {
+                    bit_offset = i;
+                    break;
+                }
+            }
+        }
+
+        if (bit_offset == -1) {
+            position = index.value() + 1;
+            continue;
+        }
+
+        // We found an EOFB! Let's split here.
+        size_t eofb_position = bit_offset <= 3 ? index.value() : index.value() - 1;
+        return SplitResult {
+            .first = bytes.slice(0, eofb_position + 3),
+            .rest = bytes.slice(eofb_position + 3),
+        };
+    }
+    VERIFY_NOT_REACHED();
+}
+
 }

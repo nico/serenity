@@ -77,4 +77,11 @@ struct Group4Options {
 
 ErrorOr<ByteBuffer> decode_ccitt_group4(ReadonlyBytes bytes, u32 image_width, u32 image_height, Group4Options const& = {});
 
+struct SplitResult {
+    ReadonlyBytes first;
+    ReadonlyBytes rest;
+};
+
+Optional<SplitResult> split_at_ccitt_group4_eofb(ReadonlyBytes bytes);
+
 }
