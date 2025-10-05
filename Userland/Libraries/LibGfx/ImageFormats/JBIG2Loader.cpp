@@ -556,7 +556,10 @@ struct SegmentData {
 };
 
 struct Page {
+    // Valid after scan_for_page_size().
     IntSize size;
+    Vector<IntRect> stripe_rects;
+    size_t current_stripe_index { 0 };
 
     // This is never CombinationOperator::Replace for Pages.
     JBIG2::CombinationOperator default_combination_operator { JBIG2::CombinationOperator::Or };
@@ -1224,6 +1227,8 @@ static ErrorOr<void> scan_for_page_size(JBIG2LoadingContext& context)
     Optional<int> height_at_end_of_last_stripe;
     Optional<size_t> last_end_of_stripe_index;
     Optional<size_t> last_not_end_of_page_segment_index;
+    Vector<IntRect> stripe_rects;
+
     for (auto const& [segment_index, segment] : enumerate(context.segments)) {
         if (segment.header.page_association != context.current_page_number)
             continue;
@@ -1292,6 +1297,8 @@ static ErrorOr<void> scan_for_page_size(JBIG2LoadingContext& context)
             if (stripe_height > max_stripe_height)
                 return Error::from_string_literal("JBIG2ImageDecoderPlugin: EndOfStripe Y coordinate larger than maximum stripe height");
 
+            stripe_rects.append({ 0, height_at_end_of_last_stripe.value_or(0), context.page.size.width(), stripe_height });
+
             height_at_end_of_last_stripe = new_height;
             last_end_of_stripe_index = segment_index;
         } else if (segment.type() == JBIG2::SegmentType::EndOfPage) {
@@ -1316,8 +1323,14 @@ static ErrorOr<void> scan_for_page_size(JBIG2LoadingContext& context)
         }
 
         // `!=` is not true, e.g. in ignition.pdf the last stripe is shorter than the page height.
+        // Also, there's no need to include an EndOfStripe segment for the page's last stripe.
         if (!has_initially_unknown_height && height_at_end_of_last_stripe.has_value() && height_at_end_of_last_stripe.value() > context.page.size.height())
             return Error::from_string_literal("JBIG2ImageDecoderPlugin: Stripes are higher than page height");
+    }
+
+    if (stripe_rects.is_empty() || stripe_rects.last().bottom() < context.page.size.height()) {
+        int y = stripe_rects.is_empty() ? 0 : stripe_rects.last().bottom();
+        stripe_rects.append({ 0, y, context.page.size.width(), context.page.size.height() - y });
     }
 
     if (context.organization == JBIG2::Organization::Embedded) {
@@ -1334,6 +1347,8 @@ static ErrorOr<void> scan_for_page_size(JBIG2LoadingContext& context)
             return Error::from_string_literal("JBIG2ImageDecoderPlugin: Missing EndOfPage segment");
     }
 
+    context.page.stripe_rects = move(stripe_rects);
+    context.page.current_stripe_index = 0;
     return {};
 }
 
@@ -2978,13 +2993,24 @@ struct DirectRegionResult {
     NonnullRefPtr<BilevelImage> bitmap;
 };
 
-static void handle_immediate_direct_region(JBIG2LoadingContext& context, DirectRegionResult const& result)
+static ErrorOr<void> handle_immediate_direct_region(JBIG2LoadingContext& context, DirectRegionResult const& result)
 {
+    IntPoint position = { result.information_field.x_location, result.information_field.y_location };
+    IntRect region_rect { position, { result.information_field.width, result.information_field.height } };
+    dbgln_if(JBIG2_DEBUG, "Drawing direct region rect {}", region_rect);
+    if (!context.page.stripe_rects[context.page.current_stripe_index].contains(region_rect)) {
+        dbgln_if(JBIG2_DEBUG, "Direct region rect outside current stripe {}'s rect {}",
+            context.page.current_stripe_index, context.page.stripe_rects[context.page.current_stripe_index]);
+        return Error::from_string_literal("JBIG2ImageDecoderPlugin: Region rect outside of current stripe's rect");
+    }
+
     // 8.2 Page image composition, 5a.
     result.bitmap->composite_onto(
         *context.page.bits,
-        { result.information_field.x_location, result.information_field.y_location },
+        position,
         to_composition_type(result.information_field.external_combination_operator()));
+
+    return {};
 }
 
 static ErrorOr<void> handle_intermediate_direct_region(JBIG2LoadingContext&, SegmentData& segment, DirectRegionResult& result)
@@ -3389,8 +3415,7 @@ static ErrorOr<void> decode_intermediate_text_region(JBIG2LoadingContext& contex
 static ErrorOr<void> decode_immediate_text_region(JBIG2LoadingContext& context, SegmentData const& segment)
 {
     auto result = TRY(decode_text_region(context, segment));
-    handle_immediate_direct_region(context, result);
-    return {};
+    return handle_immediate_direct_region(context, result);
 }
 
 static ErrorOr<void> decode_immediate_lossless_text_region(JBIG2LoadingContext& context, SegmentData const& segment)
@@ -3555,8 +3580,7 @@ static ErrorOr<void> decode_intermediate_halftone_region(JBIG2LoadingContext& co
 static ErrorOr<void> decode_immediate_halftone_region(JBIG2LoadingContext& context, SegmentData const& segment)
 {
     auto result = TRY(decode_halftone_region(context, segment));
-    handle_immediate_direct_region(context, result);
-    return {};
+    return handle_immediate_direct_region(context, result);
 }
 
 static ErrorOr<void> decode_immediate_lossless_halftone_region(JBIG2LoadingContext& context, SegmentData const& segment)
@@ -3689,8 +3713,7 @@ static ErrorOr<void> decode_intermediate_generic_region(JBIG2LoadingContext& con
 static ErrorOr<void> decode_immediate_generic_region(JBIG2LoadingContext& context, SegmentData const& segment)
 {
     auto result = TRY(decode_generic_region(context, segment));
-    handle_immediate_direct_region(context, result);
-    return {};
+    return handle_immediate_direct_region(context, result);
 }
 
 static ErrorOr<void> decode_immediate_lossless_generic_region(JBIG2LoadingContext& context, SegmentData const& segment)
@@ -3838,13 +3861,16 @@ static ErrorOr<void> decode_end_of_page(JBIG2LoadingContext&, SegmentData const&
     return {};
 }
 
-static ErrorOr<void> decode_end_of_stripe(JBIG2LoadingContext&, SegmentData const& segment)
+static ErrorOr<void> decode_end_of_stripe(JBIG2LoadingContext& context, SegmentData const& segment)
 {
     // 7.4.10 End of stripe segment syntax
     auto end_of_stripe = TRY(decode_end_of_stripe_segment(segment.data));
 
     // The data in these segments is used in scan_for_page_size().
     dbgln_if(JBIG2_DEBUG, "End of stripe: y={}", end_of_stripe.y_coordinate);
+
+    context.page.current_stripe_index++;
+    VERIFY(context.page.current_stripe_index <= context.page.stripe_rects.size());
 
     return {};
 }
