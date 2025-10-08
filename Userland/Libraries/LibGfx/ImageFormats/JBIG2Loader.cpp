@@ -1258,6 +1258,7 @@ static ErrorOr<void> scan_for_page_size(JBIG2LoadingContext& context)
             page_is_striped = page_information.page_is_striped();
             max_stripe_height = page_information.maximum_stripe_size() + 1;
 
+            dbgln("height {}, stripe size {}", page_information.bitmap_height, page_information.maximum_stripe_size());
             context.page.size = { page_information.bitmap_width, page_information.bitmap_height };
             has_initially_unknown_height = page_information.bitmap_height == 0xffff'ffff;
 
@@ -1280,6 +1281,7 @@ static ErrorOr<void> scan_for_page_size(JBIG2LoadingContext& context)
             auto end_of_stripe = TRY(decode_end_of_stripe_segment(segment.data));
             int new_height = end_of_stripe.y_coordinate + 1;
 
+            dbgln("EndOfStripe at y={}", end_of_stripe.y_coordinate);
             if (has_initially_unknown_height) {
                 if (height_at_end_of_last_stripe.has_value() && new_height < height_at_end_of_last_stripe.value())
                     return Error::from_string_literal("JBIG2ImageDecoderPlugin: EndOfStripe Y coordinate is not increasing");
@@ -2997,6 +2999,9 @@ static ErrorOr<void> handle_immediate_direct_region(JBIG2LoadingContext& context
 {
     IntPoint position = { result.information_field.x_location, result.information_field.y_location };
     IntRect region_rect { position, { result.information_field.width, result.information_field.height } };
+
+    dbgln("Drawing direct region rect {}", region_rect);
+
     dbgln_if(JBIG2_DEBUG, "Drawing direct region rect {}", region_rect);
     if (!context.page.stripe_rects[context.page.current_stripe_index].contains(region_rect)) {
         dbgln_if(JBIG2_DEBUG, "Direct region rect outside current stripe {}'s rect {}",
