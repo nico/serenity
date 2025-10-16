@@ -414,8 +414,38 @@ static ErrorOr<u8> jbig2_halftone_region_flags_from_json(JsonObject const& objec
     return flags;
 }
 
-// XXX keep options? remove?
-static ErrorOr<Gfx::JBIG2::HalftoneRegionSegmentData> jbig2_halftone_region_from_json(ToJSONOptions const&, Optional<JsonObject const&> object)
+static ErrorOr<Vector<u64>> jbig2_halftone_graymap_from_json(ToJSONOptions const&, JsonObject const& object)
+{
+    Vector<u64> graymap;
+
+    TRY(object.try_for_each_member([&](StringView key, JsonValue const& value) -> ErrorOr<void> {
+        if (key == "array") {
+            if (value.is_array()) {
+                for (auto const& row : value.as_array().values()) {
+                    if (!row.is_array())
+                        return Error::from_string_literal("expected array for \"array\" entries");
+
+                    for (auto const& element : row.as_array().values()) {
+                        if (auto value = element.get_u64(); value.has_value()) {
+                            TRY(graymap.try_append(value.value()));
+                            continue;
+                        }
+                        return Error::from_string_literal("expected u64 for \"graymap_data\" elements");
+                    }
+                }
+                return {};
+            }
+            return Error::from_string_literal("expected array for \"array\"");
+        }
+
+        dbgln("graymap_data key {}", key);
+        return Error::from_string_literal("unknown graymap_data key");
+    }));
+
+    return graymap;
+}
+
+static ErrorOr<Gfx::JBIG2::HalftoneRegionSegmentData> jbig2_halftone_region_from_json(ToJSONOptions const& options, Optional<JsonObject const&> object)
 {
     if (!object.has_value())
         return Error::from_string_literal("generic_region segment should have \"data\" object");
@@ -505,18 +535,20 @@ static ErrorOr<Gfx::JBIG2::HalftoneRegionSegmentData> jbig2_halftone_region_from
             return Error::from_string_literal("expected bool for \"strip_trailing_7fffs\"");
         }
 
-        // XXX
-        // if (key == "image_data"sv) {
-        //     if (value.is_object()) {
-        //         image = TRY(jbig2_image_from_json(options, value.as_object()));
-        //         return {};
-        //     }
-        //     return Error::from_string_literal("expected object for \"image_data\"");
-        // }
+        if (key == "graymap_data"sv) {
+            if (value.is_object()) {
+                halftone_region.grayscale_image = TRY(jbig2_halftone_graymap_from_json(options, value.as_object()));
+                return {};
+            }
+            return Error::from_string_literal("expected object for \"graymap_data\"");
+        }
 
         dbgln("halftone_region key {}", key);
         return Error::from_string_literal("unknown halftone_region key");
     }));
+
+    // XXX validate region information dimensions vs grayscale dimensions times pattern size from referred-to segment?
+    // (...or do that in loader?)
 
     return halftone_region;
 }
