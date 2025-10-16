@@ -394,12 +394,17 @@ static ErrorOr<u8> jbig2_halftone_region_flags_from_json(JsonObject const& objec
         }
 
         if (key == "default_pixel_value"sv) {
-            if (auto default_pixel_value = value.get_bool(); default_pixel_value.has_value()) {
-                if (default_pixel_value.value())
+            if (value.is_string()) {
+                auto const& s = value.as_string();
+                if (s == "white"sv)
+                    flags |= 0;
+                else if (s == "black"sv)
                     flags |= 1u << 7;
+                else
+                    return Error::from_string_literal("expected \"white\" or \"black\" for \"default_pixel_value\"");
                 return {};
             }
-            return Error::from_string_literal("expected bool for \"enable_skip\"");
+            return Error::from_string_literal("expected \"white\" or \"black\" for \"default_pixel_value\"");
         }
 
         dbgln("halftone_region flag key {}", key);
