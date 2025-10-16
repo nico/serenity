@@ -47,8 +47,8 @@ struct HalftoneRegionSegmentData {
     u32 grayscale_height { 0 };
     i32 grid_offset_x { 0 };
     i32 grid_offset_y { 0 };
-    u16 halftone_grid_vector_x { 0 };
-    u16 halftone_grid_vector_y { 0 };
+    u16 grid_vector_x { 0 };
+    u16 grid_vector_y { 0 };
 
     // Indices into pattern dictionary. At most 64 bits set per pixel.
     // grayscale_width * grayscale_height entries.

@@ -609,6 +609,9 @@ static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputPara
 {
     VERIFY(inputs.bpp < 64);
 
+    if (inputs.grayscale_image.size() != inputs.width * inputs.height)
+        return Error::from_string_literal("JBIG2Writer: Halftone graymap size does not match dimensions");
+
     auto bitplane = TRY(BilevelImage::create(inputs.width, inputs.height));
 
     // Table C.4 – Parameters used to decode a bitplane of the gray-scale image
@@ -733,8 +736,8 @@ static ErrorOr<void> encode_halftone_region(JBIG2::HalftoneRegionSegmentData con
     TRY(stream.write_value<BigEndian<u32>>(halftone_region.grayscale_height));
     TRY(stream.write_value<BigEndian<i32>>(halftone_region.grid_offset_x));
     TRY(stream.write_value<BigEndian<i32>>(halftone_region.grid_offset_y));
-    TRY(stream.write_value<BigEndian<u16>>(halftone_region.halftone_grid_vector_x));
-    TRY(stream.write_value<BigEndian<u16>>(halftone_region.halftone_grid_vector_y));
+    TRY(stream.write_value<BigEndian<u16>>(halftone_region.grid_vector_x));
+    TRY(stream.write_value<BigEndian<u16>>(halftone_region.grid_vector_y));
     TRY(stream.write_until_depleted(data));
     return {};
 }
