@@ -584,6 +584,25 @@ ErrorOr<void> JBIG2Writer::encode(Stream& stream, Bitmap const& bitmap, Options 
     return encode_with_explicit_data(stream, jbig2);
 }
 
+static ErrorOr<void> encode_halftone_region(JBIG2::HalftoneRegionSegmentData const& halftone_region, Vector<u8>& scratch_buffer)
+{
+    ByteBuffer data; // XXX encode graymap
+
+    TRY(scratch_buffer.try_resize(sizeof(JBIG2::RegionSegmentInformationField) + 1 + 2 * 4 * 2 * 2 + data.size()));
+    FixedMemoryStream stream { scratch_buffer, FixedMemoryStream::Mode::ReadWrite };
+
+    TRY(encode_region_segment_information_field(stream, halftone_region.region_segment_information));
+    TRY(stream.write_value<u8>(halftone_region.flags));
+    TRY(stream.write_value<BigEndian<u32>>(halftone_region.grayscale_width));
+    TRY(stream.write_value<BigEndian<u32>>(halftone_region.grayscale_height));
+    TRY(stream.write_value<BigEndian<i32>>(halftone_region.grid_offset_x));
+    TRY(stream.write_value<BigEndian<i32>>(halftone_region.grid_offset_y));
+    TRY(stream.write_value<BigEndian<u16>>(halftone_region.halftone_grid_vector_x));
+    TRY(stream.write_value<BigEndian<u16>>(halftone_region.halftone_grid_vector_y));
+    TRY(stream.write_until_depleted(data));
+    return {};
+}
+
 static ErrorOr<void> encode_pattern_dictionary(JBIG2::PatternDictionarySegmentData const& pattern_dictionary, Vector<u8>& scratch_buffer)
 {
     if (pattern_dictionary.image->width() != (pattern_dictionary.gray_max + 1) * pattern_dictionary.pattern_width)
@@ -741,6 +760,14 @@ static ErrorOr<void> encode_segment(Stream& stream, JBIG2::SegmentData const& se
     Vector<u8> scratch_buffer;
 
     auto encoded_data = TRY(segment_data.data.visit(
+        [&scratch_buffer](JBIG2::ImmediateHalftoneRegionSegmentData const& halftone_region_wrapper) -> ErrorOr<ReadonlyBytes> {
+            TRY(encode_halftone_region(halftone_region_wrapper.halftone_region, scratch_buffer));
+            return scratch_buffer;
+        },
+        [&scratch_buffer](JBIG2::ImmediateLosslessHalftoneRegionSegmentData const& halftone_region_wrapper) -> ErrorOr<ReadonlyBytes> {
+            TRY(encode_halftone_region(halftone_region_wrapper.halftone_region, scratch_buffer));
+            return scratch_buffer;
+        },
         [&scratch_buffer](JBIG2::PatternDictionarySegmentData const& pattern_dictionary) -> ErrorOr<ReadonlyBytes> {
             TRY(encode_pattern_dictionary(pattern_dictionary, scratch_buffer));
             return scratch_buffer;
@@ -791,6 +818,8 @@ static ErrorOr<void> encode_segment(Stream& stream, JBIG2::SegmentData const& se
     JBIG2::SegmentHeader header;
     header.segment_number = segment_data.header.segment_number;
     header.type = segment_data.data.visit(
+        [](JBIG2::ImmediateHalftoneRegionSegmentData const&) { return JBIG2::SegmentType::ImmediateHalftoneRegion; },
+        [](JBIG2::ImmediateLosslessHalftoneRegionSegmentData const&) { return JBIG2::SegmentType::ImmediateLosslessHalftoneRegion; },
         [](JBIG2::PatternDictionarySegmentData const&) { return JBIG2::SegmentType::PatternDictionary; },
         [](JBIG2::ImmediateGenericRegionSegmentData const&) { return JBIG2::SegmentType::ImmediateGenericRegion; },
         [](JBIG2::ImmediateLosslessGenericRegionSegmentData const&) { return JBIG2::SegmentType::ImmediateLosslessGenericRegion; },

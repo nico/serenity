@@ -40,6 +40,32 @@ struct SegmentHeaderData {
     bool is_immediate_generic_region_of_initially_unknown_size { false };
 };
 
+struct HalftoneRegionSegmentData {
+    RegionSegmentInformationField region_segment_information {};
+    u8 flags { 0 };
+    u32 grayscale_width { 0 };
+    u32 grayscale_height { 0 };
+    i32 grid_offset_x { 0 };
+    i32 grid_offset_y { 0 };
+    u16 halftone_grid_vector_x { 0 };
+    u16 halftone_grid_vector_y { 0 };
+
+    // Indices into pattern dictionary. At most 64 bits set per pixel.
+    // grayscale_width * grayscale_height entries.
+    Vector<u64> grayscale_image;
+
+    // FIXME: Could make this an array with one entry per bitplane.
+    MQArithmeticEncoder::Trailing7FFFHandling trailing_7fff_handling { MQArithmeticEncoder::Trailing7FFFHandling::Keep };
+};
+
+struct ImmediateHalftoneRegionSegmentData {
+    HalftoneRegionSegmentData halftone_region;
+};
+
+struct ImmediateLosslessHalftoneRegionSegmentData {
+    HalftoneRegionSegmentData halftone_region;
+};
+
 struct PatternDictionarySegmentData {
     u8 flags { 0 };
     u8 pattern_width { 0 };
@@ -100,6 +126,8 @@ struct SegmentData {
         EndOfFileSegmentData,
         EndOfPageSegmentData,
         EndOfStripeSegment,
+        ImmediateHalftoneRegionSegmentData,
+        ImmediateLosslessHalftoneRegionSegmentData,
         PatternDictionarySegmentData,
         ImmediateGenericRegionSegmentData,
         ImmediateLosslessGenericRegionSegmentData,
