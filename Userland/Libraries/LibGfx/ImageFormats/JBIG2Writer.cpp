@@ -643,6 +643,11 @@ static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputPara
     //  that each bitplane's true value is equal to its coded value XORed with the next-more-significant bitplane."
     Vector<ByteBuffer> buffers;
 
+    for (u32 y = 0; y < inputs.height; ++y)
+        for (u32 x = 0; x < inputs.width; ++x)
+            if (inputs.grayscale_image[y * inputs.width + x] >= (1ull << inputs.bpp))
+                return Error::from_string_literal("JBIG2Writer: Halftone region graymap entry too large for number of patterns");
+
     // "1) Decode GSPLANES[GSBPP – 1] using the generic region decoding procedure. The parameters to the
     //     generic region decoding procedure are as shown in Table C.4."
     for (u32 y = 0; y < inputs.height; ++y) {
