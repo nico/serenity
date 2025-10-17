@@ -605,6 +605,7 @@ struct GrayscaleInputParameters {
 
 }
 
+// C.5 Decoding the gray-scale image, but in reverse.
 static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputParameters const& inputs, Optional<JBIG2::GenericContexts>& contexts)
 {
     VERIFY(inputs.bpp < 64);
@@ -629,7 +630,6 @@ static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputPara
     generic_inputs.adaptive_template_pixels[2].y = -2;
     generic_inputs.adaptive_template_pixels[3].x = -2;
     generic_inputs.adaptive_template_pixels[3].y = -2;
-    generic_inputs.trailing_7fff_handling = inputs.trailing_7fff_handling;
 
     // An MMR graymap is the only case where the size of the a generic region is not known in advance,
     // and where the data is immediately followed by more MMR data. We need to have the MMR encoder
@@ -637,11 +637,19 @@ static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputPara
     // See 6.2.6 Decoding using MMR coding.
     generic_inputs.require_eof_after_mmr = GenericRegionEncodingInputParameters::RequireEOFBAfterMMR::Yes;
 
+    AllocatingMemoryStream mmr_output_stream;
+    Optional<MQArithmeticEncoder> arithmetic_encoder;
+    if (generic_inputs.is_modified_modified_read) {
+        generic_inputs.stream = &mmr_output_stream;
+    } else {
+        arithmetic_encoder = TRY(MQArithmeticEncoder::initialize(0));
+        generic_inputs.arithmetic_encoder = &arithmetic_encoder.value();
+    }
+
     // C.5 Decoding the gray-scale image
     // "The gray-scale image is obtained by decoding GSBPP bitplanes. These bitplanes are denoted (from least significant to
     //  most significant) GSPLANES[0], GSPLANES[1], . . . , GSPLANES[GSBPP – 1]. The bitplanes are Gray-coded, so
     //  that each bitplane's true value is equal to its coded value XORed with the next-more-significant bitplane."
-    Vector<ByteBuffer> buffers;
 
     for (u32 y = 0; y < inputs.height; ++y)
         for (u32 x = 0; x < inputs.width; ++x)
@@ -657,7 +665,7 @@ static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputPara
         }
     }
 
-    TRY(buffers.try_append(TRY(generic_region_encoding_procedure(generic_inputs, contexts))));
+    TRY(generic_region_encoding_procedure(generic_inputs, contexts));
 
     // "2) Set J = GSBPP – 2."
     int j = inputs.bpp - 2;
@@ -671,14 +679,12 @@ static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputPara
         for (u32 y = 0; y < inputs.height; ++y) {
             for (u32 x = 0; x < inputs.width; ++x) {
                 bool bit_is_set = (inputs.grayscale_image[y * inputs.width + x] & (1 << j)) != 0;
+                bit_is_set ^= (inputs.grayscale_image[y * inputs.width + x] & (1 << (j + 1))) != 0;
                 bitplane->set_bit(x, y, bit_is_set);
             }
         }
-        // XXX some kind of xor
-        TRY(buffers.try_append(TRY(generic_region_encoding_procedure(generic_inputs, contexts))));
 
-        // bitplanes[j] = TRY(generic_region_decoding_procedure(generic_inputs, contexts));
-        // bitplanes[j + 1]->composite_onto(*bitplanes[j], { 0, 0 }, BilevelImage::CompositionType::Xor);
+        TRY(generic_region_encoding_procedure(generic_inputs, contexts));
 
         // "c) Set J = J – 1."
         j = j - 1;
@@ -687,18 +693,9 @@ static ErrorOr<ByteBuffer> grayscale_image_encoding_procedure(GrayscaleInputPara
     // "4) For each (x, y), set:
     //     GSVALS [x, y] = sum_{J = 0}^{GSBPP - 1} GSPLANES[J][x,y] × 2**J)"
 
-    size_t total_size = 0;
-    for (auto& buffer : buffers)
-        total_size += buffer.size();
-
-    // XXX give ByteBuffer a join() method? Or is that an anti-pattern?
-    ByteBuffer result = TRY(ByteBuffer::create_uninitialized(total_size));
-    size_t offset = 0;
-    for (auto& buffer : buffers) {
-        memcpy(result.data() + offset, buffer.data(), buffer.size()); // XXX use Span::copy_to()
-        offset += buffer.size();
-    }
-    return result;
+    if (generic_inputs.is_modified_modified_read)
+        return TRY(mmr_output_stream.read_until_eof());
+    return TRY(arithmetic_encoder->finalize(inputs.trailing_7fff_handling));
 }
 
 static ErrorOr<void> encode_halftone_region(JBIG2::HalftoneRegionSegmentData const& halftone_region, JBIG2::SegmentHeaderData const& header, HashMap<u32, JBIG2::SegmentData const*>& segment_by_id, Vector<u8>& scratch_buffer)
@@ -722,6 +719,7 @@ static ErrorOr<void> encode_halftone_region(JBIG2::HalftoneRegionSegmentData con
     GrayscaleInputParameters inputs { .grayscale_image = halftone_region.grayscale_image };
     inputs.uses_mmr = halftone_region.flags & 1;
     // inputs.skip_pattern = ... XXX
+    inputs.skip_pattern = {};
     inputs.bpp = bits_per_pattern;
     inputs.width = halftone_region.grayscale_width;
     inputs.height = halftone_region.grayscale_height;

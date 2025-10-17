@@ -493,7 +493,7 @@ static ErrorOr<Gfx::JBIG2::HalftoneRegionSegmentData> jbig2_halftone_region_from
             return Error::from_string_literal("expected u32 for \"grayscale_height\"");
         }
 
-        if (key == "grid_offset_x"sv) {
+        if (key == "grid_offset_x"sv) { // XXX _times_256
             if (auto grid_offset_x = value.get_i32(); grid_offset_x.has_value()) {
                 halftone_region.grid_offset_x = grid_offset_x.value();
                 return {};
@@ -501,7 +501,7 @@ static ErrorOr<Gfx::JBIG2::HalftoneRegionSegmentData> jbig2_halftone_region_from
             return Error::from_string_literal("expected i32 for \"grid_offset_x\"");
         }
 
-        if (key == "grid_offset_y"sv) {
+        if (key == "grid_offset_y"sv) { // XXX _times_256
             if (auto grid_offset_y = value.get_i32(); grid_offset_y.has_value()) {
                 halftone_region.grid_offset_y = grid_offset_y.value();
                 return {};
@@ -509,7 +509,7 @@ static ErrorOr<Gfx::JBIG2::HalftoneRegionSegmentData> jbig2_halftone_region_from
             return Error::from_string_literal("expected i32 for \"grid_offset_y\"");
         }
 
-        if (key == "grid_vector_x"sv) {
+        if (key == "grid_vector_x"sv) { // XXX _times_256
             if (auto grid_vector_x = value.get_u32(); grid_vector_x.has_value()) {
                 if (grid_vector_x.value() > 0xffff)
                     return Error::from_string_literal("expected u16 for \"grid_vector_x\"");
@@ -519,7 +519,7 @@ static ErrorOr<Gfx::JBIG2::HalftoneRegionSegmentData> jbig2_halftone_region_from
             return Error::from_string_literal("expected u16 for \"grid_vector_x\"");
         }
 
-        if (key == "grid_vector_y"sv) {
+        if (key == "grid_vector_y"sv) { // XXX _times_256
             if (auto grid_vector_y = value.get_u32(); grid_vector_y.has_value()) {
                 if (grid_vector_y.value() > 0xffff)
                     return Error::from_string_literal("expected u16 for \"grid_vector_y\"");
