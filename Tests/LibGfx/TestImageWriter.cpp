@@ -68,8 +68,8 @@ static ErrorOr<NonnullRefPtr<Gfx::CMYKBitmap>> expect_cmyk_frame_of_size(Gfx::Im
     return frame;
 }
 
-template<class Writer, class... ExtraArgs>
-static ErrorOr<ByteBuffer> encode_bitmap(Gfx::Bitmap const& bitmap, ExtraArgs... extra_args)
+template<class Writer, OneOf<Gfx::Bitmap, Gfx::CMYKBitmap> BitmapType, class... ExtraArgs>
+static ErrorOr<ByteBuffer> encode_bitmap(NonnullRefPtr<BitmapType> const& bitmap, ExtraArgs... extra_args)
 {
     if constexpr (requires(AllocatingMemoryStream stream) { Writer::encode(stream, bitmap, extra_args...); }) {
         AllocatingMemoryStream stream;
@@ -80,26 +80,18 @@ static ErrorOr<ByteBuffer> encode_bitmap(Gfx::Bitmap const& bitmap, ExtraArgs...
     }
 }
 
-template<class Writer, class... ExtraArgs>
-static ErrorOr<ByteBuffer> encode_bitmap(Gfx::CMYKBitmap const& bitmap, ExtraArgs... extra_args)
+template<class Writer, class Loader>
+static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> get_roundtrip_bitmap(NonnullRefPtr<Gfx::Bitmap> const& bitmap)
 {
-    AllocatingMemoryStream stream;
-    TRY(Writer::encode(stream, bitmap, extra_args...));
-    return stream.read_until_eof();
+    auto encoded_data = TRY(encode_bitmap<Writer>(bitmap));
+    return expect_single_frame_of_size(*TRY(Loader::create(encoded_data)), bitmap->size());
 }
 
 template<class Writer, class Loader>
-static ErrorOr<NonnullRefPtr<Gfx::Bitmap>> get_roundtrip_bitmap(Gfx::Bitmap const& bitmap)
+static ErrorOr<NonnullRefPtr<Gfx::CMYKBitmap>> get_roundtrip_bitmap(NonnullRefPtr<Gfx::CMYKBitmap> const& bitmap)
 {
     auto encoded_data = TRY(encode_bitmap<Writer>(bitmap));
-    return expect_single_frame_of_size(*TRY(Loader::create(encoded_data)), bitmap.size());
-}
-
-template<class Writer, class Loader>
-static ErrorOr<NonnullRefPtr<Gfx::CMYKBitmap>> get_roundtrip_bitmap(Gfx::CMYKBitmap const& bitmap)
-{
-    auto encoded_data = TRY(encode_bitmap<Writer>(bitmap));
-    return expect_cmyk_frame_of_size(*TRY(Loader::create(encoded_data)), bitmap.size());
+    return expect_cmyk_frame_of_size(*TRY(Loader::create(encoded_data)), bitmap->size());
 }
 
 static void expect_bitmaps_equal(Gfx::Bitmap const& a, Gfx::Bitmap const& b)
