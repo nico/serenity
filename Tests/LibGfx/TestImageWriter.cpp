@@ -110,16 +110,8 @@ static void expect_bitmaps_equal(Gfx::CMYKBitmap const& a, Gfx::CMYKBitmap const
             EXPECT_EQ(a.scanline(y)[x], b.scanline(y)[x]);
 }
 
-template<class Writer, class Loader>
-static ErrorOr<void> test_roundtrip(Gfx::Bitmap const& bitmap)
-{
-    auto decoded = TRY((get_roundtrip_bitmap<Writer, Loader>(bitmap)));
-    expect_bitmaps_equal(*decoded, bitmap);
-    return {};
-}
-
-template<class Writer, class Loader>
-static ErrorOr<void> test_roundtrip(Gfx::CMYKBitmap const& bitmap)
+template<class Writer, class Loader, OneOf<Gfx::Bitmap, Gfx::CMYKBitmap> BitmapType>
+static ErrorOr<void> test_roundtrip(NonnullRefPtr<BitmapType> const& bitmap)
 {
     auto decoded = TRY((get_roundtrip_bitmap<Writer, Loader>(bitmap)));
     expect_bitmaps_equal(*decoded, bitmap);
