@@ -247,6 +247,12 @@ public:
     Optional<Creator> creator() const { return m_header.creator; }
     Optional<Crypto::Hash::MD5::DigestType> const& id() const { return m_header.id; }
 
+    bool remove_tag(TagSignature signature)
+    {
+        // XXX: invalidate caches
+        return m_tag_table.remove(signature);
+    }
+
     static Crypto::Hash::MD5::DigestType compute_id(ReadonlyBytes);
 
     template<typename Callback>

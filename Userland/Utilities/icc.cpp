@@ -346,6 +346,9 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     bool debug_roundtrip = false;
     args_parser.add_option(debug_roundtrip, "Check how many u8 colors roundtrip losslessly through the profile. For debugging.", "debug-roundtrip");
 
+    Vector<ByteString> drop_tags;
+    args_parser.add_option(drop_tags, "Remove given tag from profile, useful with --reencode-to", "drop-tag", 0, "TAG_SIGNATURE");
+
     bool measure = false;
     args_parser.add_option(measure, "For RGB ICC profiles, print perceptually smallest and largest color step", "measure");
 
@@ -373,6 +376,11 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
     }
     if (path.is_empty() && !dump_out_path.is_empty()) {
         warnln("--dump-to only valid with path, not with profile name; use --reencode-to instead");
+        return 1;
+    }
+
+    if (!drop_tags.is_empty() && reencode_out_path.is_empty()) {
+        warnln("--drop-tag only useful with --reencode-to");
         return 1;
     }
 
@@ -419,6 +427,18 @@ ErrorOr<int> serenity_main(Main::Arguments arguments)
         }
         return Gfx::ICC::Profile::try_load_from_externally_owned_memory(icc_bytes);
     }());
+
+    for (auto const& tag : drop_tags) {
+        if (tag.length() != 4) {
+            warnln("tag '{}' is not 4 characters long", tag);
+            return 1;
+        }
+        auto signature = static_cast<Gfx::ICC::TagSignature>(tag[0] << 24 | tag[1] << 16 | tag[2] << 8 | tag[3]);
+        if (!profile->remove_tag(signature)) {
+            warnln("profile does not contain tag '{}'", tag);
+            return 1;
+        }
+    }
 
     if (!reencode_out_path.is_empty()) {
         auto reencoded_bytes = TRY(Gfx::ICC::encode(profile));
