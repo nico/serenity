@@ -383,8 +383,173 @@ ErrorOr<ByteBuffer> DeflateDecompressor::decompress_all(ReadonlyBytes bytes)
 {
     FixedMemoryStream memory_stream { bytes };
     LittleEndianInputBitStream bit_stream { MaybeOwned<Stream>(memory_stream) };
-    auto deflate_stream = TRY(DeflateDecompressor::construct(MaybeOwned<LittleEndianInputBitStream>(bit_stream)));
-    return deflate_stream->read_until_eof(4096);
+
+    auto output = TRY(ByteBuffer::create_uninitialized(bytes.size() * 2));
+    size_t output_pos = 0;
+
+    auto ensure_capacity = [&](size_t needed) -> ErrorOr<void> {
+        if (output_pos + needed > output.size()) {
+            auto new_size = max(output.size() * 2, output_pos + needed);
+            TRY(output.try_resize(new_size));
+        }
+        return {};
+    };
+
+    auto decode_length = [&](u32 symbol) -> ErrorOr<u32> {
+        if (symbol <= 264)
+            return symbol - 254;
+        if (symbol <= 284) {
+            auto extra_bits = (symbol - 261) / 4;
+            return (((symbol - 265) % 4 + 4) << extra_bits) + 3 + TRY(bit_stream.read_bits(extra_bits));
+        }
+        if (symbol == 285)
+            return 258u;
+        return Error::from_string_literal("Invalid deflate length symbol");
+    };
+
+    auto decode_distance = [&](u32 symbol) -> ErrorOr<u32> {
+        if (symbol <= 3)
+            return symbol + 1;
+        if (symbol <= 29) {
+            auto extra_bits = (symbol / 2) - 1;
+            return ((symbol % 2 + 2) << extra_bits) + 1 + TRY(bit_stream.read_bits(extra_bits));
+        }
+        return Error::from_string_literal("Invalid deflate distance symbol");
+    };
+
+    auto decode_codes = [&](CanonicalCode& literal_code, Optional<CanonicalCode>& distance_code) -> ErrorOr<void> {
+        auto literal_code_count = TRY(bit_stream.read_bits(5)) + 257;
+        auto distance_code_count = TRY(bit_stream.read_bits(5)) + 1;
+        auto code_length_count = TRY(bit_stream.read_bits(4)) + 4;
+
+        u8 code_lengths_code_lengths[19] = { 0 };
+        for (size_t i = 0; i < code_length_count; ++i)
+            code_lengths_code_lengths[code_lengths_code_lengths_order[i]] = TRY(bit_stream.read_bits(3));
+
+        auto const code_length_code = TRY(CanonicalCode::from_bytes({ code_lengths_code_lengths, sizeof(code_lengths_code_lengths) }));
+
+        Vector<u8, 286> code_lengths;
+        while (code_lengths.size() < literal_code_count + distance_code_count) {
+            auto symbol = TRY(code_length_code.read_symbol(bit_stream));
+            if (symbol < deflate_special_code_length_copy) {
+                code_lengths.append(static_cast<u8>(symbol));
+            } else if (symbol == deflate_special_code_length_copy) {
+                if (code_lengths.is_empty())
+                    return Error::from_string_literal("Found no codes to copy before a copy block");
+                auto nrepeat = 3 + TRY(bit_stream.read_bits(2));
+                for (size_t j = 0; j < nrepeat; ++j)
+                    code_lengths.append(code_lengths.last());
+            } else if (symbol == deflate_special_code_length_zeros) {
+                auto nrepeat = 3 + TRY(bit_stream.read_bits(3));
+                for (size_t j = 0; j < nrepeat; ++j)
+                    code_lengths.append(0);
+            } else {
+                VERIFY(symbol == deflate_special_code_length_long_zeros);
+                auto nrepeat = 11 + TRY(bit_stream.read_bits(7));
+                for (size_t j = 0; j < nrepeat; ++j)
+                    code_lengths.append(0);
+            }
+        }
+
+        if (code_lengths.size() != literal_code_count + distance_code_count)
+            return Error::from_string_literal("Number of code lengths does not match the sum of codes");
+
+        literal_code = TRY(CanonicalCode::from_bytes(code_lengths.span().trim(literal_code_count)));
+
+        if (distance_code_count == 1) {
+            auto length = code_lengths[literal_code_count];
+            if (length == 0)
+                return {};
+            else if (length != 1)
+                return Error::from_string_literal("Length for a single distance code is longer than 1");
+        }
+
+        distance_code = TRY(CanonicalCode::from_bytes(code_lengths.span().slice(literal_code_count)));
+        return {};
+    };
+
+    bool read_final_block = false;
+    while (!read_final_block) {
+        read_final_block = TRY(bit_stream.read_bit());
+        auto const block_type = TRY(bit_stream.read_bits(2));
+
+        if (block_type == 0b00) {
+            bit_stream.align_to_byte_boundary();
+            u16 length = TRY(bit_stream.read_value<LittleEndian<u16>>());
+            u16 negated_length = TRY(bit_stream.read_value<LittleEndian<u16>>());
+            if ((length ^ 0xffff) != negated_length)
+                return Error::from_string_literal("Calculated negated length does not equal stored negated length");
+            if (length == 0 && memory_stream.is_eof())
+                break;
+            TRY(ensure_capacity(length));
+            auto read_bytes = TRY(bit_stream.read_some({ output.data() + output_pos, length }));
+            output_pos += read_bytes.size();
+            continue;
+        }
+
+        CanonicalCode literal_codes;
+        Optional<CanonicalCode> distance_codes;
+
+        if (block_type == 0b01) {
+            literal_codes = CanonicalCode::fixed_literal_codes();
+            distance_codes = CanonicalCode::fixed_distance_codes();
+        } else if (block_type == 0b10) {
+            TRY(decode_codes(literal_codes, distance_codes));
+        } else {
+            return Error::from_string_literal("Unhandled block type");
+        }
+
+        while (true) {
+            auto const symbol = TRY(literal_codes.read_symbol(bit_stream));
+
+            if (symbol >= 286)
+                return Error::from_string_literal("Invalid deflate literal/length symbol");
+
+            if (symbol < EndOfBlock) {
+                TRY(ensure_capacity(1));
+                output[output_pos++] = symbol;
+                continue;
+            }
+
+            if (symbol == EndOfBlock)
+                break;
+
+            if (!distance_codes.has_value())
+                return Error::from_string_literal("Distance codes have not been initialized");
+
+            auto const length = TRY(decode_length(symbol));
+            auto const distance_symbol = TRY(distance_codes.value().read_symbol(bit_stream));
+            if (distance_symbol >= 30)
+                return Error::from_string_literal("Invalid deflate distance symbol");
+            auto const distance = TRY(decode_distance(distance_symbol));
+
+            if (distance > output_pos)
+                return Error::from_string_literal("Deflate back-reference distance exceeds output size");
+
+            TRY(ensure_capacity(length));
+
+            // Copy from earlier in the output buffer.
+            // Note: distance can be less than length (overlapping/repeating copy).
+            auto* dst = output.data() + output_pos;
+            auto* src = output.data() + output_pos - distance;
+            if (distance >= length) {
+                memcpy(dst, src, length);
+            } else {
+                // Use distance-doubling: copy what we have, then double the copied region.
+                memcpy(dst, src, distance);
+                u32 copied = distance;
+                while (copied < length) {
+                    auto to_copy = min(copied, length - copied);
+                    memcpy(dst + copied, dst, to_copy);
+                    copied += to_copy;
+                }
+            }
+            output_pos += length;
+        }
+    }
+
+    output.resize(output_pos);
+    return output;
 }
 
 ErrorOr<u32> DeflateDecompressor::decode_length(u32 symbol)
