@@ -31,6 +31,7 @@ public:
     static ErrorOr<CanonicalCode> from_bytes(ReadonlyBytes);
 
 private:
+    friend class DirectBitReader;
     static constexpr size_t max_allowed_prefixed_code_length = 8;
 
     struct PrefixTableEntry {
